@@ -60,7 +60,7 @@ class LLaVADataset(Dataset):
         for data_dict in self.text_data:
             cur_len = len(data_dict['input_ids'])
             if data_dict.get('image', None) is None:
-                cur_len = -cur_len
+                cur_len = -cur_len  # 如果没有图片的，则用负长度代替
             length_list.append(cur_len)
         return length_list
 
@@ -71,18 +71,24 @@ class LLaVADataset(Dataset):
         data_dict = self.text_data[index]
         if data_dict.get('image', None) is not None:
             image_file = data_dict['image']
-            image = Image.open(os.path.join(self.image_folder,
-                                            image_file)).convert('RGB')
-            if self.pad_image_to_square:
-                image = expand2square(
-                    image,
-                    tuple(
-                        int(x * 255) for x in self.image_processor.image_mean))
-            image = self.image_processor.preprocess(
-                image, return_tensors='pt')['pixel_values'][0]
+            if self.image_folder is not None:
+                image = Image.open(os.path.join(self.image_folder,
+                                                image_file)).convert('RGB')
+                if self.pad_image_to_square:
+                    image = expand2square(
+                        image,
+                        tuple(
+                            int(x * 255) for x in self.image_processor.image_mean))
+                image = self.image_processor.preprocess(
+                    image, return_tensors='pt')['pixel_values'][0]
+            else:
+                image = torch.zeros(3, 224, 224)
             data_dict['pixel_values'] = image
         else:
-            crop_size = self.image_processor.crop_size
+            if self.image_processor is not None:
+                crop_size = self.image_processor.crop_size
+            else:
+                crop_size = {'height': 224, 'width': 224}
             data_dict['pixel_values'] = torch.zeros(3, crop_size['height'],
                                                     crop_size['width'])
         return data_dict

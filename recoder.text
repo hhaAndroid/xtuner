@@ -1,0 +1,45 @@
+# s 集群 环境安装
+conda create --name xtuner-env python=3.10 -y
+conda activate xtuner-env
+
+conda install pytorch==2.0.1 torchvision==0.15.2 pytorch-cuda=11.7 -c pytorch -c nvidia
+然后注释掉 requirements/runtime.txt 里面的 torch
+pip install -e '.[all]'
+
+# 第一阶段预训练
+
+
+ln -s /mnt/petrelfs/share_data/linzhihao/model model
+直接修改路径
+llm_name_or_path = 'model/models--internlm--internlm2-chat-7b/snapshots/2292b86b21cb856642782cebed0a453997453b1f'
+visual_encoder_name_or_path = 'model/models--openai--clip-vit-large-patch14-336/snapshots/ce19dc912ca5cd21c8a653c79e251e808ccabcd1'
+
+mkdir data
+ln -s /mnt/cache/linzhihao/dataset/llava_data data/
+
+单卡 - 在 aide 里面访问不了 cache 路径导致程序报错，但是在管理节点可以访问
+xtuner train llava_internlm2_chat_7b_clip_vit_large_p14_336_e1_gpu8_pretrain
+
+8 卡
+reserved
+spot
+export MKL_SERVICE_FORCE_INTEL=1
+export MKL_THREADING_LAYER=GNU
+proxy_on 不然会卡住
+
+NPROC_PER_NODE=8 xtuner train llava_internlm2_chat_7b_clip_vit_large_p14_336_e1_gpu8_pretrain --deepspeed deepspeed_zero2
+
+NPROC_PER_NODE=8 srun --quotatype spot -p s1_mm_dev --job-name=llava_1 --nodes=1 --gres=gpu:8 --ntasks-per-node=1 --kill-on-bad-exit=1 xtuner train llava_internlm2_chat_7b_clip_vit_large_p14_336_e1_gpu8_pretrain --deepspeed deepspeed_zero2
+
+NPROC_PER_NODE=8 srun --quotatype spot -p s1_mm_dev --job-name=llava_2 --nodes=1 --gres=gpu:8 --cpus-per-task=16 --ntasks-per-node=1 --kill-on-bad-exit=1 xtuner train llava_internlm2_chat_7b_clip_vit_large_p14_336_e1_gpu8_finetune --deepspeed deepspeed_zero3
+
+
+qlora zero2 可以跑
+NPROC_PER_NODE=8 srun --quotatype spot -p s1_mm_dev --job-name=llava_2 --nodes=1 --gres=gpu:8 --ntasks-per-node=1 --kill-on-bad-exit=1 xtuner train llava_internlm2_chat_7b_qlora_clip_vit_large_p14_336_lora_e1_gpu8_finetune --deepspeed deepspeed_zero2
+
+
+快速验证的配置，数据集会自动下载，配置好权重就行。
+NPROC_PER_NODE=8 srun --quotatype spot -p s1_mm_dev --job-name=oss1 --nodes=1 --gres=gpu:8 --ntasks-per-node=1 --kill-on-bad-exit=1 xtuner train internlm2_chat_7b_qlora_oasst1_e3
+
+
+

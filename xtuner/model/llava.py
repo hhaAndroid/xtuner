@@ -30,17 +30,23 @@ class LLaVAModel(BaseModel):
         super().__init__()
         self.freeze_llm = freeze_llm
         self.freeze_visual_encoder = freeze_visual_encoder
-        with LoadWoInit():
+        with LoadWoInit():  # 用于加快 from_pretrained 的速度, 把所有init都dispatch成空函数
             self.llm = self._build_from_cfg_or_module(llm)
             self.visual_encoder = self._build_from_cfg_or_module(
                 visual_encoder)
         self.llm.config.use_cache = False
+        # 替换为 flash attention1
+        # flash attention1 在 pytorch 中原生支持，所以我们无需编译就可以用了
+        # 但是如果想用 flash attention2，需要自己编译，然后修改 llm 配置，设置 attn_implementation=flash_attention_2，具体见 modeling_internlm2.py
+        # 默认值是 eager，没有用 flash attention
+        # 所以这里自动替换为 flash attention1，这里只是替换 forward 函数
         dispatch_modules(self.llm)
 
         projector_config = ProjectorConfig(
             visual_hidden_size=self.visual_encoder.config.hidden_size,
             llm_hidden_size=self.llm.config.hidden_size,
             depth=projector_depth)
+        # 两个 MLP 层
         self.projector = ProjectorModel(projector_config).to(
             self.visual_encoder.dtype)
 
@@ -49,11 +55,12 @@ class LLaVAModel(BaseModel):
         if self.freeze_visual_encoder:
             self.visual_encoder.requires_grad_(False)
 
-        if use_activation_checkpointing:
+        if use_activation_checkpointing:  # True
             # For backward compatibility
             if hasattr(self.llm, 'enable_input_require_grads'):
                 self.llm.enable_input_require_grads()
             else:
+                # 模块第一层必须要有梯度，否则 gradient_checkpointing 失败
                 self.llm.get_input_embeddings().register_forward_hook(
                     make_inputs_require_grad)
             if hasattr(self.visual_encoder, 'enable_input_require_grads'):
@@ -64,7 +71,7 @@ class LLaVAModel(BaseModel):
             self.projector.enable_input_require_grads()
 
             # enable gradient (activation) checkpointing for memory efficiency
-            self.gradient_checkpointing_enable()
+            self.gradient_checkpointing_enable()  # 开启，hf 内部方法
 
         self.use_llm_lora = llm_lora is not None
         self.use_visual_encoder_lora = visual_encoder_lora is not None
@@ -81,7 +88,7 @@ class LLaVAModel(BaseModel):
             self.load_state_dict(pretrained_state_dict, strict=False)
             print(f'Load pretrained weight from {pretrained_pth}')
 
-        self.visual_select_layer = visual_select_layer
+        self.visual_select_layer = visual_select_layer  # 选择 vit 的倒数第二层的特征
 
         self._is_init = True
 

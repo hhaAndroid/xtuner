@@ -32,6 +32,8 @@ class ProjectorModel(PreTrainedModel):
                     bias=config.bias))
         self.model = nn.Sequential(*modules)
 
+    # 主要是避免这个模块第一层没有梯度而导致的 gradient_checkpointing 失败
+    # 但是这个模型是训练的，所以这个地方不加也没事。
     def enable_input_require_grads(self):
 
         def make_inputs_require_grad(module, input, output):

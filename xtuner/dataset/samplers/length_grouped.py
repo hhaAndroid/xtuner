@@ -9,7 +9,6 @@ from torch.utils.data import Sampler
 
 
 def get_length_grouped_indices(lengths, group_batch_size, generator=None):
-
     def process(lengths, group_batch_size, generator=None):
         indices = torch.randperm(len(lengths), generator=generator)
         megabatches = [
@@ -27,16 +26,19 @@ def get_length_grouped_indices(lengths, group_batch_size, generator=None):
         # all samples are in the same modality
         megabatches = process(lengths, group_batch_size, generator=generator)
     else:
+        # 两个模态的数据分开处理
         mm_indices, mm_lengths = zip(*[(i, l) for i, l in enumerate(lengths)
-                                       if l > 0])
+                                       if l > 0])  # 多模态数据
         lang_indices, lang_lengths = zip(*[(i, -l)
                                            for i, l in enumerate(lengths)
-                                           if l < 0])
+                                           if l < 0])  # 纯文本数据
         mm_megabatches = []
+        # 对所有多模态数据进行分组，然后对每个组内部的数据进行降序排列
         for mm_megabatch in process(
                 mm_lengths, group_batch_size, generator=generator):
             mm_megabatches.append([mm_indices[i] for i in mm_megabatch])
         lang_megabatches = []
+        # 对所有纯文本模态数据进行分组，然后对每个组内部的数据进行降序排列
         for lang_megabatch in process(
                 lang_lengths, group_batch_size, generator=generator):
             lang_megabatches.append([lang_indices[i] for i in lang_megabatch])
@@ -44,13 +46,16 @@ def get_length_grouped_indices(lengths, group_batch_size, generator=None):
         last_mm = mm_megabatches[-1]
         last_lang = lang_megabatches[-1]
         last_batch = last_mm + last_lang
+        # 合并
         megabatches = mm_megabatches[:-1] + lang_megabatches[:-1]
 
+        # 组级别进行打乱，每个组内部的数据还是不变的
         megabatch_indices = torch.randperm(
             len(megabatches), generator=generator)
         megabatches = [megabatches[i] for i in megabatch_indices]
 
         if len(last_batch) > 0:
+            # 剩下的数据要保留，也要降序排序
             megabatches.append(
                 sorted(
                     last_batch, key=lambda i: abs(lengths[i]), reverse=True))
@@ -58,14 +63,17 @@ def get_length_grouped_indices(lengths, group_batch_size, generator=None):
     # The rest is to get the biggest batch first.
     # Since each megabatch is sorted by descending length,
     # the longest element is the first
+    # 每一组的最大长度 0 就是最大长度索引
     megabatch_maximums = [
         abs(lengths[megabatch[0]]) for megabatch in megabatches
     ]
     max_idx = torch.argmax(torch.tensor(megabatch_maximums)).item()
     # Switch to put the longest element in first position
+    # 长度最大的放到最前面，这样可以尽可能出现 OOM
+    # 最长的那个数据当到第一组的第一个位置
     megabatches[0][0], megabatches[max_idx][0] = megabatches[max_idx][
         0], megabatches[0][0]
-
+    # 这样相当于实现了近似的按照长度分组算法，每个组内部是降序，但是组会打乱顺序。
     return [i for megabatch in megabatches for i in megabatch]
 
 
@@ -97,8 +105,10 @@ class LengthGroupedSampler(Sampler):
                 (len(self.dataset) - rank) / world_size)
             self.total_size = len(self.dataset)
 
-        total_batch_size = per_device_batch_size * self.world_size
+        total_batch_size = per_device_batch_size * self.world_size  # 这个是全局值
         if mega_batch_mult is None:
+            # 经验值，最大是 50 个分成一个大组，最小是要构成 4 个大组
+            # 这个参数用于控制随机率，分的组越多则随机率越高，如果等于1则没有随机，直接是降序排列
             # Default for mega_batch_mult: 50 or the number to get 4
             # megabatches, whichever is smaller.
             mega_batch_mult = min(
@@ -117,9 +127,23 @@ class LengthGroupedSampler(Sampler):
             self.length = getattr(self.dataset, length_property)
         assert isinstance(self.length, (list, tuple))
 
+        data = []
+        for i, x in enumerate(self.length):
+            data.append([i, x])
+        print(f'old data: {data}')
+
+        data = list(sorted(
+            data, key=lambda i: abs(i[1]), reverse=True))
+        print(f'old data1: {data}')
+
         self.total_batch_size = total_batch_size
 
     def __iter__(self) -> Iterator[int]:
+        # transformers trainer的 --group-by-length 这个参数同等功能
+        # 排序，然后让相似的数据在同一个batch。但是你不能简单的直接排序，这样会导致没有随机性了
+        # 所以是一部分的排序
+        # 这样相当于实现了近似的按照长度分组算法，每个组内部是降序，但是组内部会打乱顺序。
+        # 并且会按照模态来分组，作者说这样可以极大的提高训练效率
         """Iterate the indices."""
         generator = torch.Generator()
         generator.manual_seed(self.seed + self.epoch)
@@ -131,12 +155,13 @@ class LengthGroupedSampler(Sampler):
         # add extra samples to make it evenly divisible
         if self.round_up:
             indices = (
-                indices *
-                int(self.total_size / len(indices) + 1))[:self.total_size]
+                              indices *
+                              int(self.total_size / len(indices) + 1))[:self.total_size]
         # subsample
         assert len(indices) == self.total_size
         indices = indices[self.rank:self.total_size:self.world_size]
         assert len(indices) == self.num_samples
+        print(f'new indices: {indices}')
         return iter(indices)
 
     def __len__(self) -> int:

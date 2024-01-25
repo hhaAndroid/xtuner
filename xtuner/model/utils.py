@@ -135,7 +135,7 @@ def prepare_inputs_labels_for_multimodal(
         past_key_values: Optional[List[torch.FloatTensor]] = None,
         labels: Optional[torch.LongTensor] = None,
         pixel_values: Optional[torch.FloatTensor] = None):
-    if pixel_values is None:
+    if pixel_values is None:  # 没有图片的话，不用进行处理。这个分支必然不会走，忽略
         return {
             'input_ids': input_ids,
             'position_ids': position_ids,
@@ -145,6 +145,7 @@ def prepare_inputs_labels_for_multimodal(
             'labels': labels
         }
 
+    # 核心在于把 <image> 这个 token 位置注入 image embedding, 这个应该是固定维度的
     _labels = labels
     _position_ids = position_ids
     _attention_mask = attention_mask
@@ -173,49 +174,52 @@ def prepare_inputs_labels_for_multimodal(
     cur_image_idx = 0
     for batch_idx, cur_input_ids in enumerate(input_ids):
         num_images = (cur_input_ids == IMAGE_TOKEN_INDEX).sum()
+        # 没有 <image> token
+        # 这个其实就是纯文本预测的场景
         if num_images == 0:
             cur_pixel_values = pixel_values[cur_image_idx]
             cur_inputs_embeds_1 = llm.get_input_embeddings()(cur_input_ids)
             cur_inputs_embeds = torch.cat(
-                [cur_inputs_embeds_1, cur_pixel_values[0:0]], dim=0)
+                [cur_inputs_embeds_1, cur_pixel_values[0:0]], dim=0)  # 图片假的 embedding 拼接到后面，否则 ddp 会有问题
             new_inputs_embeds.append(cur_inputs_embeds)
             new_labels.append(labels[batch_idx])
             cur_image_idx += 1
             continue
 
+        # 将 <image> token 的索引计算出来，然后前后加上 -1 和 最大长度，方便后续处理
         image_token_indices = [-1] + torch.where(
             cur_input_ids == IMAGE_TOKEN_INDEX)[0].tolist() + [
-                cur_input_ids.shape[0]
-            ]
+                                  cur_input_ids.shape[0]
+                              ]  # -1 4 113
         cur_input_ids_noim = []
         cur_labels = labels[batch_idx]
         cur_labels_noim = []
-        for i in range(len(image_token_indices) - 1):
+        for i in range(len(image_token_indices) - 1):  # 以图片为分离符，分离为多个 list
             cur_input_ids_noim.append(cur_input_ids[image_token_indices[i] +
                                                     1:image_token_indices[i +
                                                                           1]])
             cur_labels_noim.append(cur_labels[image_token_indices[i] +
                                               1:image_token_indices[i + 1]])
-        split_sizes = [x.shape[0] for x in cur_labels_noim]
+        split_sizes = [x.shape[0] for x in cur_labels_noim]  # 4 108
         cur_inputs_embeds = llm.get_input_embeddings()(
-            torch.cat(cur_input_ids_noim))
+            torch.cat(cur_input_ids_noim))  # 获取非图片的 embedding
         cur_inputs_embeds_no_im = torch.split(
-            cur_inputs_embeds, split_sizes, dim=0)
+            cur_inputs_embeds, split_sizes, dim=0)  # 4 4096, 108 4096
         cur_new_inputs_embeds = []
         cur_new_labels = []
 
-        for i in range(num_images + 1):
+        for i in range(num_images + 1):  # 当前文本里面有多少个图片，目前始终是 1
             cur_new_inputs_embeds.append(cur_inputs_embeds_no_im[i])
             cur_new_labels.append(cur_labels_noim[i])
             if i < num_images:
-                cur_pixel_values = pixel_values[cur_image_idx]
+                cur_pixel_values = pixel_values[cur_image_idx]  # 576,4096
                 cur_image_idx += 1
-                cur_new_inputs_embeds.append(cur_pixel_values)
+                cur_new_inputs_embeds.append(cur_pixel_values)  # 加入图片 embedding
                 cur_new_labels.append(
-                    torch.full((cur_pixel_values.shape[0], ),
+                    torch.full((cur_pixel_values.shape[0],),
                                IGNORE_INDEX,
                                device=cur_labels.device,
-                               dtype=cur_labels.dtype))
+                               dtype=cur_labels.dtype))  # 图片序列的 embedding 位置必然是没有 loss 的
 
         cur_new_inputs_embeds = torch.cat(cur_new_inputs_embeds)
         cur_new_labels = torch.cat(cur_new_labels)
@@ -255,7 +259,7 @@ def prepare_inputs_labels_for_multimodal(
                 0,
                 cur_len,
                 dtype=position_ids.dtype,
-                device=position_ids.device)
+                device=position_ids.device)  # 重新计算位置编码，padding 位置不考虑位置编码
 
     new_inputs_embeds = torch.stack(new_inputs_embeds_padded, dim=0)
 

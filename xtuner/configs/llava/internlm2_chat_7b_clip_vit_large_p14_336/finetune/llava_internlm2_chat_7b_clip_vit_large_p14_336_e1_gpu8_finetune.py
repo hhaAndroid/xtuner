@@ -29,7 +29,7 @@ data_root = './data/llava_data/'
 data_path = data_root + 'LLaVA-Instruct-150K/llava_v1_5_mix665k.json'
 image_folder = data_root + 'llava_images'
 prompt_template = PROMPT_TEMPLATE.internlm2_chat
-max_length = int(2048 - (336 / 14)**2)
+max_length = int(2048 - (336 / 14)**2)  # 要提前考虑图片所占的最大 embeding 数
 
 # Scheduler & Optimizer
 batch_size = 16  # per_device
@@ -96,7 +96,7 @@ train_dataloader = dict(
     batch_size=batch_size,
     num_workers=dataloader_num_workers,
     dataset=llava_dataset,
-    sampler=dict(
+    sampler=dict(  # 因为多轮对话和单轮对话时候长度差异很大，如果直接组成 bacth 会出现大量额外的 padding
         type=LengthGroupedSampler,
         length_property='modality_length',
         per_device_batch_size=batch_size * accumulative_counts),

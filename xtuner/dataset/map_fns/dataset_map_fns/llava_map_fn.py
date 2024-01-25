@@ -34,7 +34,7 @@ def llava_map_fn(example):
             if DEFAULT_IMAGE_TOKEN in msg['value']:
                 msg['value'] = msg['value'].replace(DEFAULT_IMAGE_TOKEN,
                                                     '').strip()
-                msg['value'] = DEFAULT_IMAGE_TOKEN + '\n' + msg['value']
+                msg['value'] = DEFAULT_IMAGE_TOKEN + '\n' + msg['value']  # DEFAULT_IMAGE_TOKEN 始终追加到前面
                 msg['value'] = msg['value'].strip()
             input += msg['value']
 

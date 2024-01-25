@@ -97,7 +97,7 @@ llava_dataset = dict(
     template_map_fn=dict(
         type=template_map_fn_factory, template=prompt_template),
     max_length=max_length,
-    pad_image_to_square=False)
+    pad_image_to_square=False)  # pretrain 和 finetune 时候不一致，有点奇怪？
 
 train_dataloader = dict(
     batch_size=batch_size,

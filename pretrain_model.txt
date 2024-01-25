@@ -1,0 +1,63 @@
+LLaVAModel(
+  (data_preprocessor): BaseDataPreprocessor()
+  (llm): InternLM2ForCausalLM(
+    (model): InternLM2Model(
+      (tok_embeddings): Embedding(92544, 4096, padding_idx=2)
+      (layers): ModuleList(
+        (0-31): 32 x InternLM2DecoderLayer(
+          (attention): InternLM2Attention(
+            (wqkv): Linear4bit(in_features=4096, out_features=6144, bias=False)
+            (wo): Linear4bit(in_features=4096, out_features=4096, bias=False)
+            (rotary_emb): InternLM2DynamicNTKScalingRotaryEmbedding()
+          )
+          (feed_forward): InternLM2MLP(
+            (w1): Linear4bit(in_features=4096, out_features=14336, bias=False)
+            (w3): Linear4bit(in_features=4096, out_features=14336, bias=False)
+            (w2): Linear4bit(in_features=14336, out_features=4096, bias=False)
+            (act_fn): SiLU()
+          )
+          (attention_norm): InternLM2RMSNorm()
+          (ffn_norm): InternLM2RMSNorm()
+        )
+      )
+      (norm): InternLM2RMSNorm()
+    )
+    (output): Linear(in_features=4096, out_features=92544, bias=False)
+  )
+  (visual_encoder): CLIPVisionModel(
+    (vision_model): CLIPVisionTransformer(
+      (embeddings): CLIPVisionEmbeddings(
+        (patch_embedding): Conv2d(3, 1024, kernel_size=(14, 14), stride=(14, 14), bias=False)
+        (position_embedding): Embedding(577, 1024)
+      )
+      (pre_layrnorm): LayerNorm((1024,), eps=1e-05, elementwise_affine=True)
+      (encoder): CLIPEncoder(
+        (layers): ModuleList(
+          (0-23): 24 x CLIPEncoderLayer(
+            (self_attn): CLIPAttention(
+              (k_proj): Linear(in_features=1024, out_features=1024, bias=True)
+              (v_proj): Linear(in_features=1024, out_features=1024, bias=True)
+              (q_proj): Linear(in_features=1024, out_features=1024, bias=True)
+              (out_proj): Linear(in_features=1024, out_features=1024, bias=True)
+            )
+            (layer_norm1): LayerNorm((1024,), eps=1e-05, elementwise_affine=True)
+            (mlp): CLIPMLP(
+              (activation_fn): QuickGELUActivation()
+              (fc1): Linear(in_features=1024, out_features=4096, bias=True)
+              (fc2): Linear(in_features=4096, out_features=1024, bias=True)
+            )
+            (layer_norm2): LayerNorm((1024,), eps=1e-05, elementwise_affine=True)
+          )
+        )
+      )
+      (post_layernorm): LayerNorm((1024,), eps=1e-05, elementwise_affine=True)
+    )
+  )
+  (projector): ProjectorModel(
+    (model): Sequential(
+      (0): Linear(in_features=1024, out_features=4096, bias=True)
+      (1): GELUActivation()
+      (2): Linear(in_features=4096, out_features=4096, bias=True)
+    )
+  )
+)
