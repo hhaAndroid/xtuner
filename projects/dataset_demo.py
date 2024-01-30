@@ -1,5 +1,8 @@
 import os
 
+import numpy as np
+import torch
+
 os.environ['HF_MODULES_CACHE'] = '../'
 
 from transformers import (AutoTokenizer, CLIPImageProcessor)
@@ -8,6 +11,8 @@ from xtuner.dataset.map_fns import llava_map_fn, template_map_fn_factory
 from xtuner.utils import PROMPT_TEMPLATE
 from xtuner.dataset import ConcatDataset
 from projects.modules import RRRDataset, ADD_TOKENS_DECODER
+from mmengine.visualization import Visualizer
+import re
 
 data_root = '/home/PJLAB/huanghaian/dataset/coco/'
 
@@ -67,5 +72,42 @@ class_type = train_dataset.pop('type')
 rrr_dataset = class_type(**train_dataset)
 print(len(rrr_dataset))
 
+image_mean = [
+    0.48145466,
+    0.4578275,
+    0.40821073
+],
+image_std = [
+    0.26862954,
+    0.26130258,
+    0.27577711
+]
+mean = torch.tensor(image_mean).view(3, 1, 1)
+std = torch.tensor(image_std).view(3, 1, 1)
+
+vis = Visualizer()
+
 for data in rrr_dataset:
-    print(data)
+    pixel_values = data['pixel_values']
+    pixel_values = pixel_values * std + mean
+    pixel_values = pixel_values * 255
+    pixel_values = torch.permute(pixel_values, (1, 2, 0))
+
+    vis.set_image(pixel_values.numpy())
+
+    conversation = data['conversation'][0]['input']
+    print(data['conversation'][0]['output'])
+
+    matches = re.findall(r'\[([^]]+)\]', conversation)[0]
+    cleaned_text = matches.replace("[", "").replace("]", "").replace("'", "")
+    numbers = cleaned_text.split(", ")
+    numbers = [int(num) for num in numbers]
+    vis.draw_bboxes(np.array([numbers]), edge_colors='r', line_widths=4)
+    vis.show()
+
+
+
+
+
+
+

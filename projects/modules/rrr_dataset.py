@@ -58,20 +58,14 @@ class RRRDataset(Dataset):
         data_dict = self.text_data[index]
         if data_dict.get('image', None) is not None:
             image_file = data_dict['image']
+            # print(image_file)
             image = Image.open(os.path.join(self.img_root,
                                             image_file)).convert('RGB')
             old_w, old_h = F.get_image_size(image)
-            scale = self.img_size[0] / min(old_w, old_h)
-            if old_h < old_w:
-                newh, neww = self.img_size[0], scale * self.img_size[0]
-            else:
-                newh, neww = scale * self.img_size[0], self.img_size[0]
-            if max(newh, neww) > self.img_size[0]:
-                scale = self.img_size[0] * 1.0 / max(newh, neww)
-                newh = newh * scale
-                neww = neww * scale
-            neww = int(neww + 0.5)
-            newh = int(newh + 0.5)
+            scale_factor = min(self.img_size[0] / max(old_h, old_w),
+                               self.img_size[0] / min(old_h, old_w))
+            neww = int(old_w * float(scale_factor))
+            newh = int(old_h * float(scale_factor))
             image = F.resize(image, size=(newh, neww), interpolation=F.InterpolationMode.BICUBIC)
             if self.pad_image_to_square:
                 image = expand2square(

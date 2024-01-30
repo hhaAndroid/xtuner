@@ -52,7 +52,7 @@ def coco2ovd(args):
         while _num_instance < num_instance_pre_cat:
             for img_id in ids:
                 img_info = coco.loadImgs([img_id])[0]
-                ann_ids = coco.getAnnIds(imgIds=img_id)
+                ann_ids = coco.getAnnIds(imgIds=img_id, catIds=[id])
                 if len(ann_ids) > 0:
                     # 随机抽一个实例, 如果没有 bbox 或者没有符合的则跳过
                     ann_id = random.choice(ann_ids)
@@ -74,12 +74,32 @@ def coco2ovd(args):
                     bbox_xyxy = [int(x1), int(y1), int(x1 + w), int(y1 + h)]
 
                     # resize to IMAGE_SIZE
+                    old_w = img_info['width']
+                    old_h = img_info['height']
+                    scale_factor = min(IMAGE_SIZE / max(old_h, old_w),
+                                       IMAGE_SIZE / min(old_h, old_w))
+                    neww = int(old_w * float(scale_factor))
+                    newh = int(old_h * float(scale_factor))
+
+                    if neww > newh:
+                        padding_h = (neww - newh) // 2
+                        padding_w = 0
+                    else:
+                        padding_w = (newh - neww) // 2
+                        padding_h = 0
                     bbox_xyxy = [
-                        int(bbox_xyxy[0] * IMAGE_SIZE / img_info['width']),
-                        int(bbox_xyxy[1] * IMAGE_SIZE / img_info['height']),
-                        int(bbox_xyxy[2] * IMAGE_SIZE / img_info['width']),
-                        int(bbox_xyxy[3] * IMAGE_SIZE / img_info['height']),
+                        int(bbox_xyxy[0] * neww / img_info['width']) + padding_w,
+                        int(bbox_xyxy[1] * newh / img_info['height']) + padding_h,
+                        int(bbox_xyxy[2] * neww / img_info['width']) + padding_w,
+                        int(bbox_xyxy[3] * newh / img_info['height']) + padding_h,
                     ]
+
+                    # 过滤掉特别小的框
+                    new_h = bbox_xyxy[3] - bbox_xyxy[1]
+                    new_w = bbox_xyxy[2] - bbox_xyxy[0]
+                    if new_h < 60 or new_w < 60:
+                        continue
+
                     temp = random.choice(OVD_TEMPLATE)
                     temp = temp.replace('<region>', str(bbox_xyxy) + ' <region_feat> <seg>')
 
