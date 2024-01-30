@@ -12,6 +12,9 @@ from xtuner.utils import PROMPT_TEMPLATE
 from xtuner.dataset import ConcatDataset
 from projects.modules import RRRDataset, ADD_TOKENS_DECODER
 from mmengine.visualization import Visualizer
+from xtuner.dataset.samplers import LengthGroupedSampler
+from xtuner.dataset.collate_fns import default_collate_fn
+from mmengine.runner.runner import Runner
 import re
 
 data_root = '/home/PJLAB/huanghaian/dataset/coco/'
@@ -105,9 +108,17 @@ for data in rrr_dataset:
     vis.draw_bboxes(np.array([numbers]), edge_colors='r', line_widths=4)
     vis.show()
 
-
-
-
-
-
-
+# train_dataloader = dict(
+#     batch_size=4,
+#     num_workers=0,
+#     dataset=rrr_dataset,
+#     sampler=dict(
+#         type=LengthGroupedSampler,
+#         length_property='length',
+#         per_device_batch_size=4 * 1),
+#     collate_fn=dict(type=default_collate_fn))
+#
+# train_dataloader = Runner.build_dataloader(train_dataloader)
+# for i, load in enumerate(train_dataloader):
+#     print(load)
+#     break

@@ -36,4 +36,14 @@ for k, v in vocab.items():
 print(new_v, len(new_v))
 
 print(tokenizer._convert_id_to_token(92535))
-print(tokenizer._convert_id_to_token(92543))
+
+# 中文情况下，空格也会被单独编码，为了少一些 token ，一些没有必要的空格可以省掉
+input_encode = tokenizer.encode('a region [206,39,382,517]<region_feat><seg>.', add_special_tokens=False)
+print(input_encode)
+
+print(tokenizer._convert_id_to_token(264))
+print(tokenizer._convert_id_to_token(5693))
+print(tokenizer._convert_id_to_token(640))
+print(tokenizer._convert_id_to_token(10969))
+print(tokenizer._convert_id_to_token(328))
+print(tokenizer._convert_id_to_token(332))

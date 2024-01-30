@@ -24,7 +24,7 @@ class RRRDataset(Dataset):
                  dataset_map_fn=None,
                  template_map_fn=None,
                  max_length=2048,
-                 img_size=(1008, 1008)):
+                 img_size=(532, 532)):
         self.data_root = data_root
         self.img_root = os.path.join(data_root, data_prefix['img'])
         json_data = json.load(open(os.path.join(data_root, ann_file)))
@@ -51,6 +51,14 @@ class RRRDataset(Dataset):
         self.pad_image_to_square = True
         self.img_size = img_size
 
+    @property
+    def length(self):
+        length_list = []
+        for data_dict in self.text_data:
+            cur_len = len(data_dict['input_ids'])
+            length_list.append(cur_len)
+        return length_list
+
     def __len__(self):
         return len(self.text_data)
 
@@ -74,7 +82,7 @@ class RRRDataset(Dataset):
                         int(x * 255) for x in self.image_processor.image_mean))
             image = self.image_processor.preprocess(
                 image, return_tensors='pt')['pixel_values'][0]
-            assert image.shape == (3, 1008, 1008)
+            assert image.shape == (3, self.img_size[0], self.img_size[1])
             data_dict['pixel_values'] = image
         else:
             raise NotImplementedError()

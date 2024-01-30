@@ -3,7 +3,8 @@ import json
 import random
 from pycocotools.coco import COCO
 
-IMAGE_SIZE = 1008  # 3*336
+IMAGE_SIZE = 532
+MIN_BBOX_SIZE = 32
 
 GLOABL_TEMPLATE = 'In images, [x, y] denotes points: top-left [0, 0], bottom-right [width-1, height-1]. Increasing x ' \
                   f'moves right; y moves down. Bounding box: [x1, y1, x2, y2]. Image size: {IMAGE_SIZE}x{IMAGE_SIZE}.'
@@ -97,11 +98,11 @@ def coco2ovd(args):
                     # 过滤掉特别小的框
                     new_h = bbox_xyxy[3] - bbox_xyxy[1]
                     new_w = bbox_xyxy[2] - bbox_xyxy[0]
-                    if new_h < 60 or new_w < 60:
+                    if new_h < MIN_BBOX_SIZE or new_w < MIN_BBOX_SIZE:
                         continue
 
                     temp = random.choice(OVD_TEMPLATE)
-                    temp = temp.replace('<region>', str(bbox_xyxy) + ' <region_feat> <seg>')
+                    temp = temp.replace('<region>', str(bbox_xyxy) + '<region_feat><seg>')
 
                     # 50 概率保留所有类类别
                     if random.random() > 0.5:
@@ -114,13 +115,13 @@ def coco2ovd(args):
                         if name not in cat_name:
                             cat_name.append(name)
                     random.shuffle(cat_name)
-                    cat_name = ', '.join(cat_name)
+                    cat_name = ','.join(cat_name)
                     temp = temp.replace('{}', cat_name)
 
                     out_temp = random.choice(OUT_TEMPLATE)
                     out_temp = out_temp.replace('<category>', name)
 
-                    data = {'id': img_id, 'image': img_info['file_name'],
+                    data = {'id': img_id, 'image': img_info['file_name'], 'bbox': bbox_xyxy,
                             'conversations': [{'from': 'human', 'value': '<image>\n' + temp},
                                               {'from': 'gpt', 'value': out_temp}]}
                     out_data.append(data)
