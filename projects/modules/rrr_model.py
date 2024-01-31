@@ -222,10 +222,33 @@ class RRRModel(BaseModel):
         loss_dict = {'loss': outputs.loss}
         return loss_dict
 
-    # TODO
+    # TODO: 暂时只支持 pretrain 阶段
     def state_dict(self, *args, **kwargs):
         state_dict = super().state_dict(*args, **kwargs)
-        return state_dict
+        to_return = OrderedDict()
+        # Step 1. visual_encoder
+        if self.use_visual_encoder_lora:
+            to_return.update(
+                get_peft_model_state_dict(
+                    self.visual_encoder, state_dict=state_dict))
+        elif not self.freeze_visual_encoder:
+            to_return.update({
+                k: v
+                for k, v in state_dict.items() if 'visual_encoder.' in k
+            })
+        # Step 2. LLM
+        if self.use_llm_lora:
+            to_return.update(
+                get_peft_model_state_dict(self.llm, state_dict=state_dict))
+        elif not self.freeze_llm:
+            to_return.update(
+                {k: v
+                 for k, v in state_dict.items() if 'llm.' in k})
+        # Step 3. Projector
+        to_return.update(
+            {k: v
+             for k, v in state_dict.items() if 'projector.' in k})
+        return to_return
 
     def _parse_lora_config(self, lora_config):
         if isinstance(lora_config, dict) or isinstance(
