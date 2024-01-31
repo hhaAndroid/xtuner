@@ -9,6 +9,7 @@ new_ckpt = OrderedDict()
 
 for k, v in list(state_dict.items()):
     if 'projector.model.0.weight' in k:
+        # TODO: 需要确定这种复制是不是对的？
         v = v.repeat(1, 4)
         print(v.shape)
     new_ckpt[k] = v
