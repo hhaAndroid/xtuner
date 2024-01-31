@@ -20,7 +20,8 @@ import re
 data_root = '/home/PJLAB/huanghaian/dataset/coco/'
 
 prompt_template = PROMPT_TEMPLATE.internlm2_chat
-max_length = int(2048 - (336 / 14) ** 2)  # TODO
+# image token 占 (336 / 14) ** 2, region token 占 1
+max_length = int(2048 - (336 / 14) ** 2 - 1)
 
 llm_name_or_path = 'internlm/internlm2-chat-7b'
 visual_encoder_name_or_path = '/home/PJLAB/huanghaian/models--openai--clip-vit-large-patch14-336/snapshots' \

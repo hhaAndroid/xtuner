@@ -3,8 +3,8 @@ import json
 import random
 from pycocotools.coco import COCO
 
-IMAGE_SIZE = 532
-MIN_BBOX_SIZE = 32
+IMAGE_SIZE = 672
+MIN_BBOX_SIZE = 40
 
 GLOABL_TEMPLATE = 'In images, [x, y] denotes points: top-left [0, 0], bottom-right [width-1, height-1]. Increasing x ' \
                   f'moves right; y moves down. Bounding box: [x1, y1, x2, y2]. Image size: {IMAGE_SIZE}x{IMAGE_SIZE}.'

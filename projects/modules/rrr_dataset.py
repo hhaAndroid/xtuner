@@ -11,6 +11,36 @@ from .dataset_huggingface import process_hf_dataset_rrr
 from xtuner.registry import BUILDER
 import torchvision.transforms.functional as F
 from xtuner.dataset.utils import expand2square
+from xtuner.dataset.llava import LLaVADataset
+import torch
+
+
+class PretrainLLaVADataset(LLaVADataset):
+
+    def __getitem__(self, index):
+        data_dict = self.text_data[index]
+        if data_dict.get('image', None) is not None:
+            image_file = data_dict['image']
+            image = Image.open(os.path.join(self.image_folder,
+                                            image_file)).convert('RGB')
+            old_w, old_h = F.get_image_size(image)
+            scale_factor = min(self.img_size[0] / max(old_h, old_w),
+                               self.img_size[0] / min(old_h, old_w))
+            neww = int(old_w * float(scale_factor))
+            newh = int(old_h * float(scale_factor))
+            image = F.resize(image, size=(newh, neww), interpolation=F.InterpolationMode.BICUBIC)
+            if self.pad_image_to_square:
+                image = expand2square(
+                    image,
+                    tuple(
+                        int(x * 255) for x in self.image_processor.image_mean))
+            image = self.image_processor.preprocess(
+                image, return_tensors='pt')['pixel_values'][0]
+            assert image.shape == (3, self.img_size[0], self.img_size[1])
+            data_dict['pixel_values'] = image
+        else:
+            data_dict['pixel_values'] = torch.zeros(3, self.img_size[0], self.img_size[1])
+        return data_dict
 
 
 class RRRDataset(Dataset):
@@ -24,7 +54,7 @@ class RRRDataset(Dataset):
                  dataset_map_fn=None,
                  template_map_fn=None,
                  max_length=2048,
-                 img_size=(532, 532)):
+                 img_size=(672, 672)):
         self.data_root = data_root
         self.img_root = os.path.join(data_root, data_prefix['img'])
         json_data = json.load(open(os.path.join(data_root, ann_file)))

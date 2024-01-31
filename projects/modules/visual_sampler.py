@@ -202,15 +202,11 @@ class GeoRegionSampler(nn.Module):
 
     def forward(self,
                 feature_map,
-                regions,
+                region_masks,
                 original_dtype=torch.float32,
                 return_dtype=torch.float32):
 
-        assert len(feature_map) == len(regions)
-        # 暂时每张图片只能存在一个 bbox
-
-
-
+        assert len(feature_map) == len(region_masks)
         all_points = []
         all_points_fea = []
         all_points_img_ids = []

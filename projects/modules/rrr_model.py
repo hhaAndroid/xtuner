@@ -21,6 +21,8 @@ from mmengine.utils.misc import get_object_from_string
 from peft import PeftType
 from torch import nn
 from transformers import PreTrainedModel
+from .constants import IMAGE_TOKEN_INDEX, REGION_FEAT_TOKEN_INDEX, SEG_TOKEN_INDEX, IGNORE_INDEX
+from .visual_sampler import GeoRegionSampler
 
 
 class RRRModel(BaseModel):
@@ -35,10 +37,11 @@ class RRRModel(BaseModel):
                  visual_encoder_lora=None,
                  use_activation_checkpointing=True,
                  # CLIP ViT parameters
-                 input_size=532,
+                 input_size=672,
                  sliding_window_size=336,
-                 sliding_window_stride=196,
-                 backbone_output_stride=14
+                 sliding_window_stride=336,
+                 backbone_output_stride=14,
+                 use_visual_sampler=False,  # 预训练时候为 False,微调时候为 True
                  ):
         super().__init__()
         self.freeze_llm = freeze_llm
@@ -57,17 +60,28 @@ class RRRModel(BaseModel):
         self.h_grids = max(input_size - sliding_window_size + sliding_window_stride - 1, 0) // sliding_window_stride + 1
         self.w_grids = max(input_size - sliding_window_size + sliding_window_stride - 1, 0) // sliding_window_stride + 1
         self.window_pos_embed = nn.Parameter(
-            torch.randn(1, (input_size // backbone_output_stride) ** 2, self.visual_encoder.config.hidden_size))
+            torch.randn(1, (input_size // backbone_output_stride) ** 2, self.visual_encoder.config.hidden_size)).to(
+            self.visual_encoder.dtype)
 
         self.llm.config.use_cache = False
         dispatch_modules(self.llm)
 
         projector_config = ProjectorConfig(
-            visual_hidden_size=self.visual_encoder.config.hidden_size * 2,
+            visual_hidden_size=self.visual_encoder.config.hidden_size * 4,
             llm_hidden_size=self.llm.config.hidden_size,
             depth=projector_depth)
         self.projector = ProjectorModel(projector_config).to(
             self.visual_encoder.dtype)
+
+        # visual sampler
+        if use_visual_sampler:
+            self.sampler = GeoRegionSampler(self.visual_encoder.config.hidden_size * 4,
+                                            self.llm.config.hidden_size,
+                                            512,
+                                            num_sub_point=[128, 32],
+                                            num_neighbor=[24, 24]).to(self.visual_encoder.dtype)
+        else:
+            self.sampler = None
 
         self.llm.requires_grad_(False)
         self.visual_encoder.requires_grad_(False)
@@ -110,7 +124,6 @@ class RRRModel(BaseModel):
 
     @torch.no_grad()
     def sliding_window_vit_forward(self, pixel_values):
-        # TODO: 在输入分辨率才 532 情况下，是否还需要 sliding window，直接对位置编码进行插值效果是不是一样？
         batch_size = pixel_values.shape[0]
         output_features = torch.zeros(
             (batch_size, self.input_size // self.backbone_output_stride, self.input_size // self.backbone_output_stride,
@@ -146,15 +159,42 @@ class RRRModel(BaseModel):
         encoded_pixel_features = output_features.view(batch_size, -1, self.backbone_output_channel)
         return encoded_pixel_features
 
+    def prepare_for_eval(self, data):
+        visual_outputs = self.sliding_window_vit_forward(data['pixel_values'])
+        visual_outputs += self.window_pos_embed
+        bs, pn, hs = visual_outputs.shape
+        # token merge
+        visual_outputs = visual_outputs.view(bs, int(pn / 4), int(hs * 4))
+        pixel_values = self.projector(visual_outputs)
+        data['pixel_values'] = pixel_values
+        if self.sampler:
+            raise NotImplementedError
+        data = prepare_inputs_labels_for_multimodal(llm=self.llm, **data)
+        return data
+
     def forward(self, data, data_samples=None, mode='loss'):
         if 'pixel_values' in data:
             visual_outputs = self.sliding_window_vit_forward(data['pixel_values'])
             visual_outputs += self.window_pos_embed
             bs, pn, hs = visual_outputs.shape
             # token merge
-            visual_outputs = visual_outputs.view(bs, int(pn / 2), int(hs * 2))
+            visual_outputs = visual_outputs.view(bs, int(pn / 4), int(hs * 4))
             pixel_values = self.projector(visual_outputs)
             data['pixel_values'] = pixel_values
+
+            if self.sampler:
+                # 计算 Spatial-aware visual sampler, 模块输入是 visual_outputs 而不是 pixel_values
+                # bbox 是原图尺度即可，内部会进行归一化处理
+                region_mask = []
+                for b in data['gt_bboxes']:
+                    coor_mask = torch.zeros((self.input_size, self.input_size), device=pixel_values.device)
+                    coor_mask[b[0]:b[2], b[1]:b[3]] = 1
+                    assert len(coor_mask.nonzero()) != 0
+                    # 可以运行每张图片存在多个 bbox 的情况，因此外层会多一个 []
+                    region_mask.append([coor_mask])
+
+                region_feats = self.sampler(visual_outputs, region_mask)  # b, 4096
+                data['region_feats'] = region_feats
             data = prepare_inputs_labels_for_multimodal(llm=self.llm, **data)
 
         if mode == 'loss':
@@ -247,7 +287,7 @@ def prepare_inputs_labels_for_multimodal(
         past_key_values: Optional[List[torch.FloatTensor]] = None,
         labels: Optional[torch.LongTensor] = None,
         pixel_values: Optional[torch.FloatTensor] = None,
-        bbox=None,
+        region_feats=None,
         **kwargs):
     if pixel_values is None:
         return {
@@ -259,3 +299,69 @@ def prepare_inputs_labels_for_multimodal(
             'labels': labels
         }
 
+    assert position_ids is None
+
+    if region_feats is None:
+        region_feats = [None] * len(pixel_values)
+
+    if attention_mask is None:  # 训练时候必然有，单张图片评估时候可能没有
+        attention_mask = [None] * len(pixel_values)
+
+    new_inputs_embeds = []
+    new_labels = []
+    new_attention_mask = []
+    for batch_idx, (cur_input_ids, region_feat, pixel_value, cur_attn_mask) in enumerate(
+            zip(input_ids, region_feats, pixel_values, attention_mask)):
+        # TODO: 每张图片里面只能有一个 img 和 region feat
+        cur_labels = labels[batch_idx]
+        # cur_inputs_embeds = llm.get_input_embeddings()(cur_input_ids)
+        cur_inputs_embeds = torch.randn((cur_input_ids.shape[0], 4096)).to(cur_labels.device)
+
+        if region_feat is not None:
+            region_token_index = torch.where(cur_input_ids == REGION_FEAT_TOKEN_INDEX)[0].tolist()
+            cur_inputs_embeds = torch.cat(
+                [cur_inputs_embeds[:region_token_index[0]], region_feat, cur_inputs_embeds[region_token_index[0]:]],
+                dim=0)
+            cur_labels = torch.cat([cur_labels[:region_token_index[0]],
+                                    torch.full((region_feat.shape[0],),
+                                               IGNORE_INDEX,
+                                               device=cur_labels.device,
+                                               dtype=cur_labels.dtype), cur_labels[region_token_index[0]:]], dim=0)
+            if attention_mask is not None:
+                cur_attn_mask = torch.cat([cur_attn_mask[:region_token_index[0]],
+                                           torch.ones((region_feat.shape[0],), device=cur_attn_mask.device).bool(),
+                                           cur_attn_mask[region_token_index[0]:]], dim=0)
+
+        # TODO: 由于 image token 必然在 region token 前面，因此这种写法没有问题
+        img_token_index = torch.where(cur_input_ids == IMAGE_TOKEN_INDEX)[0].tolist()
+        cur_inputs_embeds = torch.cat(
+            [cur_inputs_embeds[:img_token_index[0]], pixel_value, cur_inputs_embeds[img_token_index[0]:]], dim=0)
+        cur_labels = torch.cat([cur_labels[:img_token_index[0]],
+                                torch.full((pixel_value.shape[0],),
+                                           IGNORE_INDEX,
+                                           device=cur_labels.device,
+                                           dtype=cur_labels.dtype), cur_labels[img_token_index[0]:]], dim=0)
+        if attention_mask is not None:
+            cur_attn_mask = torch.cat([cur_attn_mask[:img_token_index[0]],
+                                       torch.ones((pixel_value.shape[0],), device=cur_attn_mask.device).bool(),
+                                       cur_attn_mask[img_token_index[0]:]], dim=0)
+        new_inputs_embeds.append(cur_inputs_embeds)
+        new_labels.append(cur_labels)
+        if attention_mask is not None:
+            new_attention_mask.append(cur_attn_mask)
+
+    new_inputs_embeds = torch.stack(new_inputs_embeds)
+    new_labels = torch.stack(new_labels)
+    if attention_mask is not None:
+        new_attention_mask = torch.stack(new_attention_mask)
+    else:
+        new_attention_mask = None
+
+    return {
+        'input_ids': None,
+        'position_ids': position_ids,
+        'attention_mask': new_attention_mask,
+        'past_key_values': past_key_values,
+        'inputs_embeds': new_inputs_embeds,
+        'labels': new_labels
+    }

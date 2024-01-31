@@ -26,21 +26,21 @@ from xtuner.model.modules import ProjectorConfig, ProjectorModel, dispatch_modul
 data_root = '/home/PJLAB/huanghaian/dataset/coco/'
 
 prompt_template = PROMPT_TEMPLATE.internlm2_chat
-max_length = int(2048 - (336 / 14) ** 2)  # TODO
+max_length = int(2048 - (336 / 14) ** 2 - 1)
 
 visual_encoder_name_or_path = '/home/PJLAB/huanghaian/models--openai--clip-vit-large-patch14-336/snapshots' \
                               '/ce19dc912ca5cd21c8a653c79e251e808ccabcd1'
 visual_encoder = CLIPVisionModel.from_pretrained(pretrained_model_name_or_path=visual_encoder_name_or_path)
 
-input_size = 532
+input_size = 672
 backbone_output_stride = 14
 backbone_output_channel = visual_encoder.config.hidden_size
-sliding_window_stride = 196
+sliding_window_stride = 336
 sliding_window_size = 336
 h_grids = max(input_size - sliding_window_size + sliding_window_stride - 1, 0) // sliding_window_stride + 1
 w_grids = max(input_size - sliding_window_size + sliding_window_stride - 1, 0) // sliding_window_stride + 1
 window_pos_embed = nn.Parameter(torch.randn(1, (input_size // backbone_output_stride) ** 2,
-                                            visual_encoder.config.hidden_size))  # 1,5193,2048
+                                            visual_encoder.config.hidden_size))
 
 visual_encoder.requires_grad_(False)
 
@@ -141,7 +141,7 @@ train_dataloader = dict(
 train_dataloader = Runner.build_dataloader(train_dataloader)
 
 projector_config = ProjectorConfig(
-    visual_hidden_size=visual_encoder.config.hidden_size * 2,
+    visual_hidden_size=visual_encoder.config.hidden_size * 4,
     llm_hidden_size=4096,
     depth=2)
 projector = ProjectorModel(projector_config).to(visual_encoder.dtype)
@@ -149,7 +149,7 @@ projector = ProjectorModel(projector_config).to(visual_encoder.dtype)
 from projects.modules.rrr_model import prepare_inputs_labels_for_multimodal
 from projects.modules import GeoRegionSampler
 
-sampler = GeoRegionSampler(2048,
+sampler = GeoRegionSampler(4096,
                            4096,
                            512,
                            num_sub_point=[128, 32],
@@ -162,14 +162,26 @@ for i, data_sampler in enumerate(train_dataloader):
         visual_outputs += window_pos_embed
         bs, pn, hs = visual_outputs.shape
         # token merge
-        visual_outputs = visual_outputs.view(bs, int(pn / 2), int(hs * 2))
-        print(visual_outputs.shape)  # b, 722, 2048
+        visual_outputs = visual_outputs.view(bs, int(pn / 4), int(hs * 4))
+        print(visual_outputs.shape)  # b, 576, 4096
 
         pixel_values = projector(visual_outputs)
-        data['pixel_values'] = pixel_values  # b,722, 4096
+        data['pixel_values'] = pixel_values  # b,576, 4096
 
         # 计算 Spatial-aware visual sampler, 模块输入是 visual_outputs 而不是 pixel_values
         # bbox 是原图尺度即可，内部会进行归一化处理
-        region_feats = sampler(visual_outputs, data['bbox'])
+        region_mask = []
+        for b in data['gt_bboxes']:
+            coor_mask = torch.zeros((input_size, input_size))
+            coor_mask[b[0]:b[2], b[1]:b[3]] = 1
+            assert len(coor_mask.nonzero()) != 0
+            region_mask.append([coor_mask])  # 可以运行每张图片存在多个 bbox 的情况，因此外层会多一个 []
+
+        region_feats = sampler(visual_outputs, region_mask)  # b, 4096
+        data['region_feats'] = region_feats
 
         data = prepare_inputs_labels_for_multimodal(llm=None, **data)
+        print(data.keys())
+
+
+

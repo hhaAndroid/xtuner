@@ -8,10 +8,10 @@ visual_encoder_name_or_path = '/home/PJLAB/huanghaian/models--openai--clip-vit-l
                               '/ce19dc912ca5cd21c8a653c79e251e808ccabcd1'
 visual_encoder = CLIPVisionModel.from_pretrained(pretrained_model_name_or_path=visual_encoder_name_or_path)
 
-input_size = 532
+input_size = 672
 backbone_output_stride = 14
 backbone_output_channel = visual_encoder.config.hidden_size
-sliding_window_stride = 196
+sliding_window_stride = 336
 sliding_window_size = 336
 h_grids = max(input_size - sliding_window_size + sliding_window_stride - 1, 0) // sliding_window_stride + 1
 w_grids = max(input_size - sliding_window_size + sliding_window_stride - 1, 0) // sliding_window_stride + 1
@@ -58,9 +58,9 @@ def sliding_window_vit_forward(pixel_values):
 
 
 with torch.no_grad():
-    visual_outputs = sliding_window_vit_forward(torch.ones([1, 3, 532, 532]))
+    visual_outputs = sliding_window_vit_forward(torch.ones([1, 3, input_size, input_size]))
     visual_outputs += window_pos_embed
     bs, pn, hs = visual_outputs.shape
     # token merge
-    visual_outputs = visual_outputs.view(bs, int(pn / 2), int(hs * 2))
-    print(visual_outputs.shape)  # 1, 722, 2048
+    visual_outputs = visual_outputs.view(bs, int(pn / 4), int(hs * 4))
+    print(visual_outputs.shape)  # 1, 576, 4096
