@@ -23,6 +23,7 @@ from projects.modules import ADD_TOKENS_DECODER, RRRModel, PretrainLLaVADataset,
 # Model
 llm_name_or_path = 'internlm/internlm2-chat-7b'
 visual_encoder_name_or_path = 'openai/clip-vit-large-patch14-336'
+pretrained_pth = '/mnt/petrelfs/huanghaian/code/xtuner/llava-internlm2-7b-pretrain/epoch_1_repeat.pth'  # noqa: E501
 
 # Data
 data_root = './data/llava_data/'
@@ -75,6 +76,7 @@ model = dict(
     freeze_llm=True,
     freeze_visual_encoder=True,
     use_visual_sampler=False,
+    pretrained_pth=pretrained_pth,
     llm=dict(
         type=AutoModelForCausalLM.from_pretrained,
         pretrained_model_name_or_path=llm_name_or_path,
