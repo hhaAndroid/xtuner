@@ -1,4 +1,4 @@
 
 # 单卡看下是否能正常加载除模型外的东西
-xtuner train projects/configs/rrr_internlm2_chat_7b_clip_vit_large_p14_336_e1_gpu8_pretrain.py
+xtuner train projects/configs/rrr_internlm2_chat_7b_clip_vit_large_p14_336_e1_gpu8_pretrain.py --deepspeed deepspeed_zero2
 

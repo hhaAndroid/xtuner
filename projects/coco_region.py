@@ -73,8 +73,8 @@ def coco2ovd(args):
                     old_h = img_info['height']
                     scale_factor = min(IMAGE_SIZE / max(old_h, old_w),
                                        IMAGE_SIZE / min(old_h, old_w))
-                    neww = int(old_w * float(scale_factor))
-                    newh = int(old_h * float(scale_factor))
+                    neww = int(old_w * float(scale_factor) + 0.5)
+                    newh = int(old_h * float(scale_factor) + 0.5)
 
                     if neww > newh:
                         padding_h = (neww - newh) // 2

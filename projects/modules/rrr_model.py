@@ -125,13 +125,15 @@ class RRRModel(BaseModel):
     @torch.no_grad()
     def sliding_window_vit_forward(self, pixel_values):
         batch_size = pixel_values.shape[0]
+        # 这个地方的 dtype 只能用 visual_encoder 不能是 pixel_values
+        # 因为 deepspeed 会自动将模型转为 bf16，但是 pixel_values 依然是 fp32 的，如果采用 fp32 后面模型会报错
         output_features = torch.zeros(
             (batch_size, self.input_size // self.backbone_output_stride, self.input_size // self.backbone_output_stride,
-             self.backbone_output_channel), dtype=pixel_values.dtype, device=pixel_values.device
+             self.backbone_output_channel), dtype=self.visual_encoder.dtype, device=pixel_values.device
         )
         counters = torch.zeros(
             (batch_size, self.input_size // self.backbone_output_stride, self.input_size // self.backbone_output_stride,
-             1), dtype=pixel_values.dtype, device=pixel_values.device
+             1), dtype=self.visual_encoder.dtype, device=pixel_values.device
         )
 
         for h_idx in range(self.h_grids):
@@ -161,7 +163,7 @@ class RRRModel(BaseModel):
 
     def prepare_for_eval(self, data):
         visual_outputs = self.sliding_window_vit_forward(data['pixel_values'])
-        visual_outputs += self.window_pos_embed
+        visual_outputs = visual_outputs+self.window_pos_embed
         bs, pn, hs = visual_outputs.shape
         # token merge
         visual_outputs = visual_outputs.view(bs, int(pn / 4), int(hs * 4))
@@ -175,7 +177,7 @@ class RRRModel(BaseModel):
     def forward(self, data, data_samples=None, mode='loss'):
         if 'pixel_values' in data:
             visual_outputs = self.sliding_window_vit_forward(data['pixel_values'])
-            visual_outputs += self.window_pos_embed
+            visual_outputs = visual_outputs+self.window_pos_embed
             bs, pn, hs = visual_outputs.shape
             # token merge
             visual_outputs = visual_outputs.view(bs, int(pn / 4), int(hs * 4))
@@ -231,11 +233,6 @@ class RRRModel(BaseModel):
             to_return.update(
                 get_peft_model_state_dict(
                     self.visual_encoder, state_dict=state_dict))
-        elif not self.freeze_visual_encoder:
-            to_return.update({
-                k: v
-                for k, v in state_dict.items() if 'visual_encoder.' in k
-            })
         # Step 2. LLM
         if self.use_llm_lora:
             to_return.update(
@@ -248,6 +245,15 @@ class RRRModel(BaseModel):
         to_return.update(
             {k: v
              for k, v in state_dict.items() if 'projector.' in k})
+        # Step 4. Visual Sampler
+        if self.sampler:
+            to_return.update(
+                {k: v
+                 for k, v in state_dict.items() if 'sampler.' in k})
+        # Step 5. window_pos_embed
+        to_return.update(
+            {k: v
+             for k, v in state_dict.items() if 'window_pos_embed' in k})
         return to_return
 
     def _parse_lora_config(self, lora_config):
@@ -336,21 +342,24 @@ def prepare_inputs_labels_for_multimodal(
     for batch_idx, (cur_input_ids, region_feat, pixel_value, cur_attn_mask) in enumerate(
             zip(input_ids, region_feats, pixel_values, attention_mask)):
         # TODO: 每张图片里面只能有一个 img 和 region feat
-        cur_labels = labels[batch_idx]
-        # cur_inputs_embeds = llm.get_input_embeddings()(cur_input_ids)
-        cur_inputs_embeds = torch.randn((cur_input_ids.shape[0], 4096)).to(cur_labels.device)
+        if labels is not None:
+            cur_labels = labels[batch_idx]
+        cur_inputs_embeds = llm.get_input_embeddings()(cur_input_ids)
+        # for debug
+        # cur_inputs_embeds = torch.randn((cur_input_ids.shape[0], 4096)).to(cur_labels.device)
 
         if region_feat is not None:
             region_token_index = torch.where(cur_input_ids == REGION_FEAT_TOKEN_INDEX)[0].tolist()
             cur_inputs_embeds = torch.cat(
                 [cur_inputs_embeds[:region_token_index[0]], region_feat, cur_inputs_embeds[region_token_index[0]:]],
                 dim=0)
-            cur_labels = torch.cat([cur_labels[:region_token_index[0]],
-                                    torch.full((region_feat.shape[0],),
-                                               IGNORE_INDEX,
-                                               device=cur_labels.device,
-                                               dtype=cur_labels.dtype), cur_labels[region_token_index[0]:]], dim=0)
-            if attention_mask is not None:
+            if labels is not None:
+                cur_labels = torch.cat([cur_labels[:region_token_index[0]],
+                                        torch.full((region_feat.shape[0],),
+                                                   IGNORE_INDEX,
+                                                   device=cur_labels.device,
+                                                   dtype=cur_labels.dtype), cur_labels[region_token_index[0]:]], dim=0)
+            if cur_attn_mask is not None:
                 cur_attn_mask = torch.cat([cur_attn_mask[:region_token_index[0]],
                                            torch.ones((region_feat.shape[0],), device=cur_attn_mask.device).bool(),
                                            cur_attn_mask[region_token_index[0]:]], dim=0)
@@ -359,23 +368,28 @@ def prepare_inputs_labels_for_multimodal(
         img_token_index = torch.where(cur_input_ids == IMAGE_TOKEN_INDEX)[0].tolist()
         cur_inputs_embeds = torch.cat(
             [cur_inputs_embeds[:img_token_index[0]], pixel_value, cur_inputs_embeds[img_token_index[0]:]], dim=0)
-        cur_labels = torch.cat([cur_labels[:img_token_index[0]],
-                                torch.full((pixel_value.shape[0],),
-                                           IGNORE_INDEX,
-                                           device=cur_labels.device,
-                                           dtype=cur_labels.dtype), cur_labels[img_token_index[0]:]], dim=0)
-        if attention_mask is not None:
+        if labels is not None:
+            cur_labels = torch.cat([cur_labels[:img_token_index[0]],
+                                    torch.full((pixel_value.shape[0],),
+                                               IGNORE_INDEX,
+                                               device=cur_labels.device,
+                                               dtype=cur_labels.dtype), cur_labels[img_token_index[0]:]], dim=0)
+        if cur_attn_mask is not None:
             cur_attn_mask = torch.cat([cur_attn_mask[:img_token_index[0]],
                                        torch.ones((pixel_value.shape[0],), device=cur_attn_mask.device).bool(),
                                        cur_attn_mask[img_token_index[0]:]], dim=0)
         new_inputs_embeds.append(cur_inputs_embeds)
-        new_labels.append(cur_labels)
-        if attention_mask is not None:
+        if labels is not None:
+            new_labels.append(cur_labels)
+        if cur_attn_mask is not None:
             new_attention_mask.append(cur_attn_mask)
 
     new_inputs_embeds = torch.stack(new_inputs_embeds)
-    new_labels = torch.stack(new_labels)
-    if attention_mask is not None:
+    if labels is not None:
+        new_labels = torch.stack(new_labels)
+    else:
+        new_labels = None
+    if len(new_attention_mask) > 0:
         new_attention_mask = torch.stack(new_attention_mask)
     else:
         new_attention_mask = None

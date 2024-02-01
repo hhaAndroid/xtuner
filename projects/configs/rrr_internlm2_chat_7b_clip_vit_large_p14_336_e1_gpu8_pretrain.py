@@ -23,6 +23,8 @@ from projects.modules import ADD_TOKENS_DECODER, RRRModel, PretrainLLaVADataset,
 # Model
 llm_name_or_path = 'internlm/internlm2-chat-7b'
 visual_encoder_name_or_path = 'openai/clip-vit-large-patch14-336'
+# llm_name_or_path = 'model/models--internlm--internlm2-chat-7b/snapshots/2292b86b21cb856642782cebed0a453997453b1f'
+# visual_encoder_name_or_path = 'model/models--openai--clip-vit-large-patch14-336/snapshots/ce19dc912ca5cd21c8a653c79e251e808ccabcd1'
 pretrained_pth = '/mnt/petrelfs/huanghaian/code/xtuner/llava-internlm2-7b-pretrain/epoch_1_repeat.pth'  # noqa: E501
 
 # Data
@@ -51,7 +53,8 @@ save_total_limit = 1  # Maximum checkpoints to keep (-1 means unlimited)
 # Evaluate the generation performance during the training
 evaluation_freq = 500
 SYSTEM = ''
-evaluation_images = 'https://llava-vl.github.io/static/images/view.jpg'
+# https://llava-vl.github.io/static/images/view.jpg
+evaluation_images = 'view.jpg'
 evaluation_inputs = ['<image>\n请描述一下这张照片', '<image>\nPlease describe this picture']
 
 #######################################################################
@@ -74,7 +77,6 @@ image_processor = dict(
 model = dict(
     type=RRRModel,
     freeze_llm=True,
-    freeze_visual_encoder=True,
     use_visual_sampler=False,
     pretrained_pth=pretrained_pth,
     llm=dict(
@@ -165,7 +167,6 @@ custom_hooks = [
         every_n_iters=evaluation_freq,
         evaluation_inputs=evaluation_inputs,
         evaluation_images=evaluation_images,
-        use_visual_sampler=False,
         system=SYSTEM,
         prompt_template=prompt_template)
 ]
