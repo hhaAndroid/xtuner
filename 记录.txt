@@ -2,3 +2,8 @@
 # 单卡看下是否能正常加载除模型外的东西
 xtuner train projects/configs/rrr_internlm2_chat_7b_clip_vit_large_p14_336_e1_gpu8_pretrain.py --deepspeed deepspeed_zero2
 
+
+export MKL_SERVICE_FORCE_INTEL=1
+export MKL_THREADING_LAYER=GNU
+proxy_on 不然会卡住
+NPROC_PER_NODE=8 srun -p s1_mm_dev --job-name=rrr_1 --cpus-per-task=16  --nodes=1 --gres=gpu:8 --ntasks-per-node=1 --kill-on-bad-exit=1  xtuner train projects/configs/rrr_internlm2_chat_7b_clip_vit_large_p14_336_e1_gpu8_pretrain.py --deepspeed deepspeed_zero2
