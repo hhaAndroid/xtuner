@@ -23,6 +23,7 @@ from torch import nn
 from transformers import PreTrainedModel
 from .constants import IMAGE_TOKEN_INDEX, REGION_FEAT_TOKEN_INDEX, SEG_TOKEN_INDEX, IGNORE_INDEX
 from .visual_sampler import GeoRegionSampler
+from segment_anything import build_sam_vit_h
 
 
 class RRRModel(BaseModel):
@@ -42,6 +43,8 @@ class RRRModel(BaseModel):
                  sliding_window_stride=336,
                  backbone_output_stride=14,
                  use_visual_sampler=False,  # 预训练时候为 False,微调时候为 True
+                 use_sam=False,
+                 sam_pretrained_pth=None,
                  ):
         super().__init__()
         self.freeze_llm = freeze_llm
@@ -82,6 +85,29 @@ class RRRModel(BaseModel):
                                             num_neighbor=[24, 24]).to(self.visual_encoder.dtype)
         else:
             self.sampler = None
+
+        self.use_sam = use_sam
+        if use_sam:
+            self.sam_model = build_sam_vit_h(sam_pretrained_pth)
+
+            for param in self.sam_model.parameters():
+                param.requires_grad = False
+
+            self.sam_model.mask_decoder.train()
+            for param in self.sam_model.mask_decoder.parameters():
+                param.requires_grad = True
+
+            # 投影层
+            text_fc = [
+                nn.Linear(self.llm.config.hidden_size, self.llm.config.hidden_size),
+                nn.ReLU(inplace=True),
+                nn.Linear(self.llm.config.hidden_size, 256),
+                nn.Dropout(0.0),
+            ]
+            self.text_hidden_fcs = nn.ModuleList([nn.Sequential(*text_fc)])
+            self.text_hidden_fcs.train()
+            for param in self.text_hidden_fcs.parameters():
+                param.requires_grad = True
 
         self.llm.requires_grad_(False)
         self.visual_encoder.requires_grad_(False)
@@ -163,21 +189,31 @@ class RRRModel(BaseModel):
 
     def prepare_for_eval(self, data):
         visual_outputs = self.sliding_window_vit_forward(data['pixel_values'])
-        visual_outputs = visual_outputs+self.window_pos_embed
+        visual_outputs = visual_outputs + self.window_pos_embed
         bs, pn, hs = visual_outputs.shape
         # token merge
         visual_outputs = visual_outputs.view(bs, int(pn / 4), int(hs * 4))
         pixel_values = self.projector(visual_outputs)
         data['pixel_values'] = pixel_values
         if self.sampler:
-            raise NotImplementedError
+            # 计算 Spatial-aware visual sampler, 模块输入是 visual_outputs 而不是 pixel_values
+            # bbox 是原图尺度即可，内部会进行归一化处理
+            region_mask = []
+            for b in data['gt_bboxes']:
+                coor_mask = torch.zeros((self.input_size, self.input_size), device=pixel_values.device)
+                coor_mask[b[0]:b[2], b[1]:b[3]] = 1
+                assert len(coor_mask.nonzero()) != 0
+                # 可以运行每张图片存在多个 bbox 的情况，因此外层会多一个 []
+                region_mask.append([coor_mask])
+            region_feats = self.sampler(visual_outputs, region_mask)  # b, 4096
+            data['region_feats'] = region_feats
         data = prepare_inputs_labels_for_multimodal(llm=self.llm, **data)
         return data
 
     def forward(self, data, data_samples=None, mode='loss'):
         if 'pixel_values' in data:
             visual_outputs = self.sliding_window_vit_forward(data['pixel_values'])
-            visual_outputs = visual_outputs+self.window_pos_embed
+            visual_outputs = visual_outputs + self.window_pos_embed
             bs, pn, hs = visual_outputs.shape
             # token merge
             visual_outputs = visual_outputs.view(bs, int(pn / 4), int(hs * 4))

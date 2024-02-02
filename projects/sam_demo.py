@@ -29,7 +29,7 @@ def get_visual_embs(pixel_values: torch.FloatTensor, visual_model):
             torch.cuda.empty_cache()
             image_embeddings = visual_model.image_encoder(
                 pixel_values[i].unsqueeze(0)
-            )
+            )  # stride 16
             image_embeddings_list.append(image_embeddings)
         torch.cuda.empty_cache()
         image_embeddings = torch.cat(image_embeddings_list, 0)

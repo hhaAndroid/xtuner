@@ -6,15 +6,25 @@ from pycocotools.coco import COCO
 IMAGE_SIZE = 672
 MIN_BBOX_SIZE = 40
 
-GLOABL_TEMPLATE = 'In images, [x, y] denotes points: top-left [0, 0], bottom-right [width-1, height-1]. Increasing x ' \
-                  f'moves right; y moves down. Bounding box: [x1, y1, x2, y2]. Image size: {IMAGE_SIZE}x{IMAGE_SIZE}.'
 OVD_TEMPLATE = [
-    "What is the class of the region <region> within the image?",
-    "Classify region <region> in the image.",
-    "Identify the region <region> in the image.",
-    "Describe the region <region> in a short phrase.",
-    "What is in the region <region>? Describe in a phrase.",
-    "Capture in a phrase: what's near region <region> in the picture?",
+    "What is the class of the region <region> within the image? "
+    "The region coordinate format is [x1, y1, x2, y2], where [x1, y1] represents the top-left corner of the image, "
+    f"and [x2, y2] represents the bottom-right corner coordinate. The image size is {IMAGE_SIZE}x{IMAGE_SIZE}.",
+    "Classify region <region> in the image. "
+    "The region coordinate format is [x1, y1, x2, y2], where [x1, y1] represents the top-left corner of the image, "
+    f"and [x2, y2] represents the bottom-right corner coordinate. The image size is {IMAGE_SIZE}x{IMAGE_SIZE}.",
+    "Identify the region <region> in the image. "
+    "The region coordinate format is [x1, y1, x2, y2], where [x1, y1] represents the top-left corner of the image, "
+    f"and [x2, y2] represents the bottom-right corner coordinate. The image size is {IMAGE_SIZE}x{IMAGE_SIZE}.",
+    "Describe the region <region> in a short phrase. "
+    "The region coordinate format is [x1, y1, x2, y2], where [x1, y1] represents the top-left corner of the image, "
+    f"and [x2, y2] represents the bottom-right corner coordinate. The image size is {IMAGE_SIZE}x{IMAGE_SIZE}.",
+    "What is in the region <region>? Describe in a phrase. "
+    "The region coordinate format is [x1, y1, x2, y2], where [x1, y1] represents the top-left corner of the image, "
+    f"and [x2, y2] represents the bottom-right corner coordinate. The image size is {IMAGE_SIZE}x{IMAGE_SIZE}.",
+    "Capture in a phrase: what's near region <region> in the picture? "
+    "The region coordinate format is [x1, y1, x2, y2], where [x1, y1] represents the top-left corner of the image, "
+    f"and [x2, y2] represents the bottom-right corner coordinate. The image size is {IMAGE_SIZE}x{IMAGE_SIZE}.",
 ]
 
 OUT_TEMPLATE = [
@@ -118,7 +128,7 @@ def coco2ovd(args):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser('coco to ovd format.', add_help=True)
-    parser.add_argument('--input', default='/home/PJLAB/huanghaian/dataset/coco/annotations/instances_train2017.json',
+    parser.add_argument('--input', default='/home/PJLAB/huanghaian/dataset/coco/annotations/instances_val2017.json',
                         type=str, help='input json file name')
     parser.add_argument('--num', '-n', type=int, default=100)
     parser.add_argument(

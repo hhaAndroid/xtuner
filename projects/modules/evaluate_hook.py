@@ -3,6 +3,7 @@ import torch
 from mmengine.model import is_model_wrapper
 from xtuner.dataset.utils import expand2square
 import torchvision.transforms.functional as F
+import re
 
 
 class RRREvaluateChatHook(EvaluateChatHook):
@@ -46,9 +47,19 @@ class RRREvaluateChatHook(EvaluateChatHook):
                     input=sample_input, round=1, **runner.cfg)
                 input_ids = self.tokenizer.encode(inputs)
                 input_ids = torch.tensor(input_ids).to(device)
+
+                input_dict = {'input_ids': input_ids.unsqueeze(0),
+                              'pixel_values': image.unsqueeze(0)}
+                if model.sampler is not None:
+                    # with bbox inputs
+                    matches = re.findall(r'\[([^]]+)\]', inputs)[0]
+                    cleaned_text = matches.replace("[", "").replace("]", "").replace("'", "")
+                    numbers = cleaned_text.split(", ")
+                    gt_bbox = [int(num) for num in numbers]
+                    input_dict[gt_bbox] = gt_bbox
+
                 with torch.no_grad():
-                    mm_inputs = model.prepare_for_eval({'input_ids': input_ids.unsqueeze(0),
-                                                        'pixel_values': image.unsqueeze(0)})
+                    mm_inputs = model.prepare_for_eval(input_dict)
                     generation_output = model.generate(
                         **mm_inputs,
                         max_new_tokens=max_new_tokens,

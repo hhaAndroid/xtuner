@@ -6,21 +6,29 @@ from pycocotools.coco import COCO
 IMAGE_SIZE = 672
 MIN_BBOX_SIZE = 40
 
-GLOABL_TEMPLATE = 'In images, [x, y] denotes points: top-left [0, 0], bottom-right [width-1, height-1]. Increasing x ' \
-                  f'moves right; y moves down. Bounding box: [x1, y1, x2, y2]. Image size: {IMAGE_SIZE}x{IMAGE_SIZE}.'
 OVD_TEMPLATE = [
     "In the conversation below, you simply answer the category name based on what you see in the imagery inside a "
     "region <region>. If you don't find the category name in the provided list of categories, you should output other. "
+    "The region coordinate format is [x1, y1, x2, y2], where [x1, y1] represents the top-left corner of the image, "
+    f"and [x2, y2] represents the bottom-right corner coordinate. The image size is {IMAGE_SIZE}x{IMAGE_SIZE}. "
     "Categories Containing {}.",
     "In the ensuing discussion, your task is to identify the category name by analyzing the imagery within a specific "
     "region <region>. If you don't find the category name in the provided list of categories, you should output other. "
+    "The region coordinate format is [x1, y1, x2, y2], where [x1, y1] represents the top-left corner of the image, "
+    f"and [x2, y2] represents the bottom-right corner coordinate. The image size is {IMAGE_SIZE}x{IMAGE_SIZE}. "
     "Categories will consist of {}.",
     "In the dialogue that follows, your task is to identify the category name by observing the visual elements within "
     "a specific region <region>. If you don't find the category name in the provided list of categories, you should "
-    "output other. Categories include {}.",
+    "output other. "
+    "The region coordinate format is [x1, y1, x2, y2], where [x1, y1] represents the top-left corner of the image, "
+    f"and [x2, y2] represents the bottom-right corner coordinate. The image size is {IMAGE_SIZE}x{IMAGE_SIZE}. "
+    "Categories include {}.",
     "During the conversation that follows, your role is to determine the category name by examining the visual "
     "representation within a designated region <region>. If you don't find the category name in the provided list of "
-    "categories, you should output other. Categories will contain {}."
+    "categories, you should output other. "
+    "The region coordinate format is [x1, y1, x2, y2], where [x1, y1] represents the top-left corner of the image, "
+    f"and [x2, y2] represents the bottom-right corner coordinate. The image size is {IMAGE_SIZE}x{IMAGE_SIZE}. "
+    "Categories will contain {}."
 ]
 
 OUT_TEMPLATE = [
@@ -138,7 +146,7 @@ def coco2ovd(args):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser('coco to ovd format.', add_help=True)
-    parser.add_argument('--input', default='/home/PJLAB/huanghaian/dataset/coco/annotations/instances_train2017.json',
+    parser.add_argument('--input', default='/home/PJLAB/huanghaian/dataset/coco/annotations/instances_val2017.json',
                         type=str, help='input json file name')
     parser.add_argument('--num', '-n', type=int, default=100)
     parser.add_argument(
