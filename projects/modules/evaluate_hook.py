@@ -56,7 +56,7 @@ class RRREvaluateChatHook(EvaluateChatHook):
                     cleaned_text = matches.replace("[", "").replace("]", "").replace("'", "")
                     numbers = cleaned_text.split(", ")
                     gt_bbox = [int(num) for num in numbers]
-                    input_dict[gt_bbox] = gt_bbox
+                    input_dict['gt_bboxes'] = gt_bbox
 
                 with torch.no_grad():
                     mm_inputs = model.prepare_for_eval(input_dict)

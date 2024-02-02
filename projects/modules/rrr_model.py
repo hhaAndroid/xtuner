@@ -205,7 +205,7 @@ class RRRModel(BaseModel):
                 assert len(coor_mask.nonzero()) != 0
                 # 可以运行每张图片存在多个 bbox 的情况，因此外层会多一个 []
                 region_mask.append([coor_mask])
-            region_feats = self.sampler(visual_outputs, region_mask)  # b, 4096
+            region_feats = self.sampler(visual_outputs, region_mask, return_dtype=visual_outputs.dtype)  # b, 4096
             data['region_feats'] = region_feats
         data = prepare_inputs_labels_for_multimodal(llm=self.llm, **data)
         return data
@@ -231,7 +231,7 @@ class RRRModel(BaseModel):
                     # 可以运行每张图片存在多个 bbox 的情况，因此外层会多一个 []
                     region_mask.append([coor_mask])
 
-                region_feats = self.sampler(visual_outputs, region_mask)  # b, 4096
+                region_feats = self.sampler(visual_outputs, region_mask, return_dtype=visual_outputs.dtype)  # b, 4096
                 data['region_feats'] = region_feats
             data = prepare_inputs_labels_for_multimodal(llm=self.llm, **data)
 

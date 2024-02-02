@@ -17,7 +17,7 @@ from peft import LoraConfig
 from xtuner.dataset import ConcatDataset
 from xtuner.dataset.samplers import LengthGroupedSampler
 
-from projects.modules import ADD_TOKENS_DECODER, RRRModel, RRREvaluateChatHook, RRRDataset
+from projects.modules import ADD_TOKENS_DECODER, RRRModel, RRREvaluateChatHook, RRRDataset, withbbox_default_collate_fn
 
 #######################################################################
 #                          PART 1  Settings                           #
@@ -158,7 +158,7 @@ train_dataloader = dict(
         type=LengthGroupedSampler,
         length_property='length',
         per_device_batch_size=batch_size * accumulative_counts),
-    collate_fn=dict(type=default_collate_fn))
+    collate_fn=dict(type=withbbox_default_collate_fn))
 
 #######################################################################
 #                    PART 4  Scheduler & Optimizer                    #

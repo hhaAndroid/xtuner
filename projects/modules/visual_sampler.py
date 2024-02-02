@@ -204,7 +204,7 @@ class GeoRegionSampler(nn.Module):
                 feature_map,
                 region_masks,
                 original_dtype=torch.float32,
-                return_dtype=torch.float32):
+                return_dtype=torch.bfloat16):
 
         assert len(feature_map) == len(region_masks)
         all_points = []

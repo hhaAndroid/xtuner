@@ -2,6 +2,7 @@ import argparse
 import json
 import random
 from pycocotools.coco import COCO
+from tqdm import tqdm
 
 IMAGE_SIZE = 672
 MIN_BBOX_SIZE = 40
@@ -48,22 +49,29 @@ def coco2ovd(args):
     # 确保类别均衡
     out_data = []
     num_instance_pre_cat = args.num // len(names)
-    for id, name in names.items():
+    for id, name in tqdm(names.items()):
         # 从每个类里面随机抽取num_instance_pre_cat个instance
         _num_instance = 0
+        _total_iter_num = 0
         ids = coco.getImgIds(catIds=[id])
         random.shuffle(ids)
 
         ann_ids_set = set()
-        while _num_instance < num_instance_pre_cat:
+        while _num_instance < num_instance_pre_cat and _total_iter_num < num_instance_pre_cat * 4:
             for img_id in ids:
+                _total_iter_num += 1  # 否则可能无限循环
                 img_info = coco.loadImgs([img_id])[0]
                 ann_ids = coco.getAnnIds(imgIds=img_id, catIds=[id])
                 if len(ann_ids) > 0:
                     # 随机抽一个实例, 如果没有 bbox 或者没有符合的则跳过
                     ann_id = random.choice(ann_ids)
                     if ann_id in ann_ids_set:
-                        continue
+                        for j in range(5):
+                            ann_id = random.choice(ann_ids)
+                            if ann_id not in ann_ids_set:
+                                break
+                        else:
+                            continue
 
                     ann = coco.loadAnns(ids=[ann_id])[0]
                     if ann.get('ignore', False):
@@ -128,7 +136,7 @@ def coco2ovd(args):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser('coco to ovd format.', add_help=True)
-    parser.add_argument('--input', default='/home/PJLAB/huanghaian/dataset/coco/annotations/instances_val2017.json',
+    parser.add_argument('--input', default='data/coco/annotations/instances_train2017.json',
                         type=str, help='input json file name')
     parser.add_argument('--num', '-n', type=int, default=100)
     parser.add_argument(
