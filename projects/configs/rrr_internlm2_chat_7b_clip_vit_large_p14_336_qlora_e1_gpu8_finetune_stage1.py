@@ -160,6 +160,20 @@ train_dataloader = dict(
         per_device_batch_size=batch_size * accumulative_counts),
     collate_fn=dict(type=withbbox_default_collate_fn))
 
+# to inference demo
+inference_dataset = dict(
+    type=RRRDataset,
+    data_root=data_root,
+    ann_file='annotations/instances_val2017_rrrvlm_ovd.json',
+    data_prefix=dict(img='val2017/'),
+    tokenizer=tokenizer,
+    image_processor=image_processor,
+    dataset_map_fn=llava_map_fn,
+    template_map_fn=dict(
+        type=template_map_fn_factory, template=prompt_template),
+    max_length=max_length
+)
+
 #######################################################################
 #                    PART 4  Scheduler & Optimizer                    #
 #######################################################################
