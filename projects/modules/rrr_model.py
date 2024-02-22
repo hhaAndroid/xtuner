@@ -200,11 +200,15 @@ class RRRModel(BaseModel):
             # bbox 是原图尺度即可，内部会进行归一化处理
             region_mask = []
             for b in data['gt_bboxes']:
-                coor_mask = torch.zeros((self.input_size, self.input_size), device=pixel_values.device)
-                coor_mask[b[0]:b[2], b[1]:b[3]] = 1
-                assert len(coor_mask.nonzero()) != 0
-                # 可以运行每张图片存在多个 bbox 的情况，因此外层会多一个 []
-                region_mask.append([coor_mask])
+                if not isinstance(b, list):
+                    b = [b]
+                o_mask = []
+                for _b in b:
+                    coor_mask = torch.zeros((self.input_size, self.input_size), device=pixel_values.device)
+                    coor_mask[_b[0]:_b[2], _b[1]:_b[3]] = 1
+                    assert len(coor_mask.nonzero()) != 0
+                    o_mask.append(coor_mask)
+                region_mask.append(o_mask)
             region_feats = self.sampler(visual_outputs, region_mask, return_dtype=visual_outputs.dtype)  # b, 4096
             data['region_feats'] = region_feats
         data = prepare_inputs_labels_for_multimodal(llm=self.llm, **data)
@@ -225,11 +229,15 @@ class RRRModel(BaseModel):
                 # bbox 是原图尺度即可，内部会进行归一化处理
                 region_mask = []
                 for b in data['gt_bboxes']:
-                    coor_mask = torch.zeros((self.input_size, self.input_size), device=pixel_values.device)
-                    coor_mask[b[0]:b[2], b[1]:b[3]] = 1
-                    assert len(coor_mask.nonzero()) != 0
-                    # 可以运行每张图片存在多个 bbox 的情况，因此外层会多一个 []
-                    region_mask.append([coor_mask])
+                    if not isinstance(b, list):
+                        b = [b]
+                    o_mask = []
+                    for _b in b:
+                        coor_mask = torch.zeros((self.input_size, self.input_size), device=pixel_values.device)
+                        coor_mask[b[0]:b[2], b[1]:b[3]] = 1
+                        assert len(coor_mask.nonzero()) != 0
+                        o_mask.append(coor_mask)
+                    region_mask.append(o_mask)
 
                 region_feats = self.sampler(visual_outputs, region_mask, return_dtype=visual_outputs.dtype)  # b, 4096
                 data['region_feats'] = region_feats
@@ -377,30 +385,19 @@ def prepare_inputs_labels_for_multimodal(
     new_attention_mask = []
     for batch_idx, (cur_input_ids, region_feat, pixel_value, cur_attn_mask) in enumerate(
             zip(input_ids, region_feats, pixel_values, attention_mask)):
-        # TODO: 每张图片里面只能有一个 img 和 region feat
         if labels is not None:
             cur_labels = labels[batch_idx]
-        cur_inputs_embeds = llm.get_input_embeddings()(cur_input_ids)
-        # for debug
-        # cur_inputs_embeds = torch.randn((cur_input_ids.shape[0], 4096)).to(cur_labels.device)
+        if llm is not None:
+            cur_inputs_embeds = llm.get_input_embeddings()(cur_input_ids)
+        else:
+            # for debug
+            cur_inputs_embeds = torch.randn((cur_input_ids.shape[0], 4096)).to(cur_labels.device)
 
         if region_feat is not None:
-            region_token_index = torch.where(cur_input_ids == REGION_FEAT_TOKEN_INDEX)[0].tolist()
-            cur_inputs_embeds = torch.cat(
-                [cur_inputs_embeds[:region_token_index[0]], region_feat, cur_inputs_embeds[region_token_index[0]:]],
-                dim=0)
-            if labels is not None:
-                cur_labels = torch.cat([cur_labels[:region_token_index[0]],
-                                        torch.full((region_feat.shape[0],),
-                                                   IGNORE_INDEX,
-                                                   device=cur_labels.device,
-                                                   dtype=cur_labels.dtype), cur_labels[region_token_index[0]:]], dim=0)
-            if cur_attn_mask is not None:
-                cur_attn_mask = torch.cat([cur_attn_mask[:region_token_index[0]],
-                                           torch.ones((region_feat.shape[0],), device=cur_attn_mask.device).bool(),
-                                           cur_attn_mask[region_token_index[0]:]], dim=0)
+            # 由于 region_feat 占位符是一个区域一个 token，而 region_feat 也是一个区域一个特征，因此可以直接替换
+            # 但是 image_feat 会对应多个 token，因此写法不一样
+            cur_inputs_embeds[cur_input_ids == REGION_FEAT_TOKEN_INDEX] = region_feat
 
-        # TODO: 由于 image token 必然在 region token 前面，因此这种写法没有问题
         img_token_index = torch.where(cur_input_ids == IMAGE_TOKEN_INDEX)[0].tolist()
         cur_inputs_embeds = torch.cat(
             [cur_inputs_embeds[:img_token_index[0]], pixel_value, cur_inputs_embeds[img_token_index[0]:]], dim=0)

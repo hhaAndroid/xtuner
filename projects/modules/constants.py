@@ -95,7 +95,15 @@ ADD_TOKENS_DECODER = {
         "special": True
     },
     "92535": {
-        "content": "<seg>",
+        "content": "<p>",
+        "lstrip": False,
+        "normalized": False,
+        "rstrip": False,
+        "single_word": False,
+        "special": True
+    },
+    "92534": {
+        "content": "</p>",
         "lstrip": False,
         "normalized": False,
         "rstrip": False,

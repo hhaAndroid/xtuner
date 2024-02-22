@@ -43,6 +43,10 @@ class RRREvaluateChatHook(EvaluateChatHook):
                 image = self.image_processor.preprocess(
                     image, return_tensors='pt')['pixel_values'][0]
                 image = image.to(device)
+                if isinstance(sample_input, list):
+                    gt_bboxes = sample_input[1]
+                    sample_input = sample_input[0]
+
                 inputs = (self.system + self.instruction).format(
                     input=sample_input, round=1, **runner.cfg)
                 input_ids = self.tokenizer.encode(inputs)
@@ -52,11 +56,7 @@ class RRREvaluateChatHook(EvaluateChatHook):
                               'pixel_values': image.unsqueeze(0)}
                 if model.sampler is not None:
                     # with bbox inputs
-                    matches = re.findall(r'\[([^]]+)\]', inputs)[0]
-                    cleaned_text = matches.replace("[", "").replace("]", "").replace("'", "")
-                    numbers = cleaned_text.split(", ")
-                    gt_bbox = [int(num) for num in numbers]
-                    input_dict['gt_bboxes'] = gt_bbox
+                    input_dict['gt_bboxes'] = [gt_bboxes]  # batch
 
                 with torch.no_grad():
                     mm_inputs = model.prepare_for_eval(input_dict)

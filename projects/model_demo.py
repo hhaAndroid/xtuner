@@ -104,7 +104,7 @@ train_dataset = dict(
         dict(
             type=RRRDataset,
             data_root=data_root,
-            ann_file='annotations/instances_train2017_rrrvlm_ovd.json',
+            ann_file='annotations/instances_train2017_rrrvlm_ovd1.json',
             data_prefix=dict(img='train2017/'),
             tokenizer=tokenizer,
             image_processor=image_processor,
@@ -172,16 +172,18 @@ for i, data_sampler in enumerate(train_dataloader):
         # bbox 是原图尺度即可，内部会进行归一化处理
         region_mask = []
         for b in data['gt_bboxes']:
-            coor_mask = torch.zeros((input_size, input_size))
-            coor_mask[b[0]:b[2], b[1]:b[3]] = 1
-            assert len(coor_mask.nonzero()) != 0
-            region_mask.append([coor_mask])  # 可以运行每张图片存在多个 bbox 的情况，因此外层会多一个 []
+            if not isinstance(b, list):
+                b = [b]
+            o_mask = []
+            for _b in b:
+                coor_mask = torch.zeros((input_size, input_size))
+                coor_mask[_b[0]:_b[2], _b[1]:_b[3]] = 1
+                assert len(coor_mask.nonzero()) != 0
+                o_mask.append(coor_mask)
+            region_mask.append(o_mask)
 
-        region_feats = sampler(visual_outputs, region_mask)  # b, 4096
+        region_feats = sampler(visual_outputs, region_mask, return_dtype=torch.float32)  # b, 4096
         data['region_feats'] = region_feats
 
         data = prepare_inputs_labels_for_multimodal(llm=None, **data)
         print(data.keys())
-
-
-

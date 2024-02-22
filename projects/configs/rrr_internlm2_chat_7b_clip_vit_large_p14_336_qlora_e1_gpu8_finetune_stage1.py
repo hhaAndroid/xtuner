@@ -8,7 +8,6 @@ from transformers import (AutoModelForCausalLM, AutoTokenizer,
                           BitsAndBytesConfig, CLIPImageProcessor,
                           CLIPVisionModel)
 
-from xtuner.dataset.collate_fns import default_collate_fn
 from xtuner.dataset.map_fns import llava_map_fn, template_map_fn_factory
 from xtuner.engine.hooks import DatasetInfoHook
 from xtuner.engine.runner import TrainLoop
@@ -56,17 +55,22 @@ SYSTEM = ''
 # https://llava-vl.github.io/static/images/view.jpg
 evaluation_images = '000000190753.jpg'
 IMAGE_SIZE = 672
-input_1 = "<image>\nIn the conversation below, you simply answer the category name based on what you see in the imagery inside a " \
-          "region [61, 360, 144, 408]<region_feat><seg>. If you don't find the category name in the provided list of categories, you should output other. " \
-          "The region coordinate format is [x1, y1, x2, y2], where [x1, y1] represents the top-left corner of the image, " \
-          f"and [x2, y2] represents the bottom-right corner coordinate. The image size is {IMAGE_SIZE}x{IMAGE_SIZE}. " \
-          "Categories Containing tv,hair drier,giraffe,airplane,sheep,baseball glove,cat,cow,wine glass,bicycle,scissors," \
-          "bird,bear,traffic light,hot dog,bus,elephant,refrigerator,bottle,truck,handbag,train,couch,banana,oven,sports " \
-          "ball,sink,tennis racket,teddy bear,skis,toaster,umbrella,bowl,suitcase,bench,orange,remote,parking meter," \
-          "carrot,motorcycle,baseball bat,toilet."
-input_2 = "<image>\nWhat is the class of the region [61, 360, 144, 408]<region_feat><seg> within the image? " \
-          "The region coordinate format is [x1, y1, x2, y2], where [x1, y1] represents the top-left corner of the image, " \
-          f"and [x2, y2] represents the bottom-right corner coordinate. The image size is {IMAGE_SIZE}x{IMAGE_SIZE}."
+input_1 = ["<image>\nIn the conversation below, you simply answer the category name based on what you see in the "
+           "imagery inside a region. If you don't find the category name in the provided list of categories, "
+           "you should output other. I will input one or multiple regions and provide a list of categories. Please "
+           "reply strictly in the order of the input. Categories: tv,oven,frisbee,toothbrush,truck,toilet,banana,"
+           "umbrella,fork,dog,stop sign,suitcase,cell phone,baseball glove,toaster,bowl,surfboard,handbag,bench,"
+           "parking meter,boat,car,donut,hair drier,bird,book,sandwich,cup,laptop,fire hydrant,horse,sheep,person,"
+           "tie,cake,teddy bear,bus,apple,bear,kite,bed,scissors,cat,clock,remote,tennis racket,spoon,bicycle,bottle,"
+           "mouse,cow,skis,knife,couch,elephant,chair,snowboard,pizza,wine glass,baseball bat,traffic light,"
+           "potted plant,motorcycle,broccoli,giraffe,backpack,sink,sports ball,hot dog,airplane,microwave,"
+           "refrigerator,vase,orange,train,carrot,skateboard,keyboard,zebra,dining table. Region: "
+           "1.<region_feat>;2.<region_feat>;3.<region_feat>;4.<region_feat>;5.<region_feat>.",
+           [[255, 350, 349, 477], [61, 360, 144, 408], [401, 411, 479, 507], [235, 352, 281, 411], [175, 342, 231, 516]]]
+input_2 = ["<image>\nIn the conversation below, you simply answer the category name based on what you see in the "
+           "imagery inside a region. I will input multiple regions. Please reply strictly in the order of the input. "
+           "Region: 1.<region_feat>;2.<region_feat>;3.<region_feat>;4.<region_feat>.",
+           [[401, 411, 479, 507], [255, 350, 349, 477], [244, 378, 462, 540], [455, 352, 552, 445]]]
 # bench
 evaluation_inputs = [input_1, input_2]
 
@@ -126,7 +130,7 @@ train_dataset = dict(
         dict(
             type=RRRDataset,
             data_root=data_root,
-            ann_file='annotations/instances_train2017_rrrvlm_ovd.json',
+            ann_file='annotations/instances_train2017_rrrvlm_ovd1.json',
             data_prefix=dict(img='train2017/'),
             tokenizer=tokenizer,
             image_processor=image_processor,
@@ -138,7 +142,7 @@ train_dataset = dict(
         dict(
             type=RRRDataset,
             data_root=data_root,
-            ann_file='annotations/instances_train2017_rrrvlm_region.json',
+            ann_file='annotations/instances_train2017_rrrvlm_region1.json',
             data_prefix=dict(img='train2017/'),
             tokenizer=tokenizer,
             image_processor=image_processor,
@@ -164,7 +168,7 @@ train_dataloader = dict(
 inference_dataset = dict(
     type=RRRDataset,
     data_root=data_root,
-    ann_file='annotations/instances_val2017_rrrvlm_ovd.json',
+    ann_file='annotations/instances_val2017_rrrvlm_ovd1.json',
     data_prefix=dict(img='val2017/'),
     tokenizer=tokenizer,
     image_processor=image_processor,

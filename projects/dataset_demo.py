@@ -10,12 +10,10 @@ from transformers import (AutoTokenizer, CLIPImageProcessor)
 from xtuner.dataset.map_fns import llava_map_fn, template_map_fn_factory
 from xtuner.utils import PROMPT_TEMPLATE
 from xtuner.dataset import ConcatDataset
-from projects.modules import RRRDataset, ADD_TOKENS_DECODER
+from projects.modules import RRRDataset, ADD_TOKENS_DECODER, withbbox_default_collate_fn
 from mmengine.visualization import Visualizer
 from xtuner.dataset.samplers import LengthGroupedSampler
-from xtuner.dataset.collate_fns import default_collate_fn
 from mmengine.runner.runner import Runner
-import re
 
 data_root = '/home/PJLAB/huanghaian/dataset/coco/'
 
@@ -48,7 +46,7 @@ train_dataset = dict(
         dict(
             type=RRRDataset,
             data_root=data_root,
-            ann_file='annotations/instances_train2017_rrrvlm_ovd.json',
+            ann_file='annotations/instances_train2017_rrrvlm_ovd1.json',
             data_prefix=dict(img='train2017/'),
             tokenizer=tokenizer,
             image_processor=image_processor,
@@ -60,7 +58,7 @@ train_dataset = dict(
         dict(
             type=RRRDataset,
             data_root=data_root,
-            ann_file='annotations/instances_train2017_rrrvlm_region.json',
+            ann_file='annotations/instances_train2017_rrrvlm_region1.json',
             data_prefix=dict(img='train2017/'),
             tokenizer=tokenizer,
             image_processor=image_processor,
@@ -91,6 +89,15 @@ std = torch.tensor(image_std).view(3, 1, 1)
 
 vis = Visualizer()
 
+
+def _get_adaptive_scales(areas: np.ndarray,
+                         min_area: int = 800,
+                         max_area: int = 30000) -> np.ndarray:
+    scales = 0.5 + (areas - min_area) // (max_area - min_area)
+    scales = np.clip(scales, 0.5, 1.0)
+    return scales
+
+
 for data in rrr_dataset:
     pixel_values = data['pixel_values']
     pixel_values = pixel_values * std + mean
@@ -100,26 +107,42 @@ for data in rrr_dataset:
     vis.set_image(pixel_values.numpy())
 
     conversation = data['conversation'][0]['input']
+    print(conversation)
     print(data['conversation'][0]['output'])
 
-    matches = re.findall(r'\[([^]]+)\]', conversation)[0]
-    cleaned_text = matches.replace("[", "").replace("]", "").replace("'", "")
-    numbers = cleaned_text.split(", ")
-    numbers = [int(num) for num in numbers]
-    vis.draw_bboxes(np.array([numbers]), edge_colors='r', line_widths=4)
+    bboxes = data['bbox']
+    name = data['name']
+
+    bboxes = np.array(bboxes).reshape(-1, 4)
+    positions = bboxes[:, :2] + 3
+    areas = (bboxes[:, 3] - bboxes[:, 1]) * (
+            bboxes[:, 2] - bboxes[:, 0])
+    scales = _get_adaptive_scales(areas)
+    vis.draw_bboxes(bboxes, edge_colors='r', line_widths=3)
+    vis.draw_texts(
+        name,
+        positions,
+        colors='g',
+        font_sizes=[int(13 * s) for s in scales],
+        bboxes=[{
+            'facecolor': 'black',
+            'alpha': 0.8,
+            'pad': 0.7,
+            'edgecolor': 'none'
+        }] * len(scales))
     vis.show()
 
-# train_dataloader = dict(
-#     batch_size=4,
-#     num_workers=0,
-#     dataset=rrr_dataset,
-#     sampler=dict(
-#         type=LengthGroupedSampler,
-#         length_property='length',
-#         per_device_batch_size=4 * 1),
-#     collate_fn=dict(type=default_collate_fn))
-#
-# train_dataloader = Runner.build_dataloader(train_dataloader)
-# for i, load in enumerate(train_dataloader):
-#     print(load)
-#     break
+train_dataloader = dict(
+    batch_size=4,
+    num_workers=0,
+    dataset=rrr_dataset,
+    sampler=dict(
+        type=LengthGroupedSampler,
+        length_property='length',
+        per_device_batch_size=4 * 1),
+    collate_fn=dict(type=withbbox_default_collate_fn))
+
+train_dataloader = Runner.build_dataloader(train_dataloader)
+for i, load in enumerate(train_dataloader):
+    print(load)
+    break
