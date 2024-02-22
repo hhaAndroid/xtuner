@@ -13,6 +13,6 @@ NPROC_PER_NODE=8 srun -p s1_mm_dev --job-name=rrr_1 --cpus-per-task=16  --nodes=
 
 L135:   dist.init_distributed(dist_backend=dist_backend, dist_init_required=dist_init_required, distributed_port=29501)
 
-或者
 
+export PYTHONPATH="$(pwd)"
 NPROC_PER_NODE=8 srun -p s1_mm_dev --job-name=rrr_2 --cpus-per-task=16  --nodes=1 --gres=gpu:8 --ntasks-per-node=1 --kill-on-bad-exit=1  xtuner train projects/configs/rrr_internlm2_chat_7b_clip_vit_large_p14_336_qlora_e1_gpu8_finetune_stage1.py --deepspeed deepspeed_zero2

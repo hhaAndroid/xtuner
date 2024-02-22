@@ -234,7 +234,7 @@ class RRRModel(BaseModel):
                     o_mask = []
                     for _b in b:
                         coor_mask = torch.zeros((self.input_size, self.input_size), device=pixel_values.device)
-                        coor_mask[b[0]:b[2], b[1]:b[3]] = 1
+                        coor_mask[_b[0]:_b[2], _b[1]:_b[3]] = 1
                         assert len(coor_mask.nonzero()) != 0
                         o_mask.append(coor_mask)
                     region_mask.append(o_mask)
@@ -396,6 +396,9 @@ def prepare_inputs_labels_for_multimodal(
         if region_feat is not None:
             # 由于 region_feat 占位符是一个区域一个 token，而 region_feat 也是一个区域一个特征，因此可以直接替换
             # 但是 image_feat 会对应多个 token，因此写法不一样
+            # 如果不加下面这行会报错，原因是 inplace 操作不允许
+            # RuntimeError: a leaf Variable that requires grad is being used in an in-place operation.
+            cur_inputs_embeds = cur_inputs_embeds.clone()
             cur_inputs_embeds[cur_input_ids == REGION_FEAT_TOKEN_INDEX] = region_feat
 
         img_token_index = torch.where(cur_input_ids == IMAGE_TOKEN_INDEX)[0].tolist()

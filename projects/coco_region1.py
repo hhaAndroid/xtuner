@@ -166,7 +166,7 @@ if __name__ == '__main__':
     parser.add_argument('--input',
                         default='/home/PJLAB/huanghaian/dataset/coco/annotations/instances_train2017.json',
                         type=str, help='input json file name')
-    parser.add_argument('--num', '-n', type=int, default=100)
+    parser.add_argument('--num', '-n', type=int, default=100) # 300000
     parser.add_argument(
         '--output', '-o', type=str, help='output json file name')
     args = parser.parse_args()

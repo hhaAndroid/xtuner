@@ -31,7 +31,7 @@ pretrained_pth = '/mnt/petrelfs/huanghaian/code/mm/xtuner/work_dirs/rrr_internlm
 # Data
 data_root = 'data/coco/'
 prompt_template = PROMPT_TEMPLATE.internlm2_chat
-max_length = int(2048 - (336 / 14) ** 2 - 1)
+max_length = int(2048 - (336 / 14) ** 2)  # 文本里面已经考虑了 region token 的长度
 
 # Scheduler & Optimizer
 batch_size = 16  # per_device
