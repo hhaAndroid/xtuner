@@ -111,3 +111,15 @@ ADD_TOKENS_DECODER = {
         "special": True
     },
 }
+
+# 增加 MAX_REGION_NUM 个 <seg> token 用于模型预测
+MAX_REGION_NUM = 30
+for i in range(92533, 92533-MAX_REGION_NUM, -1):
+    ADD_TOKENS_DECODER[str(i)] = {
+        "content": f"<seg{92533-i}>",
+        "lstrip": False,
+        "normalized": False,
+        "rstrip": False,
+        "single_word": False,
+        "special": True
+    }

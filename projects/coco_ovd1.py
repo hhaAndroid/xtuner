@@ -1,8 +1,17 @@
 import argparse
 import json
 import random
+
+import torch
 from pycocotools.coco import COCO
 from tqdm import tqdm
+import numpy as np
+from projects.modules.utils import merge_multi_segment
+import os.path as osp
+from mmengine.visualization import Visualizer
+from PIL import Image
+import torchvision.transforms.functional as F
+from xtuner.dataset.utils import expand2square
 
 # 可以输入单个区域或者多个区域
 # 为了减少输入序列长度，坐标值就不输入了
@@ -34,12 +43,17 @@ def coco2ovd(args):
     names = {cat['id']: cat['name'] for cat in cats}
     all_name = list(names.values())
 
+    with_mask = args.mask
+
     if args.output is None:
         out_path = args.input[:-5] + '_rrrvlm_ovd1.json'
+        out_mask_path = args.input[:-5] + '_rrrvlm_ovd1_mask.pth'
     else:
         out_path = args.output
+        out_mask_path = args.output[:-5] + '_mask.pth'
 
     out_datas = []
+    out_masks = []
     # 对每一张图片进行操作
     img_ids = coco.getImgIds()
     random.shuffle(img_ids)
@@ -93,8 +107,36 @@ def coco2ovd(args):
                 if new_h < MIN_BBOX_SIZE or new_w < MIN_BBOX_SIZE:
                     continue
 
-                # TODO 对应的处理 mask
                 new_ann_info.append({'bbox': bbox_xyxy, 'label': names[ann['category_id']]})
+
+                if with_mask:
+                    gt_mask = ann['segmentation']
+                    if isinstance(gt_mask, list):
+                        gt_mask = [
+                            np.array(polygon) for polygon in gt_mask
+                            if len(polygon) % 2 == 0 and len(polygon) >= 6
+                        ]
+                        if len(gt_mask) == 0:
+                            # ignore
+                            continue
+                        else:
+                            if len(gt_mask) > 1:
+                                new_gt_masks = merge_multi_segment(gt_mask)
+                            else:
+                                new_gt_masks = gt_mask[0]
+                    else:
+                        raise NotImplementedError(
+                            'Only supports mask annotations in polygon '
+                            'format currently')
+
+                    # 和 bbox 一样进行数值变换
+                    w_scale = neww / img_info['width']
+                    h_scale = newh / img_info['height']
+                    new_gt_masks[0::2] = new_gt_masks[0::2] * w_scale
+                    new_gt_masks[1::2] = new_gt_masks[1::2] * h_scale
+                    new_gt_masks[0::2] = new_gt_masks[0::2] + padding_w
+                    new_gt_masks[1::2] = new_gt_masks[1::2] + padding_h
+                    new_ann_info[-1]['mask'] = new_gt_masks
 
             if len(new_ann_info) == 0:
                 continue
@@ -117,9 +159,13 @@ def coco2ovd(args):
             out_data['bbox'] = all_bboxes
             out_data['name'] = all_names
 
+            if with_mask:
+                all_masks = [ann['mask'] for ann in sample_ann_info]
+                out_masks.append({'id': img_id, 'mask': all_masks})
+
             out_str = ''
             for i in range(len(all_bboxes)):
-                if i != len(all_bboxes)-1:
+                if i != len(all_bboxes) - 1:
                     out_str += f'{i + 1}.<region_feat>;'
                 else:
                     out_str += f'{i + 1}.<region_feat>'
@@ -150,12 +196,21 @@ def coco2ovd(args):
             out_str = ''
             for i in range(len(all_names)):
                 if len(all_bboxes) == 1:
-                    out_str += f'{all_names[i]}'
-                else:
-                    if i != len(all_names)-1:
-                        out_str += f'{i + 1}.{all_names[i]};'
+                    if with_mask:
+                        out_str += f'{all_names[i]}<seg{i}>'
                     else:
-                        out_str += f'{i + 1}.{all_names[i]}'
+                        out_str += f'{all_names[i]}'
+                else:
+                    if i != len(all_names) - 1:
+                        if with_mask:
+                            out_str += f'{i + 1}.{all_names[i]}<seg{i}>;'
+                        else:
+                            out_str += f'{i + 1}.{all_names[i]};'
+                    else:
+                        if with_mask:
+                            out_str += f'{i + 1}.{all_names[i]}<seg{i}>'
+                        else:
+                            out_str += f'{i + 1}.{all_names[i]}'
 
             out_temp = out_temp.replace('<c>', out_str)
 
@@ -167,17 +222,112 @@ def coco2ovd(args):
             if total_num >= args.num:
                 break
 
+    if with_mask:
+        assert len(out_datas) == len(out_masks)
+        torch.save(out_masks, out_mask_path)
+
     with open(out_path, 'w') as file:
         json.dump(out_datas, file)
 
 
+def _get_adaptive_scales(areas: np.ndarray,
+                         min_area: int = 800,
+                         max_area: int = 30000) -> np.ndarray:
+    scales = 0.5 + (areas - min_area) // (max_area - min_area)
+    scales = np.clip(scales, 0.5, 1.0)
+    return scales
+
+
+def show(args):
+    vis = Visualizer()
+
+    with_mask = args.mask
+
+    if args.output is None:
+        out_path = args.input[:-5] + '_rrrvlm_ovd1.json'
+        out_mask_path = args.input[:-5] + '_rrrvlm_ovd1_mask.pth'
+    else:
+        out_path = args.output
+        out_mask_path = args.output[:-5] + '_mask.pth'
+
+    json_data = json.load(open(out_path))
+
+    if with_mask:
+        masks = torch.load(out_mask_path)
+        combined = list(zip(json_data, masks))
+        random.shuffle(combined)
+        json_data, masks = zip(*combined)
+    else:
+        random.shuffle(json_data)
+
+    for i, data in enumerate(json_data):
+        image_name = data['image']
+        directory = osp.dirname(args.input)
+        image_path = osp.join(directory, '..', args.img_prefix, image_name)
+        image = Image.open(image_path).convert('RGB')
+        old_w, old_h = F.get_image_size(image)
+        scale_factor = min(IMAGE_SIZE / max(old_h, old_w),
+                           IMAGE_SIZE / min(old_h, old_w))
+        neww = int(old_w * float(scale_factor) + 0.5)
+        newh = int(old_h * float(scale_factor) + 0.5)
+        image = F.resize(image, size=(newh, neww), interpolation=F.InterpolationMode.BICUBIC)
+        image = expand2square(image, 0)
+
+        vis.set_image(np.array(image))
+
+        bboxes = data['bbox']
+        name = data['name']
+
+        image2colors = []
+        for _ in range(len(bboxes)):
+            colors = np.random.random((1, 3)) * 0.7 + 0.3
+            colors = (colors * 255).astype(int).tolist()[0]
+            image2colors.append(tuple(colors))
+
+        bboxes = np.array(bboxes).reshape(-1, 4)
+        positions = bboxes[:, :2] + 3
+        areas = (bboxes[:, 3] - bboxes[:, 1]) * (
+                bboxes[:, 2] - bboxes[:, 0])
+        scales = _get_adaptive_scales(areas)
+        vis.draw_bboxes(bboxes, edge_colors=image2colors, line_widths=3)
+        vis.draw_texts(
+            name,
+            positions,
+            colors='g',
+            font_sizes=[int(13 * s) for s in scales],
+            bboxes=[{
+                'facecolor': 'black',
+                'alpha': 0.8,
+                'pad': 0.7,
+                'edgecolor': 'none'
+            }] * len(scales))
+
+        if with_mask:
+            mask = masks[i]['mask']
+            for i, m in enumerate(mask):
+                vis.draw_polygons(m.reshape(-1, 2), edge_colors='w', face_colors=image2colors[i])
+
+        vis.show()
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser('coco to ovd format.', add_help=True)
-    parser.add_argument('--input', default='/home/PJLAB/huanghaian/dataset/coco/annotations/instances_train2017.json',
+    parser.add_argument('--input', default='/home/PJLAB/huanghaian/dataset/coco/annotations/instances_val2017.json',
                         type=str, help='input json file name')
-    parser.add_argument('--num', '-n', type=int, default=100)  # 300000
+    parser.add_argument(
+        '--img-prefix', type=str, default='val2017')
+    parser.add_argument('--num', '-n', type=int, default=10)  # 300000
+    parser.add_argument(
+        '--mask', '-m', action='store_true', help='Whether to add mask')
     parser.add_argument(
         '--output', '-o', type=str, help='output json file name')
+    parser.add_argument(
+        '--show', '-s', action='store_true', help='Whether to add mask')
+
     args = parser.parse_args()
 
     coco2ovd(args)
+
+    # show data
+    if args.show:
+        show(args)
