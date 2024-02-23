@@ -83,9 +83,10 @@ class RRRModel(BaseModel):
             # 然后级联 2 次计算
             self.sampler = GeoRegionSampler(self.visual_encoder.config.hidden_size * 4,
                                             self.llm.config.hidden_size,
-                                            512,
-                                            num_sub_point=[128, 32],
-                                            num_neighbor=[24, 24]).to(self.visual_encoder.dtype)
+                                            256,  # 512
+                                            num_sub_point=[64, 16],  # 128 32
+                                            # 24, 24
+                                            num_neighbor=[16, 16]).to(self.visual_encoder.dtype)
         else:
             self.sampler = None
 
