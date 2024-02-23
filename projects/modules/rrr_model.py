@@ -78,6 +78,9 @@ class RRRModel(BaseModel):
 
         # visual sampler
         if use_visual_sampler:
+            # 先对每个区域采样 512 个点，然后对 512 个进行 fps 计算得到 128 个点，然后对 128 个点中每个点进行 24 个邻居采样
+            # 然后将 24 个邻居信息聚合到当前点上，最后得到 128 个点的特征，对这个128个点特征进行拉平，然后维度变换
+            # 然后级联 2 次计算
             self.sampler = GeoRegionSampler(self.visual_encoder.config.hidden_size * 4,
                                             self.llm.config.hidden_size,
                                             512,

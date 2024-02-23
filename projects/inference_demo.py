@@ -46,6 +46,9 @@ def main():
 
     cfg.model.pretrained_pth = args.weighs
     model = BUILDER.build(cfg.model).to(args.device).half()
+    model.activation_checkpointing_disable()
+    model.llm.config.use_cache = True
+    model.eval()
     dataset = BUILDER.build(cfg.inference_dataset)
     tokenizer = BUILDER.build(cfg.tokenizer)
 
@@ -96,7 +99,8 @@ def main():
         pixel_values = torch.permute(pixel_values, (1, 2, 0))
 
         vis.set_image(pixel_values.numpy())
-        vis.draw_bboxes(np.array([data['bbox']]), edge_colors='r', line_widths=4)
+        bboxes = np.array(data['bbox']).reshape(-1, 4)
+        vis.draw_bboxes(bboxes, edge_colors='r', line_widths=4)
         vis.draw_texts(output, np.array([10, 10]), colors='r', font_sizes=20)
 
         drawn_image = vis.get_image()
