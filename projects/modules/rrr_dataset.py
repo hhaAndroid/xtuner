@@ -64,7 +64,8 @@ class RRRDataset(Dataset):
                  dataset_map_fn=None,
                  template_map_fn=None,
                  max_length=2048,
-                 img_size=(672, 672)):
+                 img_size=(672, 672),
+                 input_ids_with_output=True):
         self.data_root = data_root
         self.img_root = os.path.join(data_root, data_prefix['img'])
         json_data = json.load(open(os.path.join(data_root, ann_file)))
@@ -79,6 +80,7 @@ class RRRDataset(Dataset):
             split='train',
             max_dataset_length=max_dataset_length,
             remove_unused_columns=False,
+            input_ids_with_output=input_ids_with_output,
             pack_to_max_length=False,
             with_image_token=True)
 

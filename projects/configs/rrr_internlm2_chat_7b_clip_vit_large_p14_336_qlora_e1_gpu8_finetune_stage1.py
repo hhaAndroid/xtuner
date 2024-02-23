@@ -167,6 +167,7 @@ train_dataloader = dict(
 # to inference demo
 inference_dataset = dict(
     type=RRRDataset,
+    input_ids_with_output=False,  # 非常重要
     data_root=data_root,
     ann_file='annotations/instances_val2017_rrrvlm_ovd1.json',
     data_prefix=dict(img='val2017/'),
