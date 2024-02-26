@@ -272,6 +272,13 @@ def withbbox_default_collate_fn(
         pixel_values = torch.stack(pixel_values)
         data_dict['pixel_values'] = pixel_values
 
+    if 'sam_pixel_values' in instances[0]:
+        sam_pixel_values = torch.stack([inst['sam_pixel_values'] for inst in instances])
+        data_dict['sam_pixel_values'] = sam_pixel_values
+        data_dict['orig_size'] = [inst['orig_size'] for inst in instances]
+        data_dict['padding_size'] = [inst['padding_size'] for inst in instances]
+        data_dict['sam_mask'] = [inst['sam_mask'] for inst in instances]
+
     if return_hf_format:
         return data_dict
     else:

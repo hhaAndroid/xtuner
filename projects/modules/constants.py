@@ -3,7 +3,7 @@ IGNORE_INDEX = -100
 DEFAULT_PAD_TOKEN_INDEX = 0
 IMAGE_TOKEN_INDEX = 92537
 REGION_FEAT_TOKEN_INDEX = 92536
-SEG_TOKEN_INDEX = 92535
+SEG_TOKEN_INDEX = 92533
 
 ADD_TOKENS_DECODER = {
     "0": {
@@ -110,16 +110,20 @@ ADD_TOKENS_DECODER = {
         "single_word": False,
         "special": True
     },
-}
-
-# 增加 MAX_REGION_NUM 个 <seg> token 用于模型预测
-MAX_REGION_NUM = 30
-for i in range(92533, 92533-MAX_REGION_NUM, -1):
-    ADD_TOKENS_DECODER[str(i)] = {
-        "content": f"<seg{92533-i}>",
+    "92533": {
+        "content": "<seg>",
         "lstrip": False,
         "normalized": False,
         "rstrip": False,
         "single_word": False,
         "special": True
-    }
+    },
+    "92532": {
+        "content": "<rej>",
+        "lstrip": False,
+        "normalized": False,
+        "rstrip": False,
+        "single_word": False,
+        "special": True
+    },
+}

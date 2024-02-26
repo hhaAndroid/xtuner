@@ -3,7 +3,13 @@ import torch
 from mmengine.model import is_model_wrapper
 from xtuner.dataset.utils import expand2square
 import torchvision.transforms.functional as F
-import re
+
+from segment_anything.utils.transforms import ResizeLongestSide
+import numpy as np
+
+sam_pixel_mean = torch.Tensor([123.675, 116.28, 103.53]).view(-1, 1, 1)
+sam_pixel_std = torch.Tensor([58.395, 57.12, 57.375]).view(-1, 1, 1)
+sam_transform = ResizeLongestSide(1024)
 
 
 class RRREvaluateChatHook(EvaluateChatHook):
@@ -31,6 +37,14 @@ class RRREvaluateChatHook(EvaluateChatHook):
             for sample_image, sample_input in zip(self.evaluation_images,
                                                   self.evaluation_inputs):
                 old_w, old_h = F.get_image_size(sample_image)
+                if model.use_sam:
+                    mask_data_dict = {'orig_size': [(old_h, old_w)]}  # 考虑 bs
+                    sam_image = sam_transform.apply_image(np.array(sample_image))
+                    padding_h, padding_w = sam_image.shape[:2]  # 网络训练的输入尺寸,不包括 padding 部分
+                    mask_data_dict['padding_size'] = [(padding_h, padding_w)]
+                    sam_image = self.sam_preprocess(torch.from_numpy(sam_image).permute(2, 0, 1).contiguous())
+                    mask_data_dict['sam_pixel_values'] = sam_image.unsqueeze(0)  # 考虑 bs
+
                 scale_factor = min(self.img_size[0] / max(old_h, old_w),
                                    self.img_size[0] / min(old_h, old_w))
                 neww = int(old_w * float(scale_factor) + 0.5)
@@ -66,6 +80,11 @@ class RRREvaluateChatHook(EvaluateChatHook):
                         generation_config=self.gen_config,
                         bos_token_id=self.tokenizer.bos_token_id,
                         stopping_criteria=self.stop_criteria)
+                    pred_masks = model.postprocess_for_eval(generation_output, mask_data_dict)
+
+                    # TODO 可视化结果保存
+
+
                 runner.logger.info(
                     f'Sample output:\n'
                     f'{inputs + self.tokenizer.decode(generation_output[0])}\n'
@@ -91,3 +110,16 @@ class RRREvaluateChatHook(EvaluateChatHook):
             model.activation_checkpointing_enable()
         model.llm.config.use_cache = use_cache
         model.train()
+
+    def sam_preprocess(self, x: torch.Tensor, img_size=1024) -> torch.Tensor:
+        """Normalize pixel values and pad to a square input."""
+        # Normalize colors
+        x = (x - sam_pixel_mean) / sam_pixel_std
+
+        # Pad
+        h, w = x.shape[-2:]  # 往后 padding
+        padh = img_size - h
+        padw = img_size - w
+        x = F.pad(x, (0, padw, 0, padh))
+        return x
+

@@ -1,4 +1,5 @@
 import argparse
+import copy
 import json
 import random
 
@@ -132,6 +133,9 @@ def coco2ovd(args):
                             'Only supports mask annotations in polygon '
                             'format currently')
 
+                    # sam 计算 loss 时候需要一份原始尺度的
+                    new_ann_info[-1]['sam_mask'] = copy.deepcopy(new_gt_masks)
+
                     # 和 bbox 一样进行数值变换
                     w_scale = neww / img_info['width']
                     h_scale = newh / img_info['height']
@@ -164,7 +168,8 @@ def coco2ovd(args):
 
             if with_mask:
                 all_masks = [ann['mask'] for ann in sample_ann_info]
-                out_masks.append({'id': img_id, 'mask': all_masks})
+                all_sam_masks = [ann['sam_mask'] for ann in sample_ann_info]
+                out_masks.append({'id': img_id, 'mask': all_masks, 'sam_mask': all_sam_masks})
 
             out_str = ''
             for i in range(len(all_bboxes)):
@@ -200,18 +205,19 @@ def coco2ovd(args):
             for i in range(len(all_names)):
                 if len(all_bboxes) == 1:
                     if with_mask:
-                        out_str += f'{all_names[i]}<seg{i}>'
+                        # out_str += f'{all_names[i]}<seg{i}>'
+                        out_str += f'{all_names[i]}<seg>'
                     else:
                         out_str += f'{all_names[i]}'
                 else:
                     if i != len(all_names) - 1:
                         if with_mask:
-                            out_str += f'{i + 1}.{all_names[i]}<seg{i}>;'
+                            out_str += f'{i + 1}.{all_names[i]}<seg>;'
                         else:
                             out_str += f'{i + 1}.{all_names[i]};'
                     else:
                         if with_mask:
-                            out_str += f'{i + 1}.{all_names[i]}<seg{i}>'
+                            out_str += f'{i + 1}.{all_names[i]}<seg>'
                         else:
                             out_str += f'{i + 1}.{all_names[i]}'
 
@@ -235,8 +241,7 @@ def coco2ovd(args):
     for data in out_datas:
         num_mask = len(data['bbox'])
         gpt_data = data['conversations'][1]['value']
-        for i in range(num_mask):
-            gpt_data = gpt_data.replace('<seg' + str(i) + '>', '')
+        gpt_data = gpt_data.replace('<seg>', '')
         data['conversations'][1]['value'] = gpt_data
     with open(out_bbox_json_path, 'w') as file:
         json.dump(out_datas, file)

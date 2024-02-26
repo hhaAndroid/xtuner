@@ -25,6 +25,53 @@ from .constants import IMAGE_TOKEN_INDEX, REGION_FEAT_TOKEN_INDEX, SEG_TOKEN_IND
 from .visual_sampler import GeoRegionSampler
 from segment_anything import build_sam_vit_h
 from .utils import polygon_to_bitmap
+import torch.nn.functional as F
+
+
+def dice_loss(
+    inputs: torch.Tensor,
+    targets: torch.Tensor,
+    num_masks: float,
+    scale=1000,  # 100000.0,
+    eps=1e-6,
+):
+    """
+    Compute the DICE loss, similar to generalized IOU for masks
+    Args:
+        inputs: A float tensor of arbitrary shape.
+                The predictions for each example.
+        targets: A float tensor with the same shape as inputs. Stores the binary
+                 classification label for each element in inputs
+                (0 for the negative class and 1 for the positive class).
+    """
+    inputs = inputs.sigmoid()
+    inputs = inputs.flatten(1, 2)
+    targets = targets.flatten(1, 2)
+    numerator = 2 * (inputs / scale * targets).sum(-1)
+    denominator = (inputs / scale).sum(-1) + (targets / scale).sum(-1)
+    loss = 1 - (numerator + eps) / (denominator + eps)
+    loss = loss.sum() / (num_masks + 1e-8)
+    return loss
+
+
+def sigmoid_ce_loss(
+    inputs: torch.Tensor,
+    targets: torch.Tensor,
+    num_masks: float,
+):
+    """
+    Args:
+        inputs: A float tensor of arbitrary shape.
+                The predictions for each example.
+        targets: A float tensor with the same shape as inputs. Stores the binary
+                 classification label for each element in inputs
+                (0 for the negative class and 1 for the positive class).
+    Returns:
+        Loss tensor
+    """
+    loss = F.binary_cross_entropy_with_logits(inputs, targets, reduction="none")
+    loss = loss.flatten(1, 2).mean(1).sum() / (num_masks + 1e-8)
+    return loss
 
 
 class RRRModel(BaseModel):
@@ -46,8 +93,17 @@ class RRRModel(BaseModel):
                  use_visual_sampler=False,  # 预训练时候为 False,微调时候为 True
                  use_sam=False,
                  sam_pretrained_pth=None,
+                 # 仅仅开启了 sam 训练才有效
+                 ce_loss_weight=1.0,
+                 dice_loss_weight=1.0,
+                 bce_loss_weight=1.0
                  ):
         super().__init__()
+
+        self.ce_loss_weight = ce_loss_weight
+        self.dice_loss_weight = dice_loss_weight
+        self.bce_loss_weight = bce_loss_weight
+
         self.freeze_llm = freeze_llm
 
         with LoadWoInit():
@@ -92,6 +148,7 @@ class RRRModel(BaseModel):
             self.sampler = None
 
         self.use_sam = use_sam
+        self._need_seg_token = False
         if use_sam:
             self.sam_model = build_sam_vit_h(sam_pretrained_pth)
 
@@ -113,6 +170,8 @@ class RRRModel(BaseModel):
             self.text_hidden_fcs.train()
             for param in self.text_hidden_fcs.parameters():
                 param.requires_grad = True
+
+            self._seg_token_mask = None
 
         self.llm.requires_grad_(False)
         self.visual_encoder.requires_grad_(False)
@@ -223,8 +282,79 @@ class RRRModel(BaseModel):
         data = prepare_inputs_labels_for_multimodal(llm=self.llm, **data)
         return data
 
+    def postprocess_for_eval(self, llm_out, mask_data_dict):
+        # 只有开启了 sam 才会调用
+        output_hidden_states = llm_out.hidden_states[-1]
+        output_ids = llm_out.sequences
+
+        seg_token_mask = output_ids[:, 1:] == SEG_TOKEN_INDEX
+
+        assert len(self.model.text_hidden_fcs) == 1
+        hidden_states = self.model.text_hidden_fcs[0](output_hidden_states[-1])
+        pred_embeddings = hidden_states[seg_token_mask]
+
+        # 上述操作会丢失 bs 信息，需要还原回来
+        seg_token_counts = seg_token_mask.int().sum(-1)  # [bs, ]
+        seg_token_offset = seg_token_counts.cumsum(-1)
+        seg_token_offset = torch.cat(
+            [torch.zeros(1).long().cuda(), seg_token_offset], dim=0
+        )
+
+        pred_embeddings_ = []
+        for i in range(len(seg_token_offset) - 1):
+            start_i, end_i = seg_token_offset[i], seg_token_offset[i + 1]
+            pred_embeddings_.append(pred_embeddings[start_i:end_i])
+        pred_embeddings = pred_embeddings_
+
+        image_embeddings = self.get_sam_visual_embs(mask_data_dict['sam_pixel_values'])
+
+        multimask_output = False
+        pred_masks = []
+        for i in range(len(pred_embeddings)):
+            (
+                sparse_embeddings,
+                dense_embeddings,
+            ) = self.model.visual_model.prompt_encoder(
+                points=None,
+                boxes=None,
+                masks=None,
+                text_embeds=pred_embeddings[i].unsqueeze(1),
+            )
+
+            sparse_embeddings = sparse_embeddings.to(pred_embeddings[i].dtype)
+            low_res_masks, iou_predictions = self.model.visual_model.mask_decoder(
+                image_embeddings=image_embeddings[i].unsqueeze(0),
+                image_pe=self.model.visual_model.prompt_encoder.get_dense_pe(),
+                sparse_prompt_embeddings=sparse_embeddings,
+                dense_prompt_embeddings=dense_embeddings,
+                multimask_output=multimask_output,
+            )
+            pred_mask = self.model.visual_model.postprocess_masks(
+                low_res_masks,
+                input_size=mask_data_dict['padding_size'][i],
+                original_size=mask_data_dict['orig_size'][i],
+            )
+            pred_masks.append(pred_mask[:, 0])
+        return pred_masks
+
     def forward(self, data, data_samples=None, mode='loss'):
         if 'pixel_values' in data:
+            if self.training:
+                # 训练时候才有这个逻辑，推理时候不能如此处理
+                self._need_seg_token = SEG_TOKEN_INDEX in data['input_ids']
+                if self._need_seg_token:
+                    assert self.use_sam, 'sam model is not enabled, but seg token is found in input_ids'
+                    seg_token_mask = data['input_ids'][:, 1:] == SEG_TOKEN_INDEX  # B,N
+                    # 后面填充假数据，使其和 input_ids 一样长
+                    seg_token_mask = torch.cat(
+                        [
+                            seg_token_mask,
+                            torch.zeros((seg_token_mask.shape[0], 1), device=seg_token_mask.device).bool(),
+                        ],
+                        dim=1,
+                    )
+                    self._seg_token_mask = seg_token_mask
+
             visual_outputs = self.sliding_window_vit_forward(data['pixel_values'])
             visual_outputs = visual_outputs + self.window_pos_embed
             bs, pn, hs = visual_outputs.shape
@@ -258,12 +388,25 @@ class RRRModel(BaseModel):
 
         if mode == 'loss':
             return self.compute_loss(data, data_samples)
-        elif mode == 'predict':
+        elif mode == 'predict':  # 不会运行，无需关注
             return self.predict(data, data_samples)
-        elif mode == 'tensor':
+        elif mode == 'tensor':  # 不会运行，无需关注
             return self._forward(data, data_samples)
         else:
             raise NotImplementedError
+
+    def get_sam_visual_embs(self, pixel_values: torch.FloatTensor):
+        with torch.no_grad():
+            image_embeddings_list = []
+            for i in range(pixel_values.shape[0]):
+                torch.cuda.empty_cache()
+                image_embeddings = self.sam_model.image_encoder(
+                    pixel_values[i].unsqueeze(0)
+                )  # stride 16
+                image_embeddings_list.append(image_embeddings)
+            torch.cuda.empty_cache()
+            image_embeddings = torch.cat(image_embeddings_list, 0)
+        return image_embeddings
 
     def _forward(self, data, data_samples=None):
 
@@ -278,10 +421,93 @@ class RRRModel(BaseModel):
 
     def compute_loss(self, data, data_samples=None):
         outputs = self.llm(**data)
-        loss_dict = {'loss': outputs.loss}
+        loss_dict = {'loss': outputs.loss * self.ce_loss_weight}
+
+        if self._need_seg_token and self.training:  # sam 训练
+            image_embeddings = self.get_sam_visual_embs(data['sam_pixel_values'])
+
+            # 考虑 sam loss
+            output_hidden_states = outputs.hidden_states
+            assert len(self.model.text_hidden_fcs) == 1
+            hidden_states = self.model.text_hidden_fcs[0](output_hidden_states[-1])
+            pred_embeddings = hidden_states[self._seg_token_mask]
+
+            # 上述操作会丢失 bs 信息，需要还原回来
+            seg_token_counts = self._seg_token_mask.int().sum(-1)  # [bs, ]
+            seg_token_offset = seg_token_counts.cumsum(-1)
+            seg_token_offset = torch.cat(
+                [torch.zeros(1, device=seg_token_offset.device).long(), seg_token_offset], dim=0
+            )
+            pred_embeddings_ = []
+            for i in range(len(seg_token_offset) - 1):
+                start_i, end_i = seg_token_offset[i], seg_token_offset[i + 1]
+                pred_embeddings_.append(pred_embeddings[start_i:end_i])
+            pred_embeddings = pred_embeddings_
+
+            multimask_output = False
+            pred_masks = []
+            for i in range(len(pred_embeddings)):  # bs 维度
+                (
+                    sparse_embeddings,
+                    dense_embeddings,
+                ) = self.sam_model.prompt_encoder(
+                    points=None,
+                    boxes=None,
+                    masks=None,
+                    text_embeds=pred_embeddings[i].unsqueeze(1),
+                )
+                sparse_embeddings = sparse_embeddings.to(pred_embeddings[i].dtype)
+                low_res_masks, iou_predictions = self.sam_model.mask_decoder(
+                    image_embeddings=image_embeddings[i].unsqueeze(0),
+                    image_pe=self.sam_model.prompt_encoder.get_dense_pe(),
+                    sparse_prompt_embeddings=sparse_embeddings,
+                    dense_prompt_embeddings=dense_embeddings,
+                    multimask_output=multimask_output,
+                )
+                pred_mask = self.sam_model.postprocess_masks(
+                    low_res_masks,
+                    input_size=data['padding_size'][i],
+                    original_size=data['orig_size'][i],
+                )
+                pred_masks.append(pred_mask[:, 0])
+
+            mask_bce_loss = 0
+            mask_dice_loss = 0
+            num_masks = 0
+            gt_masks = data['sam_mask']
+
+            for batch_idx in range(len(pred_masks)):
+                pred_mask = pred_masks[batch_idx]
+
+                ori_h, ori_w = data['orig_size'][batch_idx]
+                gt_mask = gt_masks[batch_idx]
+                # polygon 转换为 n 个 bitmap 格式
+                gt_mask = [mask.reshape(-1, 2) for mask in gt_mask]
+                gt_mask = polygon_to_bitmap(gt_mask, ori_h, ori_w)
+                gt_mask = torch.tensor(gt_mask, device=pred_mask.device)
+
+                assert (
+                        gt_mask.shape[0] == pred_mask.shape[0]
+                ), "gt_mask.shape: {}, pred_mask.shape: {}".format(
+                    gt_mask.shape, pred_mask.shape
+                )
+                mask_bce_loss += (
+                        sigmoid_ce_loss(pred_mask, gt_mask, num_masks=gt_mask.shape[0])
+                        * gt_mask.shape[0]
+                )
+                mask_dice_loss += (
+                        dice_loss(pred_mask, gt_mask, num_masks=gt_mask.shape[0])
+                        * gt_mask.shape[0]
+                )
+                num_masks += gt_mask.shape[0]
+
+            mask_bce_loss = self.bce_loss_weight * mask_bce_loss / (num_masks + 1e-8)
+            mask_dice_loss = self.dice_loss_weight * mask_dice_loss / (num_masks + 1e-8)
+            loss_dict['loss_sam_bce'] = mask_bce_loss
+            loss_dict['loss_sam_dice'] = mask_dice_loss
+
         return loss_dict
 
-    # TODO: 暂时只支持 pretrain 阶段
     def state_dict(self, *args, **kwargs):
         state_dict = super().state_dict(*args, **kwargs)
         to_return = OrderedDict()
@@ -311,6 +537,15 @@ class RRRModel(BaseModel):
         to_return.update(
             {k: v
              for k, v in state_dict.items() if 'window_pos_embed' in k})
+
+        if self.use_sam:
+            # 只保存可训练参数就行
+            to_return.update(
+                {k: v
+                 for k, v in state_dict.items() if '.mask_decoder' in k})
+            to_return.update(
+                {k: v
+                 for k, v in state_dict.items() if 'text_hidden_fcs' in k})
         return to_return
 
     def _parse_lora_config(self, lora_config):

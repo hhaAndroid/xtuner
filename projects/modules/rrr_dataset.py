@@ -15,6 +15,8 @@ from xtuner.dataset.llava import LLaVADataset
 import torch
 from .constants import IMAGE_TOKEN_INDEX
 import random
+from segment_anything.utils.transforms import ResizeLongestSide
+import numpy as np
 
 
 class PretrainLLaVADataset(LLaVADataset):
@@ -68,6 +70,7 @@ class RRRDataset(Dataset):
                  img_size=(672, 672),
                  use_mask=False,
                  bbox_to_mask_prob=0.5,  # 只有 use_mask 为 True 才有效
+                 use_sam=False,  # 如果需要，则需要返回 sam 图片数据
                  input_ids_with_output=True  # 推理时候应该是 false
                  ):
         self.data_root = data_root
@@ -84,8 +87,10 @@ class RRRDataset(Dataset):
             assert len(mask_list_dict) == len(json_data), f'the length of mask_data: {len(mask_list_dict)} ' \
                                                           f'is not equal to json_data: {len(json_data)}'
             self.id_to_mask = {}
+            self.id_to_sam_mask = {}
             for i, mask_dict in enumerate(mask_list_dict):
                 self.id_to_mask[mask_dict['id']] = mask_dict['mask']
+                self.id_to_sam_mask[mask_dict['id']] = mask_dict['sam_mask']
 
         json_data = DatasetDict({'train': HFDataset.from_list(json_data)})
 
@@ -111,6 +116,23 @@ class RRRDataset(Dataset):
         self.pad_image_to_square = True
         self.img_size = img_size
 
+        self.use_sam = use_sam
+        self.sam_pixel_mean = torch.Tensor([123.675, 116.28, 103.53]).view(-1, 1, 1)
+        self.sam_pixel_std = torch.Tensor([58.395, 57.12, 57.375]).view(-1, 1, 1)
+        self.sam_transform = ResizeLongestSide(1024)
+
+    def sam_preprocess(self, x: torch.Tensor, img_size=1024) -> torch.Tensor:
+        """Normalize pixel values and pad to a square input."""
+        # Normalize colors
+        x = (x - self.sam_pixel_mean) / self.sam_pixel_std
+
+        # Pad
+        h, w = x.shape[-2:]  # 往后 padding
+        padh = img_size - h
+        padw = img_size - w
+        x = F.pad(x, (0, padw, 0, padh))
+        return x
+
     @property
     def length(self):
         length_list = []
@@ -130,6 +152,17 @@ class RRRDataset(Dataset):
             image = Image.open(os.path.join(self.img_root,
                                             image_file)).convert('RGB')
             old_w, old_h = F.get_image_size(image)
+            if self.use_sam:
+                # sam loss 是在原图尺度计算的
+                data_dict['orig_size'] = (old_h, old_w)  # 原始图片尺寸
+                sam_image = self.sam_transform.apply_image(np.array(image))
+                padding_h, padding_w = sam_image.shape[:2]  # 网络训练的输入尺寸,不包括 padding 部分
+                data_dict['padding_size'] = (padding_h, padding_w)
+                sam_image = self.sam_preprocess(torch.from_numpy(sam_image).permute(2, 0, 1).contiguous())
+                data_dict['sam_pixel_values'] = sam_image
+                # 原图尺度的 polygon mask
+                data_dict['sam_mask'] = self.id_to_sam_mask[data_dict['id']]
+
             scale_factor = min(self.img_size[0] / max(old_h, old_w),
                                self.img_size[0] / min(old_h, old_w))
             neww = int(old_w * float(scale_factor) + 0.5)
