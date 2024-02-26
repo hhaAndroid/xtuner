@@ -1,6 +1,6 @@
 import numpy as np
 from typing import Tuple, List
-
+import pycocotools.mask as maskUtils
 
 def min_index(arr1: np.ndarray, arr2: np.ndarray) -> Tuple[int, int]:
     """Find a pair of indexes with the shortest distance.
@@ -61,3 +61,20 @@ def merge_multi_segment(gt_masks: List[np.ndarray]) -> List[np.ndarray]:
                     nidx = abs(idx[1] - idx[0])
                     s.append(segments[i][nidx:])
     return np.concatenate(s).reshape(-1, )
+
+
+def polygon_to_bitmap(polygons, height, width):
+    """Convert masks from the form of polygons to bitmaps.
+
+    Args:
+        polygons (list[ndarray]): masks in polygon representation
+        height (int): mask height
+        width (int): mask width
+
+    Return:
+        ndarray: the converted masks in bitmap representation
+    """
+    rles = maskUtils.frPyObjects(polygons, height, width)
+    rle = maskUtils.merge(rles)
+    bitmap_mask = maskUtils.decode(rle).astype(bool)
+    return bitmap_mask

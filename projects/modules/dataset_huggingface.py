@@ -232,9 +232,6 @@ def withbbox_default_collate_fn(
         instances: Sequence[Dict],
         pad_index: int = DEFAULT_PAD_TOKEN_INDEX,
         return_hf_format: bool = False) -> Dict[str, torch.Tensor]:
-
-    gt_bboxes = [inst['bbox'] for inst in instances]
-
     input_ids = []
     labels = []
     has_image = any(inst.get('pixel_values') is not None for inst in instances)
@@ -255,11 +252,22 @@ def withbbox_default_collate_fn(
         labels = torch.stack(labels)
 
     data_dict = {
-        'gt_bboxes': gt_bboxes,
         'input_ids': input_ids,
         'attention_mask': input_ids.ne(pad_index),
         'labels': labels
     }
+
+    gt_bboxes = []
+    gt_bboxes_masks = []
+    for inst in instances:
+        if 'mask' in inst:
+            gt_bboxes_masks.append(inst['mask'])
+        else:
+            gt_bboxes_masks.append(inst['bbox'])
+        gt_bboxes.append(inst['bbox'])
+    data_dict['gt_bboxes_masks'] = gt_bboxes_masks
+    data_dict['gt_bboxes'] = gt_bboxes  # 仅仅用于可视化，不参与训练和推理
+
     if has_image:
         pixel_values = torch.stack(pixel_values)
         data_dict['pixel_values'] = pixel_values

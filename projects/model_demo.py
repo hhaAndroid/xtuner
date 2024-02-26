@@ -21,12 +21,13 @@ from xtuner.dataset.samplers import LengthGroupedSampler
 from projects.modules import withbbox_default_collate_fn
 from mmengine.runner.runner import Runner
 import re
-from xtuner.model.modules import ProjectorConfig, ProjectorModel, dispatch_modules
+from xtuner.model.modules import ProjectorConfig, ProjectorModel
+import pycocotools.mask as maskUtils
 
 data_root = '/home/PJLAB/huanghaian/dataset/coco/'
 
 prompt_template = PROMPT_TEMPLATE.internlm2_chat
-max_length = int(2048 - (336 / 14) ** 2 - 1)
+max_length = int(2048 - (336 / 14) ** 2)
 
 visual_encoder_name_or_path = '/home/PJLAB/huanghaian/models--openai--clip-vit-large-patch14-336/snapshots' \
                               '/ce19dc912ca5cd21c8a653c79e251e808ccabcd1'
@@ -81,6 +82,23 @@ def sliding_window_vit_forward(pixel_values):
     return encoded_pixel_features
 
 
+def polygon_to_bitmap(polygons, height, width):
+    """Convert masks from the form of polygons to bitmaps.
+
+    Args:
+        polygons (list[ndarray]): masks in polygon representation
+        height (int): mask height
+        width (int): mask width
+
+    Return:
+        ndarray: the converted masks in bitmap representation
+    """
+    rles = maskUtils.frPyObjects(polygons, height, width)
+    rle = maskUtils.merge(rles)
+    bitmap_mask = maskUtils.decode(rle).astype(bool)
+    return bitmap_mask
+
+
 llm_name_or_path = 'internlm/internlm2-chat-7b'
 
 tokenizer = dict(
@@ -104,8 +122,11 @@ train_dataset = dict(
         dict(
             type=RRRDataset,
             data_root=data_root,
-            ann_file='annotations/instances_train2017_rrrvlm_ovd1.json',
-            data_prefix=dict(img='train2017/'),
+            # 如果是 bbox 后缀则 use_mask 必须设置为 False
+            ann_file='annotations/instances_val2017_rrrvlm_ovd1_mask.json',
+            data_prefix=dict(img='val2017/'),
+            use_mask=True,
+            bbox_mask_prob=0.7,
             tokenizer=tokenizer,
             image_processor=image_processor,
             dataset_map_fn=llava_map_fn,
@@ -116,8 +137,10 @@ train_dataset = dict(
         # dict(
         #     type=RRRDataset,
         #     data_root=data_root,
-        #     ann_file='annotations/instances_train2017_rrrvlm_region.json',
-        #     data_prefix=dict(img='train2017/'),
+        #     ann_file='annotations/instances_val2017_rrrvlm_region1_mask.json',
+        #     data_prefix=dict(img='val2017/'),
+        #     use_mask=True,
+        #     bbox_mask_prob=0.5,
         #     tokenizer=tokenizer,
         #     image_processor=image_processor,
         #     dataset_map_fn=llava_map_fn,
@@ -151,9 +174,9 @@ from projects.modules import GeoRegionSampler
 
 sampler = GeoRegionSampler(4096,
                            4096,
-                           512,
-                           num_sub_point=[128, 32],
-                           num_neighbor=[24, 24])
+                           256,
+                           num_sub_point=[64, 16],
+                           num_neighbor=[16, 16])
 
 for i, data_sampler in enumerate(train_dataloader):
     data = data_sampler['data']
@@ -171,13 +194,17 @@ for i, data_sampler in enumerate(train_dataloader):
         # 计算 Spatial-aware visual sampler, 模块输入是 visual_outputs 而不是 pixel_values
         # bbox 是原图尺度即可，内部会进行归一化处理
         region_mask = []
-        for b in data['gt_bboxes']:
-            if not isinstance(b, list):
-                b = [b]
+        for b in data['gt_bboxes_masks']:
             o_mask = []
             for _b in b:
-                coor_mask = torch.zeros((input_size, input_size))
-                coor_mask[_b[0]:_b[2], _b[1]:_b[3]] = 1
+                if len(_b) == 4:
+                    # bbox
+                    coor_mask = torch.zeros((input_size, input_size))
+                    coor_mask[_b[0]:_b[2], _b[1]:_b[3]] = 1
+                else:
+                    # mask
+                    coor_mask = polygon_to_bitmap(_b.reshape(-1, 2), input_size, input_size)
+                    coor_mask = torch.from_numpy(coor_mask)
                 assert len(coor_mask.nonzero()) != 0
                 o_mask.append(coor_mask)
             region_mask.append(o_mask)

@@ -24,6 +24,7 @@ from transformers import PreTrainedModel
 from .constants import IMAGE_TOKEN_INDEX, REGION_FEAT_TOKEN_INDEX, SEG_TOKEN_INDEX, IGNORE_INDEX
 from .visual_sampler import GeoRegionSampler
 from segment_anything import build_sam_vit_h
+from .utils import polygon_to_bitmap
 
 
 class RRRModel(BaseModel):
@@ -203,13 +204,17 @@ class RRRModel(BaseModel):
             # 计算 Spatial-aware visual sampler, 模块输入是 visual_outputs 而不是 pixel_values
             # bbox 是原图尺度即可，内部会进行归一化处理
             region_mask = []
-            for b in data['gt_bboxes']:
-                if not isinstance(b, list):
-                    b = [b]
+            for b in data['gt_bboxes_masks']:
                 o_mask = []
                 for _b in b:
-                    coor_mask = torch.zeros((self.input_size, self.input_size), device=pixel_values.device)
-                    coor_mask[_b[0]:_b[2], _b[1]:_b[3]] = 1
+                    if len(_b) == 4:
+                        # bbox
+                        coor_mask = torch.zeros((self.input_size, self.input_size), device=pixel_values.device)
+                        coor_mask[_b[0]:_b[2], _b[1]:_b[3]] = 1
+                    else:
+                        # mask
+                        coor_mask = polygon_to_bitmap(_b.reshape(-1, 2), self.input_size, self.input_size)
+                        coor_mask = torch.tensor(coor_mask, device=pixel_values.device)
                     assert len(coor_mask.nonzero()) != 0
                     o_mask.append(coor_mask)
                 region_mask.append(o_mask)
@@ -232,13 +237,17 @@ class RRRModel(BaseModel):
                 # 计算 Spatial-aware visual sampler, 模块输入是 visual_outputs 而不是 pixel_values
                 # bbox 是原图尺度即可，内部会进行归一化处理
                 region_mask = []
-                for b in data['gt_bboxes']:
-                    if not isinstance(b, list):
-                        b = [b]
+                for b in data['gt_bboxes_masks']:
                     o_mask = []
                     for _b in b:
-                        coor_mask = torch.zeros((self.input_size, self.input_size), device=pixel_values.device)
-                        coor_mask[_b[0]:_b[2], _b[1]:_b[3]] = 1
+                        if len(_b) == 4:
+                            # bbox
+                            coor_mask = torch.zeros((self.input_size, self.input_size), device=pixel_values.device)
+                            coor_mask[_b[0]:_b[2], _b[1]:_b[3]] = 1
+                        else:
+                            # mask
+                            coor_mask = polygon_to_bitmap(_b.reshape(-1, 2), self.input_size, self.input_size)
+                            coor_mask = torch.tensor(coor_mask, device=pixel_values.device)
                         assert len(coor_mask.nonzero()) != 0
                         o_mask.append(coor_mask)
                     region_mask.append(o_mask)

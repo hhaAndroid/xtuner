@@ -43,14 +43,17 @@ def coco2ovd(args):
     names = {cat['id']: cat['name'] for cat in cats}
     all_name = list(names.values())
 
-    with_mask = args.mask
+    with_mask = True
 
+    # 同时生成 mask 和 bbox 两份数据，方便做对比实验
     if args.output is None:
-        out_path = args.input[:-5] + '_rrrvlm_ovd1.json'
-        out_mask_path = args.input[:-5] + '_rrrvlm_ovd1_mask.pth'
+        out_mask_json_path = args.input[:-5] + '_rrrvlm_ovd1_mask.json'
+        out_bbox_json_path = args.input[:-5] + '_rrrvlm_ovd1_bbox.json'
+        out_mask_pth_path = args.input[:-5] + '_rrrvlm_ovd1_mask.pth'
     else:
-        out_path = args.output
-        out_mask_path = args.output[:-5] + '_mask.pth'
+        out_mask_json_path = args.output
+        out_bbox_json_path = args.output[:-5] + '_bbox.json'
+        out_mask_pth_path = args.output[:-5] + '.pth'
 
     out_datas = []
     out_masks = []
@@ -222,11 +225,20 @@ def coco2ovd(args):
             if total_num >= args.num:
                 break
 
-    if with_mask:
-        assert len(out_datas) == len(out_masks)
-        torch.save(out_masks, out_mask_path)
+    assert len(out_datas) == len(out_masks)
+    torch.save(out_masks, out_mask_pth_path)
 
-    with open(out_path, 'w') as file:
+    with open(out_mask_json_path, 'w') as file:
+        json.dump(out_datas, file)
+
+    # 同时保存一份 bbox 数据，方便对比实验
+    for data in out_datas:
+        num_mask = len(data['bbox'])
+        gpt_data = data['conversations'][1]['value']
+        for i in range(num_mask):
+            gpt_data = gpt_data.replace('<seg' + str(i) + '>', '')
+        data['conversations'][1]['value'] = gpt_data
+    with open(out_bbox_json_path, 'w') as file:
         json.dump(out_datas, file)
 
 
@@ -241,14 +253,14 @@ def _get_adaptive_scales(areas: np.ndarray,
 def show(args):
     vis = Visualizer()
 
-    with_mask = args.mask
+    with_mask = True
 
     if args.output is None:
-        out_path = args.input[:-5] + '_rrrvlm_ovd1.json'
+        out_path = args.input[:-5] + '_rrrvlm_ovd1_mask.json'
         out_mask_path = args.input[:-5] + '_rrrvlm_ovd1_mask.pth'
     else:
         out_path = args.output
-        out_mask_path = args.output[:-5] + '_mask.pth'
+        out_mask_path = args.output[:-5] + '.pth'
 
     json_data = json.load(open(out_path))
 
@@ -316,9 +328,7 @@ if __name__ == '__main__':
                         type=str, help='input json file name')
     parser.add_argument(
         '--img-prefix', type=str, default='val2017')
-    parser.add_argument('--num', '-n', type=int, default=10)  # 300000
-    parser.add_argument(
-        '--mask', '-m', action='store_true', help='Whether to add mask')
+    parser.add_argument('--num', '-n', type=int, default=100)  # 300000
     parser.add_argument(
         '--output', '-o', type=str, help='output json file name')
     parser.add_argument(

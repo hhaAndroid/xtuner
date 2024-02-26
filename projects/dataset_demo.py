@@ -46,8 +46,11 @@ train_dataset = dict(
         dict(
             type=RRRDataset,
             data_root=data_root,
-            ann_file='annotations/instances_train2017_rrrvlm_ovd1.json',
-            data_prefix=dict(img='train2017/'),
+            # 如果是 bbox 后缀则 use_mask 必须设置为 False
+            ann_file='annotations/instances_val2017_rrrvlm_ovd1_mask.json',
+            data_prefix=dict(img='val2017/'),
+            use_mask=True,
+            bbox_mask_prob=0.5,
             tokenizer=tokenizer,
             image_processor=image_processor,
             dataset_map_fn=llava_map_fn,
@@ -58,8 +61,10 @@ train_dataset = dict(
         dict(
             type=RRRDataset,
             data_root=data_root,
-            ann_file='annotations/instances_train2017_rrrvlm_region1.json',
-            data_prefix=dict(img='train2017/'),
+            ann_file='annotations/instances_val2017_rrrvlm_region1_mask.json',
+            data_prefix=dict(img='val2017/'),
+            use_mask=True,
+            bbox_mask_prob=0.5,
             tokenizer=tokenizer,
             image_processor=image_processor,
             dataset_map_fn=llava_map_fn,
@@ -98,51 +103,66 @@ def _get_adaptive_scales(areas: np.ndarray,
     return scales
 
 
-for data in rrr_dataset:
-    pixel_values = data['pixel_values']
-    pixel_values = pixel_values * std + mean
-    pixel_values = pixel_values * 255
-    pixel_values = torch.permute(pixel_values, (1, 2, 0))
+debug_dataset = True
 
-    vis.set_image(pixel_values.numpy())
+if debug_dataset:
+    for data in rrr_dataset:
+        pixel_values = data['pixel_values']
+        pixel_values = pixel_values * std + mean
+        pixel_values = pixel_values * 255
+        pixel_values = torch.permute(pixel_values, (1, 2, 0))
 
-    conversation = data['conversation'][0]['input']
-    print(conversation)
-    print(data['conversation'][0]['output'])
+        vis.set_image(pixel_values.numpy())
 
-    bboxes = data['bbox']
-    name = data['name']
+        conversation = data['conversation'][0]['input']
+        print(conversation)
+        print(data['conversation'][0]['output'])
 
-    bboxes = np.array(bboxes).reshape(-1, 4)
-    positions = bboxes[:, :2] + 3
-    areas = (bboxes[:, 3] - bboxes[:, 1]) * (
-            bboxes[:, 2] - bboxes[:, 0])
-    scales = _get_adaptive_scales(areas)
-    vis.draw_bboxes(bboxes, edge_colors='r', line_widths=3)
-    vis.draw_texts(
-        name,
-        positions,
-        colors='g',
-        font_sizes=[int(13 * s) for s in scales],
-        bboxes=[{
-            'facecolor': 'black',
-            'alpha': 0.8,
-            'pad': 0.7,
-            'edgecolor': 'none'
-        }] * len(scales))
-    vis.show()
+        bboxes = data['bbox']
+        name = data['name']
 
-train_dataloader = dict(
-    batch_size=4,
-    num_workers=0,
-    dataset=rrr_dataset,
-    sampler=dict(
-        type=LengthGroupedSampler,
-        length_property='length',
-        per_device_batch_size=4 * 1),
-    collate_fn=dict(type=withbbox_default_collate_fn))
+        image2colors = []
+        for _ in range(len(bboxes)):
+            colors = np.random.random((1, 3)) * 0.7 + 0.3
+            colors = (colors * 255).astype(int).tolist()[0]
+            image2colors.append(tuple(colors))
 
-train_dataloader = Runner.build_dataloader(train_dataloader)
-for i, load in enumerate(train_dataloader):
-    print(load)
-    break
+        bboxes = np.array(bboxes).reshape(-1, 4)
+        positions = bboxes[:, :2] + 3
+        areas = (bboxes[:, 3] - bboxes[:, 1]) * (
+                bboxes[:, 2] - bboxes[:, 0])
+        scales = _get_adaptive_scales(areas)
+        vis.draw_bboxes(bboxes, edge_colors=image2colors, line_widths=3)
+        vis.draw_texts(
+            name,
+            positions,
+            colors='g',
+            font_sizes=[int(13 * s) for s in scales],
+            bboxes=[{
+                'facecolor': 'black',
+                'alpha': 0.8,
+                'pad': 0.7,
+                'edgecolor': 'none'
+            }] * len(scales))
+
+        if 'mask' in data:
+            mask = data['mask']
+            for i, m in enumerate(mask):
+                vis.draw_polygons(m.reshape(-1, 2), edge_colors='w', face_colors=image2colors[i])
+
+        vis.show()
+else:
+    train_dataloader = dict(
+        batch_size=4,
+        num_workers=0,
+        dataset=rrr_dataset,
+        sampler=dict(
+            type=LengthGroupedSampler,
+            length_property='length',
+            per_device_batch_size=4 * 1),
+        collate_fn=dict(type=withbbox_default_collate_fn))
+
+    train_dataloader = Runner.build_dataloader(train_dataloader)
+    for i, load in enumerate(train_dataloader):
+        print(load)
+        break

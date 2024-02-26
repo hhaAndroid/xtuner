@@ -56,7 +56,7 @@ class RRREvaluateChatHook(EvaluateChatHook):
                               'pixel_values': image.unsqueeze(0)}
                 if model.sampler is not None:
                     # with bbox inputs
-                    input_dict['gt_bboxes'] = [gt_bboxes]  # batch
+                    input_dict['gt_bboxes_masks'] = [gt_bboxes]  # batch
 
                 with torch.no_grad():
                     mm_inputs = model.prepare_for_eval(input_dict)
