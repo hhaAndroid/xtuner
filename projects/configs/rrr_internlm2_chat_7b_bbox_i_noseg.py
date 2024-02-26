@@ -130,7 +130,7 @@ train_dataset = dict(
         dict(
             type=RRRDataset,
             data_root=data_root,
-            ann_file='annotations/instances_train2017_rrrvlm_ovd1.json',
+            ann_file='annotations/instances_train2017_rrrvlm_ovd1_bbox.json',
             data_prefix=dict(img='train2017/'),
             tokenizer=tokenizer,
             image_processor=image_processor,
@@ -142,7 +142,7 @@ train_dataset = dict(
         dict(
             type=RRRDataset,
             data_root=data_root,
-            ann_file='annotations/instances_train2017_rrrvlm_region1.json',
+            ann_file='annotations/instances_train2017_rrrvlm_region1_bbox.json',
             data_prefix=dict(img='train2017/'),
             tokenizer=tokenizer,
             image_processor=image_processor,
@@ -169,7 +169,7 @@ inference_dataset = dict(
     type=RRRDataset,
     input_ids_with_output=False,  # 非常重要
     data_root=data_root,
-    ann_file='annotations/instances_val2017_rrrvlm_ovd1.json',
+    ann_file='annotations/instances_val2017_rrrvlm_ovd1_bbox.json',
     data_prefix=dict(img='val2017/'),
     tokenizer=tokenizer,
     image_processor=image_processor,

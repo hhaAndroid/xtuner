@@ -67,7 +67,7 @@ class RRRDataset(Dataset):
                  max_length=2048,
                  img_size=(672, 672),
                  use_mask=False,
-                 bbox_mask_prob=0.5,  # 只有 use_mask 为 True 才有效
+                 bbox_to_mask_prob=0.5,  # 只有 use_mask 为 True 才有效
                  input_ids_with_output=True  # 推理时候应该是 false
                  ):
         self.data_root = data_root
@@ -77,9 +77,9 @@ class RRRDataset(Dataset):
 
         self.use_mask = use_mask
         # =0 表示只有 bbox，=0.7 表示 70% 概率用 mask， =1 表示只有 mask
-        self.bbox_mask_prob = bbox_mask_prob
+        self.bbox_to_mask_prob = bbox_to_mask_prob
         if self.use_mask:
-            mask_path = ann_file_path.replace('.json', '.pth')
+            mask_path = ann_file_path.replace('_bbox', '_mask').replace('.json', '.pth')
             mask_list_dict = torch.load(mask_path)
             assert len(mask_list_dict) == len(json_data), f'the length of mask_data: {len(mask_list_dict)} ' \
                                                           f'is not equal to json_data: {len(json_data)}'
@@ -148,7 +148,7 @@ class RRRDataset(Dataset):
 
             if self.use_mask:
                 mask = self.id_to_mask[data_dict['id']]
-                if random.random() < self.bbox_mask_prob:
+                if random.random() < self.bbox_to_mask_prob:
                     data_dict['mask'] = mask
                     # bbox 还是保留，方便可视化啥的
                     # 如果存在 mask 数据，则训练和推理只用 mask
