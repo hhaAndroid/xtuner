@@ -29,11 +29,11 @@ import torch.nn.functional as F
 
 
 def dice_loss(
-    inputs: torch.Tensor,
-    targets: torch.Tensor,
-    num_masks: float,
-    scale=1000,  # 100000.0,
-    eps=1e-6,
+        inputs: torch.Tensor,
+        targets: torch.Tensor,
+        num_masks: float,
+        scale=1000,  # 100000.0,
+        eps=1e-6,
 ):
     """
     Compute the DICE loss, similar to generalized IOU for masks
@@ -55,9 +55,9 @@ def dice_loss(
 
 
 def sigmoid_ce_loss(
-    inputs: torch.Tensor,
-    targets: torch.Tensor,
-    num_masks: float,
+        inputs: torch.Tensor,
+        targets: torch.Tensor,
+        num_masks: float,
 ):
     """
     Args:
@@ -292,6 +292,10 @@ class RRRModel(BaseModel):
         assert len(self.model.text_hidden_fcs) == 1
         hidden_states = self.model.text_hidden_fcs[0](output_hidden_states[-1])
         pred_embeddings = hidden_states[seg_token_mask]
+
+        if pred_embeddings.shape[0] == 0:
+            # 没有找到 seg token
+            return []
 
         # 上述操作会丢失 bs 信息，需要还原回来
         seg_token_counts = seg_token_mask.int().sum(-1)  # [bs, ]
