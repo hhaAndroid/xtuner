@@ -43,7 +43,7 @@ class RRREvaluateChatHook(EvaluateChatHook):
                     padding_h, padding_w = sam_image.shape[:2]  # 网络训练的输入尺寸,不包括 padding 部分
                     mask_data_dict['padding_size'] = [(padding_h, padding_w)]
                     sam_image = self.sam_preprocess(torch.from_numpy(sam_image).permute(2, 0, 1).contiguous())
-                    mask_data_dict['sam_pixel_values'] = sam_image.unsqueeze(0)  # 考虑 bs
+                    mask_data_dict['sam_pixel_values'] = sam_image.unsqueeze(0).to(device)  # 考虑 bs
 
                 scale_factor = min(self.img_size[0] / max(old_h, old_w),
                                    self.img_size[0] / min(old_h, old_w))
@@ -72,10 +72,14 @@ class RRREvaluateChatHook(EvaluateChatHook):
                     # with bbox inputs
                     input_dict['gt_bboxes_masks'] = [gt_bboxes]  # batch
 
+                # 设置也是无效的，因为我们输入到模型的是 input_embeds，此时 hf 不允许设置为 false
+                self.gen_config.use_cache = False
                 with torch.no_grad():
                     mm_inputs = model.prepare_for_eval(input_dict)
                     generation_output = model.generate(
                         **mm_inputs,
+                        output_hidden_states=True,
+                        return_dict_in_generate=True,
                         max_new_tokens=max_new_tokens,
                         generation_config=self.gen_config,
                         bos_token_id=self.tokenizer.bos_token_id,
@@ -84,10 +88,9 @@ class RRREvaluateChatHook(EvaluateChatHook):
 
                     # TODO 可视化结果保存
 
-
                 runner.logger.info(
                     f'Sample output:\n'
-                    f'{inputs + self.tokenizer.decode(generation_output[0])}\n'
+                    f'{inputs + self.tokenizer.decode(generation_output.sequences[0])}\n'
                 )
         else:
             for sample_input in self.evaluation_inputs:

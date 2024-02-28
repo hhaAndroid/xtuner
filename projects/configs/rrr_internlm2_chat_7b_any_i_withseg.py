@@ -22,10 +22,10 @@ from projects.modules import ADD_TOKENS_DECODER, RRRModel, RRREvaluateChatHook, 
 #                          PART 1  Settings                           #
 #######################################################################
 # Model
-llm_name_or_path = 'internlm/internlm2-chat-7b'
-visual_encoder_name_or_path = 'openai/clip-vit-large-patch14-336'
-# llm_name_or_path = 'model/models--internlm--internlm2-chat-7b/snapshots/2292b86b21cb856642782cebed0a453997453b1f'
-# visual_encoder_name_or_path = 'model/models--openai--clip-vit-large-patch14-336/snapshots/ce19dc912ca5cd21c8a653c79e251e808ccabcd1'
+# llm_name_or_path = 'internlm/internlm2-chat-7b'
+# visual_encoder_name_or_path = 'openai/clip-vit-large-patch14-336'
+llm_name_or_path = 'model/models--internlm--internlm2-chat-7b/snapshots/2292b86b21cb856642782cebed0a453997453b1f'
+visual_encoder_name_or_path = 'model/models--openai--clip-vit-large-patch14-336/snapshots/ce19dc912ca5cd21c8a653c79e251e808ccabcd1'
 pretrained_pth = '/mnt/petrelfs/huanghaian/code/mm/xtuner/work_dirs/rrr_internlm2_chat_7b_clip_vit_large_p14_336_e1_gpu8_pretrain/iter_2181.pth'  # noqa: E501
 
 # Data
@@ -36,7 +36,9 @@ max_length = int(2048 - (336 / 14) ** 2)  # 文本里面已经考虑了 region t
 # Scheduler & Optimizer
 batch_size = 16  # per_device
 accumulative_counts = 1
-dataloader_num_workers = 0
+dataloader_num_workers = 4
+pin_memory = True
+
 max_epochs = 1
 optim_type = AdamW
 lr = 2e-4
@@ -66,7 +68,8 @@ input_1 = ["<image>\nIn the conversation below, you simply answer the category n
            "potted plant,motorcycle,broccoli,giraffe,backpack,sink,sports ball,hot dog,airplane,microwave,"
            "refrigerator,vase,orange,train,carrot,skateboard,keyboard,zebra,dining table. Region: "
            "1.<region_feat>;2.<region_feat>;3.<region_feat>;4.<region_feat>;5.<region_feat>.",
-           [[255, 350, 349, 477], [61, 360, 144, 408], [401, 411, 479, 507], [235, 352, 281, 411], [175, 342, 231, 516]]]
+           [[255, 350, 349, 477], [61, 360, 144, 408], [401, 411, 479, 507], [235, 352, 281, 411],
+            [175, 342, 231, 516]]]
 input_2 = ["<image>\nIn the conversation below, you simply answer the category name based on what you see in the "
            "imagery inside a region. I will input multiple regions. Please reply strictly in the order of the input. "
            "Region: 1.<region_feat>;2.<region_feat>;3.<region_feat>;4.<region_feat>.",
@@ -91,10 +94,18 @@ image_processor = dict(
     do_resize=False,
     trust_remote_code=True)
 
+use_mask = True
+bbox_to_mask_prob = 0.5
+use_sam = True
+use_visual_sampler = True
+
 model = dict(
     type=RRRModel,
     freeze_llm=True,
-    use_visual_sampler=True,
+    use_visual_sampler=use_visual_sampler,
+    use_sam=use_sam,
+    # https://dl.fbaipublicfiles.com/segment_anything/sam_vit_h_4b8939.pth
+    sam_pretrained_pth='sam_vit_h_4b8939.pth',
     pretrained_pth=pretrained_pth,
     llm=dict(
         type=AutoModelForCausalLM.from_pretrained,
@@ -131,8 +142,9 @@ train_dataset = dict(
             type=RRRDataset,
             data_root=data_root,
             ann_file='annotations/instances_train2017_rrrvlm_ovd1_mask.json',
-            use_mask=True,
-            bbox_to_mask_prob=0.5,
+            use_mask=use_mask,
+            bbox_to_mask_prob=bbox_to_mask_prob,
+            use_sam=use_sam,
             data_prefix=dict(img='train2017/'),
             tokenizer=tokenizer,
             image_processor=image_processor,
@@ -145,8 +157,9 @@ train_dataset = dict(
             type=RRRDataset,
             data_root=data_root,
             ann_file='annotations/instances_train2017_rrrvlm_region1_mask.json',
-            use_mask=True,
-            bbox_to_mask_prob=1.0,
+            use_mask=use_mask,
+            bbox_to_mask_prob=bbox_to_mask_prob,
+            use_sam=use_sam,
             data_prefix=dict(img='train2017/'),
             tokenizer=tokenizer,
             image_processor=image_processor,
@@ -162,6 +175,7 @@ train_dataloader = dict(
     batch_size=batch_size,
     num_workers=dataloader_num_workers,
     dataset=train_dataset,
+    pin_memory=pin_memory,
     sampler=dict(
         type=LengthGroupedSampler,
         length_property='length',

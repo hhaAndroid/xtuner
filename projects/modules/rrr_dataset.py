@@ -17,6 +17,8 @@ from .constants import IMAGE_TOKEN_INDEX
 import random
 from segment_anything.utils.transforms import ResizeLongestSide
 import numpy as np
+import torch.nn.functional as Torch_F
+import cv2
 
 
 class PretrainLLaVADataset(LLaVADataset):
@@ -130,7 +132,7 @@ class RRRDataset(Dataset):
         h, w = x.shape[-2:]  # 往后 padding
         padh = img_size - h
         padw = img_size - w
-        x = F.pad(x, (0, padw, 0, padh))
+        x = Torch_F.pad(x, (0, padw, 0, padh))
         return x
 
     @property
@@ -159,9 +161,11 @@ class RRRDataset(Dataset):
                 padding_h, padding_w = sam_image.shape[:2]  # 网络训练的输入尺寸,不包括 padding 部分
                 data_dict['padding_size'] = (padding_h, padding_w)
                 sam_image = self.sam_preprocess(torch.from_numpy(sam_image).permute(2, 0, 1).contiguous())
+                # print(data_dict['orig_size'],data_dict['padding_size'],sam_image.shape)
                 data_dict['sam_pixel_values'] = sam_image
                 # 原图尺度的 polygon mask
-                data_dict['sam_mask'] = self.id_to_sam_mask[data_dict['id']]
+                sam_mask = self.id_to_sam_mask[data_dict['id']]
+                data_dict['sam_mask'] = self.polygons2masks(old_h, old_w, sam_mask)
 
             scale_factor = min(self.img_size[0] / max(old_h, old_w),
                                self.img_size[0] / min(old_h, old_w))
@@ -182,10 +186,34 @@ class RRRDataset(Dataset):
             if self.use_mask:
                 mask = self.id_to_mask[data_dict['id']]
                 if random.random() < self.bbox_to_mask_prob:
-                    data_dict['mask'] = mask
+                    data_dict['mask'] = self.polygons2masks(image.shape[1], image.shape[2], mask)
                     # bbox 还是保留，方便可视化啥的
                     # 如果存在 mask 数据，则训练和推理只用 mask
                     # del data_dict['bbox']
         else:
             raise NotImplementedError()
         return data_dict
+
+    def polygon2mask(self,
+                     h,
+                     w,
+                     polygons: np.ndarray,
+                     color: int = 1) -> np.ndarray:
+        mask = np.zeros((h, w), dtype=np.uint8)
+        polygons = np.asarray(polygons, dtype=np.int32)
+        cv2.fillPoly(mask, polygons.reshape(1, -1, 2), color=1)
+        return mask
+
+    def polygons2masks(self,
+                       h,
+                       w,
+                       polygons,
+                       color: int = 1):
+        masks = []
+        for si in range(len(polygons)):
+            mask = self.polygon2mask(h, w, polygons[si], color)
+            masks.append(mask)
+        masks = np.stack(masks, axis=0)
+        masks = torch.from_numpy(masks)
+        return masks
+

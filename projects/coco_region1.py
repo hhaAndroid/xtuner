@@ -116,7 +116,7 @@ def coco2ovd(args):
                 if new_h < MIN_BBOX_SIZE or new_w < MIN_BBOX_SIZE:
                     continue
 
-                new_ann_info.append({'bbox': bbox_xyxy, 'label': names[ann['category_id']]})
+                new_data={'bbox': bbox_xyxy, 'label': names[ann['category_id']]}
 
                 if with_mask:
                     gt_mask = ann['segmentation']
@@ -139,7 +139,7 @@ def coco2ovd(args):
                             'format currently')
 
                     # sam 计算 loss 时候需要一份原始尺度的
-                    new_ann_info[-1]['sam_mask'] = copy.deepcopy(new_gt_masks)
+                    new_data['sam_mask'] = copy.deepcopy(new_gt_masks)
 
                     # 和 bbox 一样进行数值变换
                     w_scale = neww / img_info['width']
@@ -148,7 +148,8 @@ def coco2ovd(args):
                     new_gt_masks[1::2] = new_gt_masks[1::2] * h_scale
                     new_gt_masks[0::2] = new_gt_masks[0::2] + padding_w
                     new_gt_masks[1::2] = new_gt_masks[1::2] + padding_h
-                    new_ann_info[-1]['mask'] = new_gt_masks
+                    new_data['mask'] = new_gt_masks
+                new_ann_info.append(new_data)
 
             if len(new_ann_info) == 0:
                 continue
@@ -164,7 +165,7 @@ def coco2ovd(args):
             random.shuffle(sample_ann_info)
 
             # 提取信息
-            out_data = {'id': img_id, 'image': img_info['file_name']}
+            out_data = {'id': str(img_id)+"_"+str(total_num), 'image': img_info['file_name']}
 
             all_bboxes = [ann['bbox'] for ann in sample_ann_info]
             all_names = [ann['label'] for ann in sample_ann_info]
@@ -174,7 +175,7 @@ def coco2ovd(args):
             if with_mask:
                 all_masks = [ann['mask'] for ann in sample_ann_info]
                 all_sam_masks = [ann['sam_mask'] for ann in sample_ann_info]
-                out_masks.append({'id': img_id, 'mask': all_masks, 'sam_mask': all_sam_masks})
+                out_masks.append({'id': str(img_id)+"_"+str(total_num), 'mask': all_masks, 'sam_mask': all_sam_masks})
 
             if len(all_bboxes) == 1:
                 temp = random.choice(OVD_TEMPLATE_ONE)
@@ -320,11 +321,11 @@ def show(args):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser('coco to ovd format.', add_help=True)
     parser.add_argument('--input',
-                        default='/home/PJLAB/huanghaian/dataset/coco/annotations/instances_val2017.json',
+                        default='data/coco/annotations/instances_train2017.json',
                         type=str, help='input json file name')
     parser.add_argument(
-        '--img-prefix', type=str, default='val2017')
-    parser.add_argument('--num', '-n', type=int, default=100)  # 300000
+        '--img-prefix', type=str, default='train2017')
+    parser.add_argument('--num', '-n', type=int, default=300000)  # 300000
     parser.add_argument(
         '--output', '-o', type=str, help='output json file name')
     parser.add_argument(

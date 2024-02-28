@@ -95,8 +95,8 @@ class RRRModel(BaseModel):
                  sam_pretrained_pth=None,
                  # 仅仅开启了 sam 训练才有效
                  ce_loss_weight=1.0,
-                 dice_loss_weight=1.0,
-                 bce_loss_weight=1.0
+                 dice_loss_weight=0.5,
+                 bce_loss_weight=2.0
                  ):
         super().__init__()
 
@@ -235,7 +235,7 @@ class RRRModel(BaseModel):
                 y1 = max(y2 - self.sliding_window_size, 0)
                 x1 = max(x2 - self.sliding_window_size, 0)
                 cur_pixel_values = pixel_values[..., y1:y2, x1:x2]
-
+                # 可以接受 fp32 输入，model 是 bf16 格式，输出是 bf16，因为内部有 target_dtype = self.patch_embedding.weight.dtype 代码
                 cur_visual_outputs = self.visual_encoder(cur_pixel_values, output_hidden_states=True)
                 # 无需考虑 cls_outputs
                 last_hidden_state = cur_visual_outputs.hidden_states[self.visual_select_layer][:, 1:]
@@ -284,24 +284,30 @@ class RRRModel(BaseModel):
 
     def postprocess_for_eval(self, llm_out, mask_data_dict):
         # 只有开启了 sam 才会调用
-        output_hidden_states = llm_out.hidden_states[-1]
-        output_ids = llm_out.sequences
+        # TODO 暂时没有验证 bs>1 情况下正确性
+        # 第 0 个是第一次输入推理的隐含层输出，不需要, 因为不可能是我们关心的
+        output_hidden_states = llm_out.hidden_states[1:]
+        output_hidden_states = [o[-1] for o in output_hidden_states]  # 每一个shape 都是 (b,1,4096)
+        output_hidden_states = torch.cat(output_hidden_states, dim=1)  # b,N,4096
 
-        seg_token_mask = output_ids[:, 1:] == SEG_TOKEN_INDEX
+        output_ids = llm_out.sequences  # (B,N+1)
 
-        assert len(self.model.text_hidden_fcs) == 1
-        hidden_states = self.model.text_hidden_fcs[0](output_hidden_states[-1])
+        # 不需要前2个是因为, 本身第一个是开始符，第 2 个第一次推理结果，我们前面已经丢弃了。
+        seg_token_mask = output_ids[:, 2:] == SEG_TOKEN_INDEX
+
+        assert len(self.text_hidden_fcs) == 1
+        hidden_states = self.text_hidden_fcs[0](output_hidden_states)
         pred_embeddings = hidden_states[seg_token_mask]
 
         if pred_embeddings.shape[0] == 0:
-            # 没有找到 seg token
-            return []
+            # 所有预测都没有找到 seg token，暂时只验证 bs=1 情况
+            return [None] * output_hidden_states.shape[0]  # bs
 
         # 上述操作会丢失 bs 信息，需要还原回来
         seg_token_counts = seg_token_mask.int().sum(-1)  # [bs, ]
         seg_token_offset = seg_token_counts.cumsum(-1)
         seg_token_offset = torch.cat(
-            [torch.zeros(1).long().cuda(), seg_token_offset], dim=0
+            [torch.zeros(1, device=seg_token_counts.device).long(), seg_token_offset], dim=0
         )
 
         pred_embeddings_ = []
@@ -318,7 +324,7 @@ class RRRModel(BaseModel):
             (
                 sparse_embeddings,
                 dense_embeddings,
-            ) = self.model.visual_model.prompt_encoder(
+            ) = self.sam_model.prompt_encoder(
                 points=None,
                 boxes=None,
                 masks=None,
@@ -326,22 +332,24 @@ class RRRModel(BaseModel):
             )
 
             sparse_embeddings = sparse_embeddings.to(pred_embeddings[i].dtype)
-            low_res_masks, iou_predictions = self.model.visual_model.mask_decoder(
+            low_res_masks, iou_predictions = self.sam_model.mask_decoder(
                 image_embeddings=image_embeddings[i].unsqueeze(0),
-                image_pe=self.model.visual_model.prompt_encoder.get_dense_pe(),
+                image_pe=self.sam_model.prompt_encoder.get_dense_pe(),
                 sparse_prompt_embeddings=sparse_embeddings,
                 dense_prompt_embeddings=dense_embeddings,
                 multimask_output=multimask_output,
             )
-            pred_mask = self.model.visual_model.postprocess_masks(
-                low_res_masks,
+            orig_dtype = low_res_masks.dtype
+            pred_mask = self.sam_model.postprocess_masks(
+                low_res_masks.float(),
                 input_size=mask_data_dict['padding_size'][i],
                 original_size=mask_data_dict['orig_size'][i],
             )
-            pred_masks.append(pred_mask[:, 0])
+            pred_masks.append(pred_mask[:, 0].to(orig_dtype))
         return pred_masks
 
     def forward(self, data, data_samples=None, mode='loss'):
+        mask_data_dict = {}
         if 'pixel_values' in data:
             if self.training:
                 # 训练时候才有这个逻辑，推理时候不能如此处理
@@ -358,6 +366,10 @@ class RRRModel(BaseModel):
                         dim=1,
                     )
                     self._seg_token_mask = seg_token_mask
+                    mask_data_dict['sam_pixel_values'] = data['sam_pixel_values']
+                    mask_data_dict['orig_size'] = data['orig_size']
+                    mask_data_dict['padding_size'] = data['padding_size']
+                    mask_data_dict['sam_mask'] = data['sam_mask']
 
             visual_outputs = self.sliding_window_vit_forward(data['pixel_values'])
             visual_outputs = visual_outputs + self.window_pos_embed
@@ -380,8 +392,7 @@ class RRRModel(BaseModel):
                             coor_mask[_b[0]:_b[2], _b[1]:_b[3]] = 1
                         else:
                             # mask
-                            coor_mask = polygon_to_bitmap(_b.reshape(-1, 2), self.input_size, self.input_size)
-                            coor_mask = torch.tensor(coor_mask, device=pixel_values.device)
+                            coor_mask = _b.to(pixel_values.device)
                         assert len(coor_mask.nonzero()) != 0
                         o_mask.append(coor_mask)
                     region_mask.append(o_mask)
@@ -391,7 +402,7 @@ class RRRModel(BaseModel):
             data = prepare_inputs_labels_for_multimodal(llm=self.llm, **data)
 
         if mode == 'loss':
-            return self.compute_loss(data, data_samples)
+            return self.compute_loss(data, data_samples, mask_data_dict)
         elif mode == 'predict':  # 不会运行，无需关注
             return self.predict(data, data_samples)
         elif mode == 'tensor':  # 不会运行，无需关注
@@ -404,8 +415,9 @@ class RRRModel(BaseModel):
             image_embeddings_list = []
             for i in range(pixel_values.shape[0]):
                 torch.cuda.empty_cache()
+                # 不允许 fp32 和 bf16 运算
                 image_embeddings = self.sam_model.image_encoder(
-                    pixel_values[i].unsqueeze(0)
+                    pixel_values[i].unsqueeze(0).to(self.sam_model.image_encoder.pos_embed.dtype)
                 )  # stride 16
                 image_embeddings_list.append(image_embeddings)
             torch.cuda.empty_cache()
@@ -423,18 +435,23 @@ class RRRModel(BaseModel):
         logits_dict = [{'logits': logits} for logits in outputs.logits]
         return logits_dict
 
-    def compute_loss(self, data, data_samples=None):
-        outputs = self.llm(**data)
-        loss_dict = {'loss': outputs.loss * self.ce_loss_weight}
+    def compute_loss(self, data, data_samples=None, mask_data_dict=None):
+        if self._need_seg_token and self.training:  # sam 训练
+            outputs = self.llm(**data, output_hidden_states=True)
+            loss_dict = {'loss_llm': outputs.loss * self.ce_loss_weight}
+        else:
+            outputs = self.llm(**data)
+            loss_dict = {'loss': outputs.loss * self.ce_loss_weight}
 
         if self._need_seg_token and self.training:  # sam 训练
-            image_embeddings = self.get_sam_visual_embs(data['sam_pixel_values'])
+            image_embeddings = self.get_sam_visual_embs(mask_data_dict['sam_pixel_values'])
 
             # 考虑 sam loss
             output_hidden_states = outputs.hidden_states
-            assert len(self.model.text_hidden_fcs) == 1
-            hidden_states = self.model.text_hidden_fcs[0](output_hidden_states[-1])
-            pred_embeddings = hidden_states[self._seg_token_mask]
+            assert len(self.text_hidden_fcs) == 1
+            hidden_states = self.text_hidden_fcs[0](output_hidden_states[-1])
+            # 因为 image id 在前面，因此我们只需要截取后部分就可以，不会有啥影响，因为 seg token 不可能在前面
+            pred_embeddings = hidden_states[:, -self._seg_token_mask.shape[1]:, :][self._seg_token_mask]
 
             # 上述操作会丢失 bs 信息，需要还原回来
             seg_token_counts = self._seg_token_mask.int().sum(-1)  # [bs, ]
@@ -461,34 +478,31 @@ class RRRModel(BaseModel):
                     text_embeds=pred_embeddings[i].unsqueeze(1),
                 )
                 sparse_embeddings = sparse_embeddings.to(pred_embeddings[i].dtype)
-                low_res_masks, iou_predictions = self.sam_model.mask_decoder(
+                low_res_masks, _ = self.sam_model.mask_decoder(
                     image_embeddings=image_embeddings[i].unsqueeze(0),
                     image_pe=self.sam_model.prompt_encoder.get_dense_pe(),
                     sparse_prompt_embeddings=sparse_embeddings,
                     dense_prompt_embeddings=dense_embeddings,
                     multimask_output=multimask_output,
                 )
+                # 不支持 bf16
+                orig_dtype = low_res_masks.dtype
                 pred_mask = self.sam_model.postprocess_masks(
-                    low_res_masks,
-                    input_size=data['padding_size'][i],
-                    original_size=data['orig_size'][i],
+                    low_res_masks.float(),
+                    input_size=mask_data_dict['padding_size'][i],
+                    original_size=mask_data_dict['orig_size'][i],
                 )
-                pred_masks.append(pred_mask[:, 0])
+                pred_masks.append(pred_mask[:, 0].to(orig_dtype))
 
             mask_bce_loss = 0
             mask_dice_loss = 0
             num_masks = 0
-            gt_masks = data['sam_mask']
+            gt_masks = mask_data_dict['sam_mask']
 
             for batch_idx in range(len(pred_masks)):
                 pred_mask = pred_masks[batch_idx]
 
-                ori_h, ori_w = data['orig_size'][batch_idx]
-                gt_mask = gt_masks[batch_idx]
-                # polygon 转换为 n 个 bitmap 格式
-                gt_mask = [mask.reshape(-1, 2) for mask in gt_mask]
-                gt_mask = polygon_to_bitmap(gt_mask, ori_h, ori_w)
-                gt_mask = torch.tensor(gt_mask, device=pred_mask.device)
+                gt_mask = gt_masks[batch_idx].to(device=pred_mask.device, dtype=pred_mask.dtype)
 
                 assert (
                         gt_mask.shape[0] == pred_mask.shape[0]
