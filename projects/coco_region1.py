@@ -180,7 +180,10 @@ def coco2ovd(args):
             if len(all_bboxes) == 1:
                 temp = random.choice(OVD_TEMPLATE_ONE)
                 out_temp = random.choice(OUT_TEMPLATE_ONE)
-                out_temp = out_temp.replace('<c>', all_names[0])
+                if with_mask:
+                    out_temp = out_temp.replace('<c>', f'{all_names[0]}<seg>')
+                else:
+                    out_temp = out_temp.replace('<c>', all_names[0])
             else:
                 temp = random.choice(OVD_TEMPLATE_MANY)
 
