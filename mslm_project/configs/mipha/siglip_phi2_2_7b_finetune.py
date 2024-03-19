@@ -29,7 +29,7 @@ data_root = './data/llava_data/'
 data_path = data_root + 'LLaVA-Instruct-150K/llava_v1_5_mix665k.json'
 image_folder = data_root + 'llava_images'
 prompt_template = PROMPT_TEMPLATE.vicuna
-max_length = int(2048 - (336 / 14)**2)
+max_length = int(2048 - (384 // 14)**2)
 
 # Scheduler & Optimizer
 batch_size = 16  # per_device
@@ -169,6 +169,7 @@ default_hooks = dict(
     # save checkpoint per `save_steps`.
     checkpoint=dict(
         type=CheckpointHook,
+        save_optimizer=False,  # can save disk memory mmengine >=0.10.3
         by_epoch=False,
         interval=save_steps,
         max_keep_ckpts=save_total_limit),
