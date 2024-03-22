@@ -204,3 +204,10 @@ randomness = dict(seed=None, deterministic=False)
 
 # set log processor
 log_processor = dict(by_epoch=False)
+
+
+# 评估时候只会读取 model + eval_dataset 参数，其他参数忽略
+eval_dataset = []
+
+
+
