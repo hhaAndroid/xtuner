@@ -11,7 +11,7 @@ from xtuner.registry import BUILDER
 from tqdm import tqdm
 import torch.distributed as dist
 from mmengine.dist import broadcast,collect_results, get_rank
-
+import math
 
 TORCH_DTYPE_MAP = dict(
     fp16=torch.float16, bf16=torch.bfloat16, fp32=torch.float32, auto='auto')
@@ -91,9 +91,12 @@ if __name__ == '__main__':
         model.preparing_eval(dataset, max_new_tokens=args.max_new_tokens)
 
         results = []
-        sheet_indices = list(range(rank, len(dataset), world_size))
-        lt = len(sheet_indices)
-        for i in tqdm(range(lt), desc=f'Rank {rank}'):
+        n_samples = len(dataset)
+        per_rank_samples = math.ceil(n_samples / world_size)
+
+        per_rank_ids = range(per_rank_samples * rank,
+                             min(n_samples, per_rank_samples * (rank + 1)))
+        for i in tqdm(per_rank_ids, desc=f'Rank {rank}'):
             data_sample = dataset[i]
             prediction = {}
             prediction['id'] = data_sample['id']
