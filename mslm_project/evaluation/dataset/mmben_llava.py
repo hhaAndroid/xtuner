@@ -1,36 +1,20 @@
-import argparse
-import json
-import math
 import os
 import os.path as osp
 import re
 import string
-import time
 
 import numpy as np
 import pandas as pd
 import torch
-import tqdm
-from huggingface_hub import snapshot_download
-from mmengine import mkdir_or_exist
-from mmengine.dist import (collect_results, get_dist_info, get_rank, init_dist,
-                           master_only)
-from mmengine.utils.dl_utils import set_multi_processing
-from peft import PeftModel
+from mmengine.dist import (master_only)
 from rich.console import Console
 from rich.table import Table
 from torch.utils.data import Dataset
-from transformers import (AutoModel, AutoModelForCausalLM, AutoTokenizer,
-                          BitsAndBytesConfig, CLIPImageProcessor,
-                          CLIPVisionModel, GenerationConfig)
 
 from xtuner.dataset.utils import decode_base64_to_image, expand2square
-from xtuner.model.utils import LoadWoInit, prepare_inputs_labels_for_multimodal
-from xtuner.tools.utils import get_stop_criteria, is_cn_string
-from xtuner.utils import (DEFAULT_IMAGE_TOKEN, IMAGE_TOKEN_INDEX,
-                          PROMPT_TEMPLATE)
+from xtuner.tools.utils import is_cn_string
+from xtuner.utils import (DEFAULT_IMAGE_TOKEN, IMAGE_TOKEN_INDEX)
 from xtuner.registry import BUILDER
-from PIL import Image
 
 
 class LLaVAMMBenchDataset(Dataset):
