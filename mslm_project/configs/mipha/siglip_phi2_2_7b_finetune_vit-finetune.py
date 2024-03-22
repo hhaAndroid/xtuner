@@ -12,7 +12,7 @@ from xtuner.dataset.map_fns import llava_map_fn, template_map_fn_factory
 from xtuner.dataset.samplers import LengthGroupedSampler
 from xtuner.engine.hooks import DatasetInfoHook, EvaluateChatHook
 from xtuner.engine.runner import TrainLoop
-from xtuner.model import LLaVAModel
+from mslm_project.modules import GLLaVAModel
 from xtuner.utils import PROMPT_TEMPLATE
 
 #######################################################################
@@ -68,7 +68,7 @@ image_processor = dict(
     trust_remote_code=True)
 
 model = dict(
-    type=LLaVAModel,
+    type=GLLaVAModel,
     freeze_llm=False,
     freeze_visual_encoder=False,  # change this
     pretrained_pth=pretrained_pth,

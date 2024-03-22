@@ -30,12 +30,23 @@ def parse_args():
     parser.add_argument('--work-dir', type=str, default='.', help='select the output directory')
     parser.add_argument('--mode', type=str, default='all', choices=['all', 'infer'])
     parser.add_argument('--nproc', type=int, default=4, help='Parallel API calling')
+    parser.add_argument(
+        '--seed',
+        type=int,
+        default=0,
+        help='Random seed for reproducible text generation')
+    parser.add_argument(
+        '--max-new-tokens',
+        type=int,
+        default=100,
+        help='Maximum number of new tokens allowed in generated text')
     args = parser.parse_args()
     return args
 
 
 if __name__ == '__main__':
     args = parse_args()
+    torch.manual_seed(args.seed)
 
     rank, world_size = get_rank_and_world_size()
     if world_size > 1:
@@ -63,8 +74,6 @@ if __name__ == '__main__':
     # 模型自身处理权重加载问题
     model.load_custom_weights(args.checkpoint)
     model = model.cuda().to(dtype=args.torch_dtype)
-    # 模型自己准备好评测前的事宜
-    model.preparing_eval()
 
     eval_dataset = cfg.eval_dataset
     for _, dataset_cfg in enumerate(eval_dataset):
@@ -75,14 +84,18 @@ if __name__ == '__main__':
         if world_size > 1:
             dist.barrier()
 
+        # 模型自己准备好评测前的事宜
+        model.preparing_eval(dataset=dataset, max_new_tokens=args.max_new_tokens)
+
         results = []
         sheet_indices = list(range(rank, len(dataset), world_size))
         lt = len(sheet_indices)
         for i in tqdm(range(lt), desc=f'Rank {rank}'):
             data_sample = dataset[i]
             prediction = {}
-            # 模型生成，返回响应
-            response = model.generate(data_sample)
+            with torch.no_grad():
+                # 模型生成，返回响应
+                response = model.generate(data_sample)
             prediction['prediction'] = response
             prediction['index'] = data_sample['index']
             results.append(prediction)
@@ -95,3 +108,5 @@ if __name__ == '__main__':
         if get_rank() == 0:
             # 数据集进行后处理，可选的评估
             dataset.postprocess_results(results, args.work_dir, timestamp)
+
+        del dataset

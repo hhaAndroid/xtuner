@@ -12,7 +12,7 @@ from xtuner.dataset.map_fns import llava_map_fn, template_map_fn_factory
 from xtuner.dataset.samplers import LengthGroupedSampler
 from xtuner.engine.hooks import DatasetInfoHook, EvaluateChatHook
 from xtuner.engine.runner import TrainLoop
-from xtuner.model import LLaVAModel
+from mslm_project.modules import GLLaVAModel
 from xtuner.utils import PROMPT_TEMPLATE
 
 #######################################################################
@@ -29,7 +29,7 @@ data_root = './data/llava_data/'
 data_path = data_root + 'LLaVA-Instruct-150K/llava_v1_5_mix665k.json'
 image_folder = data_root + 'llava_images'
 prompt_template = PROMPT_TEMPLATE.vicuna
-max_length = int(2048 - (384 // 14)**2)
+max_length = int(2048 - (384 // 14) ** 2)
 
 # Scheduler & Optimizer
 batch_size = 16  # per_device
@@ -68,7 +68,7 @@ image_processor = dict(
     trust_remote_code=True)
 
 model = dict(
-    type=LLaVAModel,
+    type=GLLaVAModel,
     freeze_llm=False,
     freeze_visual_encoder=True,
     pretrained_pth=pretrained_pth,
@@ -205,9 +205,15 @@ randomness = dict(seed=None, deterministic=False)
 # set log processor
 log_processor = dict(by_epoch=False)
 
-
 # 评估时候只会读取 model + eval_dataset 参数，其他参数忽略
-eval_dataset = []
+from mslm_project.evaluation.dataset import LLaVAMMBenchDataset
 
-
-
+eval_dataset = [
+    dict(
+        type=LLaVAMMBenchDataset,
+        data_file='/mnt/petrelfs/huanghaian/code/xtuner/LMUData/MMBench_DEV_EN.tsv',
+        prompt_template=PROMPT_TEMPLATE.vicuna,
+        tokenizer=tokenizer,
+        image_processor=image_processor,
+        pad_image_to_square=True)
+]
