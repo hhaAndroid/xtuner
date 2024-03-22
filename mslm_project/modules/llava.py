@@ -227,6 +227,7 @@ class GLLaVAModel(BaseModel):
 
     def generate(self, data, data_samples=None):
         # data 是单张图片的数据
+        del data['id']
         input_ids = data['input_ids'].unsqueeze(0).to(self.visual_encoder.device)
         data['input_ids'] = input_ids
         pixel_values = data['pixel_values'].unsqueeze(0).to(self.visual_encoder.device)

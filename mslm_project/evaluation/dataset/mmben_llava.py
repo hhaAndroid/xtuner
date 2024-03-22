@@ -56,13 +56,15 @@ class LLaVAMMBenchDataset(Dataset):
         self.split = 'dev' if 'answer' in self.df.iloc[0].keys() else 'test'
         self.has_l2_category = 'l2-category' in self.df.columns.to_list()
 
-        template = PROMPT_TEMPLATE[prompt_template]
+        template = prompt_template
         self.template = template
 
         self.tokenizer = BUILDER.build(tokenizer)
         self.image_processor = BUILDER.build(image_processor)
         self.pad_image_to_square = pad_image_to_square
-        self.results_xlsx_path = os.path.splitext(os.path.basename(data_file))[0]+'-results.xlsx'
+        self.name = os.path.splitext(os.path.basename(data_file))[0]
+        self.results_xlsx_path = os.path.splitext(os.path.basename(data_file))[0] + '-results.xlsx'
+        self.data = self.load_data_list()
 
     def get_image(self, image):
         while len(image) < 16:
@@ -75,39 +77,45 @@ class LLaVAMMBenchDataset(Dataset):
     def __len__(self):
         return len(self.df)
 
+    def load_data_list(self):
+        data_list = []
+        for idx in range(len(self.df)):
+            index = self.df.iloc[idx]['index']
+            image = self.df.iloc[idx]['image']
+            question = self.df.iloc[idx]['question']
+            answer = self.df.iloc[idx]['answer'] if 'answer' in self.df.iloc[
+                0].keys() else None
+            category = self.df.iloc[idx]['category']
+
+            options = {
+                cand: self.load_from_df(idx, cand)
+                for cand in string.ascii_uppercase
+                if self.load_from_df(idx, cand) is not None
+            }
+            options_prompt = ''
+            for key, item in options.items():
+                options_prompt += f'{key}. {item}\n'
+
+            hint = self.load_from_df(idx, 'hint')
+            data = {
+                'img': image,
+                'question': question,
+                'answer': answer,
+                'options': options_prompt,
+                'category': category,
+                'options_dict': options,
+                'index': index,
+                'context': hint,
+                'id': idx
+            }
+            if self.has_l2_category:
+                data.update({'l2-category': self.df.iloc[idx]['l2-category']})
+            data_list.append(data)
+        return data_list
+
     def __getitem__(self, idx):
-        index = self.df.iloc[idx]['index']
-        image = self.df.iloc[idx]['image']
-        image = self.get_image(image)
-        question = self.df.iloc[idx]['question']
-        answer = self.df.iloc[idx]['answer'] if 'answer' in self.df.iloc[
-            0].keys() else None
-        category = self.df.iloc[idx]['category']
-
-        options = {
-            cand: self.load_from_df(idx, cand)
-            for cand in string.ascii_uppercase
-            if self.load_from_df(idx, cand) is not None
-        }
-        options_prompt = ''
-        for key, item in options.items():
-            options_prompt += f'{key}. {item}\n'
-
-        hint = self.load_from_df(idx, 'hint')
-        data = {
-            'img': image,
-            'question': question,
-            'answer': answer,
-            'options': options_prompt,
-            'category': category,
-            'options_dict': options,
-            'index': index,
-            'context': hint,
-        }
-        if self.has_l2_category:
-            data.update({'l2-category': self.df.iloc[idx]['l2-category']})
-
-        data_dict = {'index': data['index']}
+        data = self.data[idx]
+        data_dict = {'id': data['id']}
 
         if data['context'] is not None:
             text = data['context'] + '\n' + data[
@@ -142,7 +150,7 @@ class LLaVAMMBenchDataset(Dataset):
         ids = torch.tensor(ids)
         data_dict['input_ids'] = ids
 
-        image = data['img'].convert('RGB')
+        image = self.get_image(data['img']).convert('RGB')
         if self.pad_image_to_square:
             image = expand2square(
                 image,
@@ -207,10 +215,12 @@ class LLaVAMMBenchDataset(Dataset):
                   'extraction')
 
         # 拼接数据
+        orig_index = [x['id'] for x in self.data]
         results = []
         for pred_dict in result:
-            index = pred_dict['index']
-            filtered_rows = self.df[self.df['index'] == index]
+            index = pred_dict['id']
+            new_index = orig_index.index(index)
+            filtered_rows = self.data[new_index]
 
             cur_result = {}
             cur_result['question'] = filtered_rows.get('question')

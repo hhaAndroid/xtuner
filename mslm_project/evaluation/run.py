@@ -4,14 +4,14 @@ from mmengine.config import Config
 import os.path as osp
 from mmengine.utils import mkdir_or_exist
 import time
-from mmengine.dist import broadcast
 import torch
 import datetime
-import torch.distributed as dist
 from mslm_project.evaluation.utils import get_rank_and_world_size
 from xtuner.registry import BUILDER
 from tqdm import tqdm
-from mmengine.dist import (collect_results, get_rank)
+import torch.distributed as dist
+from mmengine.dist import broadcast,collect_results, get_rank
+
 
 TORCH_DTYPE_MAP = dict(
     fp16=torch.float16, bf16=torch.bfloat16, fp32=torch.float32, auto='auto')
@@ -26,10 +26,8 @@ def parse_args():
         default='fp16',
         choices=TORCH_DTYPE_MAP.keys(),
         help='Override the default `torch.dtype` and load the model under '
-        'a specific `dtype`.')
+             'a specific `dtype`.')
     parser.add_argument('--work-dir', type=str, default='.', help='select the output directory')
-    parser.add_argument('--mode', type=str, default='all', choices=['all', 'infer'])
-    parser.add_argument('--nproc', type=int, default=4, help='Parallel API calling')
     parser.add_argument(
         '--seed',
         type=int,
@@ -73,19 +71,24 @@ if __name__ == '__main__':
     model = BUILDER.build(cfg.model)
     # 模型自身处理权重加载问题
     model.load_custom_weights(args.checkpoint)
-    model = model.cuda().to(dtype=args.torch_dtype)
+    model.to(TORCH_DTYPE_MAP[args.torch_dtype])
+    model.cuda()
+    model.eval()
 
     eval_dataset = cfg.eval_dataset
     for _, dataset_cfg in enumerate(eval_dataset):
-        logger.info(f'Running on dataset {dataset_cfg.name}')
-
         if rank == 0:
             dataset = BUILDER.build(dataset_cfg)
+            objects = [dataset]
+        else:
+            objects = [None]
         if world_size > 1:
-            dist.barrier()
+            dist.broadcast_object_list(objects, src=0)
+        dataset = objects[0]
+        logger.info(f'Running on dataset:  {dataset.name}')
 
         # 模型自己准备好评测前的事宜
-        model.preparing_eval(dataset=dataset, max_new_tokens=args.max_new_tokens)
+        model.preparing_eval(dataset, max_new_tokens=args.max_new_tokens)
 
         results = []
         sheet_indices = list(range(rank, len(dataset), world_size))
@@ -93,11 +96,11 @@ if __name__ == '__main__':
         for i in tqdm(range(lt), desc=f'Rank {rank}'):
             data_sample = dataset[i]
             prediction = {}
+            prediction['id'] = data_sample['id']
             with torch.no_grad():
                 # 模型生成，返回响应
                 response = model.generate(data_sample)
             prediction['prediction'] = response
-            prediction['index'] = data_sample['index']
             results.append(prediction)
 
         if world_size > 1:
