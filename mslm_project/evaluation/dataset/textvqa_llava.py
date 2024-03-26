@@ -51,6 +51,9 @@ class TextVQALLaVADataset(Dataset):
     def load_data_list(self):
         return [json.loads(q) for q in open(os.path.expanduser(self.data_file), "r")]
 
+    def __len__(self):
+        return len(self.data)
+
     def __getitem__(self, idx):
         data_dict = {'id': idx}
         line = self.data[idx]
