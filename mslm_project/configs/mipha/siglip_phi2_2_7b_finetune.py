@@ -206,7 +206,7 @@ randomness = dict(seed=None, deterministic=False)
 log_processor = dict(by_epoch=False)
 
 # 评估时候只会读取 model + eval_dataset 参数，其他参数忽略
-from mslm_project.evaluation.dataset import LLaVAMMBenchDataset,LLaVAMMEDataset
+from mslm_project.evaluation.dataset import LLaVAMMBenchDataset,LLaVAMMEDataset,LLaVASEEDDataset
 
 eval_dataset = [
     # dict(
@@ -216,9 +216,16 @@ eval_dataset = [
     #     tokenizer=tokenizer,
     #     image_processor=image_processor,
     #     pad_image_to_square=True),
+    # dict(
+    #     type=LLaVAMMEDataset,
+    #     data_file='/mnt/petrelfs/huanghaian/code/xtuner/LMUData/MME.tsv',
+    #     prompt_template=PROMPT_TEMPLATE.vicuna,
+    #     tokenizer=tokenizer,
+    #     image_processor=image_processor,
+    #     pad_image_to_square=True),
     dict(
-        type=LLaVAMMEDataset,
-        data_file='/mnt/petrelfs/huanghaian/code/xtuner/LMUData/MME.tsv',
+        type=LLaVASEEDDataset,
+        data_file='/mnt/petrelfs/huanghaian/code/xtuner/LMUData/SEEDBench_IMG.tsv',
         prompt_template=PROMPT_TEMPLATE.vicuna,
         tokenizer=tokenizer,
         image_processor=image_processor,
