@@ -92,7 +92,7 @@ def MME_rating(data):
     return ret
 
 
-class LLaVAMMEDataset(Dataset):
+class MMELLaVADataset(Dataset):
 
     def __init__(self, data_file, prompt_template, image_processor, tokenizer, pad_image_to_square=True):
         self.data_file = data_file

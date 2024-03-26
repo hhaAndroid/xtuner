@@ -1,5 +1,4 @@
-from .mmben_llava import LLaVAMMBenchDataset
-from .mme_llava import LLaVAMMEDataset
-from .seed_llava import LLaVASEEDDataset
+from .multiple_choice_llava import MultipleChoiceLLaVADataset
+from .mme_llava import MMELLaVADataset
 
-__all__ = ['LLaVAMMBenchDataset', 'LLaVAMMEDataset', 'LLaVASEEDDataset']
+__all__ = ['MultipleChoiceLLaVADataset', 'MMELLaVADataset']

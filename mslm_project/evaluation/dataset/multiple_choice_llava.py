@@ -15,119 +15,16 @@ from xtuner.dataset.utils import decode_base64_to_image, expand2square
 from xtuner.tools.utils import is_cn_string
 from xtuner.utils import (DEFAULT_IMAGE_TOKEN, IMAGE_TOKEN_INDEX)
 from xtuner.registry import BUILDER
-from collections import defaultdict
-import copy as cp
 
 
-def build_choices(item):
-    ret = {}
-    for ch in string.ascii_uppercase:
-        if ch in item and (not pd.isna(item[ch])):
-            ret[ch] = item[ch]
-    return ret
-
-
-def can_infer_option(answer, choices):
-    verbose = os.environ.get('VERBOSE', 0)
-    # Choices is a dictionary
-    if 'Failed to obtain answer via API' in answer:
-        return False
-
-    reject_to_answer = [
-        "Sorry, I can't help with images of people yet.",
-        "I can't process this file.",
-        "I'm sorry, but without the image provided",
-        'Cannot determine the answer'
-    ]
-    for err in reject_to_answer:
-        if err in answer:
-            return 'Z'
-
-    def count_choice(splits, choices, prefix='', suffix=''):
-        cnt = 0
-        for c in choices:
-            if prefix + c + suffix in splits:
-                cnt += 1
-        return cnt
-
-    answer_mod = cp.copy(answer)
-    chars = '.()[],:;!*#{}'
-    for c in chars:
-        answer_mod = answer_mod.replace(c, ' ')
-
-    splits = [x.strip() for x in answer_mod.split()]
-    count = count_choice(splits, choices)
-
-    if count == 1:
-        for ch in choices:
-            if 'A' in splits and len(splits) > 3 and verbose:
-                print(f'A might be a quantifier in the string: {answer}.')
-                return False
-            if ch in splits:
-                return ch
-    elif count == 0 and count_choice(splits, {'Z', ''}) == 1:
-        return 'Z'
-    return False
-
-
-def can_infer_text(answer, choices):
-    answer = answer.lower()
-    assert isinstance(choices, dict)
-    for k in choices:
-        assert k in string.ascii_uppercase
-        choices[k] = str(choices[k]).lower()
-    cands = []
-    for k in choices:
-        if choices[k] in answer:
-            cands.append(k)
-    if len(cands) == 1:
-        return cands[0]
-    return False
-
-
-def can_infer(answer, choices):
-    answer = str(answer)
-    copt = can_infer_option(answer, choices)
-    return copt if copt else can_infer_text(answer, choices)
-
-
-def prefetch_acc(data):
-    tot = defaultdict(lambda: 0)
-    match = defaultdict(lambda: 0)
-    hit = defaultdict(lambda: 0)
-    lt = len(data)
-    for i in range(lt):
-        item = data.iloc[i]
-        cate = item['category']
-        tot['Overall'] += 1
-        tot[cate] += 1
-        choices = build_choices(item)
-        matched = can_infer(item['prediction'], choices)
-        if matched:
-            match['Overall'] += 1
-            match[cate] += 1
-            if matched == item['answer']:
-                hit['Overall'] += 1
-                hit[cate] += 1
-    res = defaultdict(list)
-    for k in tot.keys():
-        res['Category'].append(k)
-        res['tot'].append(tot[k])
-        res['match'].append(match[k])
-        res['hit'].append(hit[k])
-        res['match_rate'].append(match[k] / tot[k] * 100)
-        if match[k] == 0:
-            res['acc'].append(0)
-        else:
-            res['acc'].append(hit[k] / tot[k] * 100)
-    return res
-
-
-class LLaVASEEDDataset(Dataset):
+# 'mmbench', 'seedbench', 'ccbench', 'mmmu', 'scienceqa', 'ai2d'
+class MultipleChoiceLLaVADataset(Dataset):
 
     def __init__(self, data_file, prompt_template, image_processor, tokenizer, pad_image_to_square=True):
         self.data_file = data_file
         self.df = pd.read_csv(data_file, sep='\t')
+        self.split = 'dev' if 'answer' in self.df.iloc[0].keys() else 'test'
+        self.has_l2_category = 'l2-category' in self.df.columns.to_list()
 
         template = prompt_template
         self.template = template
@@ -169,16 +66,20 @@ class LLaVASEEDDataset(Dataset):
             for key, item in options.items():
                 options_prompt += f'{key}. {item}\n'
 
+            hint = self.load_from_df(idx, 'hint')
             data = {
                 'img': image,
                 'question': question,
                 'answer': answer,
-                'category': category,
-                'index': index,
                 'options': options_prompt,
+                'category': category,
                 'options_dict': options,
+                'index': index,
+                'context': hint,
                 'id': idx
             }
+            if self.has_l2_category:
+                data.update({'l2-category': self.df.iloc[idx]['l2-category']})
             data_list.append(data)
         return data_list
 
@@ -186,7 +87,12 @@ class LLaVASEEDDataset(Dataset):
         data = self.data[idx]
         data_dict = {'id': data['id']}
 
-        text = data['question'] + '\n' + data['options']
+        if data['context'] is not None:
+            text = data['context'] + '\n' + data[
+                'question'] + '\n' + data['options']
+        else:
+            text = data['question'] + '\n' + data['options']
+
         text = DEFAULT_IMAGE_TOKEN + '\n' + text
 
         if is_cn_string(text):
@@ -235,7 +141,48 @@ class LLaVASEEDDataset(Dataset):
     @master_only
     def postprocess_results(self, result, work_dir, timestamp, show=True):
 
-        # 拼接数据
+        def calc_acc(df, group='category'):
+            assert group in ['overall', 'category', 'l2-category']
+            if group == 'overall':
+                res = {'Average': np.mean(df['hit'])}
+            else:
+                res = {}
+                abilities = list(set(df[group]))
+                abilities.sort()
+                for ab in abilities:
+                    sub_df = df[df[group] == ab]
+                    res[ab] = np.mean(sub_df['hit'])
+            return res
+
+        def eval_sub_data(sub_data, answer_map):
+            lt = len(sub_data)
+            for i in range(lt):
+                item = sub_data.iloc[i]
+                match = re.search(r'([A-D]+)', item['prediction'])
+                pred = match.group(1) if match else ''
+                gt = answer_map[item['index']]
+                if gt != pred:
+                    return 0
+            return 1
+
+        def show_result(ret_json):
+            show_dict = ret_json.copy()
+            table = Table(title=f' Multiple Choice ({self.data_file}) ')
+            console = Console()
+            table.add_column('Category', justify='left')
+            table.add_column('Accuracy (%)', justify='right')
+            average = show_dict.pop('Average') * 100
+            table.add_row('Average', f'{average:.1f}')
+            table.add_section()
+            for cat_name, cat_acc in show_dict.items():
+                table.add_row(cat_name, f'{cat_acc * 100:.1f}')
+            with console.capture() as capture:
+                console.print(table, end='')
+            print('\n' + capture.get())
+            print('Note: Please be cautious if you use the results in papers, '
+                  "since we don't use ChatGPT as a helper for choice "
+                  'extraction')
+
         orig_index = [x['id'] for x in self.data]
         results = []
         for pred_dict in result:
@@ -249,7 +196,10 @@ class LLaVASEEDDataset(Dataset):
             cur_result['prediction'] = pred_dict['prediction']
             if filtered_rows.get('category') is not None:
                 cur_result['category'] = filtered_rows.get('category')
+            if filtered_rows.get('l2-category') is not None:
+                cur_result['l2-category'] = filtered_rows.get('l2-category')
             cur_result['index'] = filtered_rows.get('index')
+            cur_result['split'] = filtered_rows.get('split')
             cur_result['answer'] = filtered_rows.get('answer')
             results.append(cur_result)
 
@@ -257,6 +207,54 @@ class LLaVASEEDDataset(Dataset):
         with pd.ExcelWriter(osp.join(work_dir, self.results_xlsx_path), engine='openpyxl') as writer:
             results_df.to_excel(writer, index=False)
 
-        res = prefetch_acc(results_df)
-        print(res)
-        return res
+        data = results_df.sort_values(by='index')
+        data['prediction'] = [str(x) for x in data['prediction']]
+        for k in data.keys():
+            data[k.lower() if k not in 'ABCD' else k] = data.pop(k)
+
+        data_main = data[data['index'] < int(1e6)]
+        cate_map = {
+            i: c
+            for i, c in zip(self.df['index'], self.df['category'])
+        }
+        if self.has_l2_category:
+            l2_cate_map = {
+                i: c
+                for i, c in zip(self.df['index'], self.df['l2-category'])
+            }
+        answer_map = {
+            i: c
+            for i, c in zip(self.df['index'], self.df['answer'])
+        }
+
+        lt = len(data_main)
+        hit, tot = 0, 0
+        result = {}
+        for i in range(lt):
+            item_main = data_main.iloc[i]
+            idx = item_main['index']
+            assert idx not in result
+            sub_data = data[data['index'] % int(1e6) == idx]
+            ret = eval_sub_data(sub_data, answer_map)
+            result[idx] = ret
+            hit += ret
+            tot += 1
+
+        indices = data_main['index']
+        data_main = data_main.copy()
+        data_main['hit'] = [result[i] for i in indices]
+        main_idx = data_main['index']
+        data_main['category'] = [cate_map[i] for i in main_idx]
+
+        ret_json = calc_acc(data_main, 'overall')
+
+        if self.has_l2_category:
+            data_main['l2-category'] = [l2_cate_map[i] for i in main_idx]
+            l2 = calc_acc(data_main, 'l2-category')
+            ret_json.update(l2)
+        else:
+            leaf = calc_acc(data_main, 'category')
+            ret_json.update(leaf)
+        if show:
+            show_result(ret_json)
+        return ret_json
