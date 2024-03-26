@@ -44,55 +44,57 @@ def YOrN_Extraction(output):
     return 'Unknown'
 
 
-def d2df(D):
-    return pd.DataFrame({x: [D[x]] for x in D})
+def Hallusion_rating(data):
+    def calc_fAcc(data):
+        res = defaultdict(list)
+        lt = len(data)
+        for i in range(lt):
+            line = data.iloc[i]
+            res[f"{line['l2-category']}_{line['set_id']}_{line['figure_id']}"].append(line['score'])
+        return np.mean([np.all(x) for x in res.values()]) * 100
+
+    def calc_qAcc(data):
+        res = defaultdict(list)
+        lt = len(data)
+        for i in range(lt):
+            line = data.iloc[i]
+            res[f"{line['l2-category']}_{line['set_id']}_{line['question_id']}"].append(line['score'])
+        return np.mean([np.all(x) for x in res.values()]) * 100
+
+    def calc_aAcc(data):
+        return np.mean(data['score']) * 100
+
+    data['set_id'] = [x.split('_')[3] for x in data['index']]
+    data['figure_id'] = [x.split('_')[4] for x in data['index']]
+    data['question_id'] = [x.split('_')[5] for x in data['index']]
+
+    res = dict(split=[], aAcc=[], fAcc=[], qAcc=[])
+    res['split'].append('Overall')
+    res['aAcc'].append(calc_aAcc(data))
+    res['fAcc'].append(calc_fAcc(data))
+    res['qAcc'].append(calc_qAcc(data))
+
+    if 'category' in data:
+        cates = list(set(data['category']))
+        for c in cates:
+            sub = data[data['category'] == c]
+            res['split'].append(c)
+            res['aAcc'].append(calc_aAcc(sub))
+            res['fAcc'].append(calc_fAcc(sub))
+            res['qAcc'].append(calc_qAcc(sub))
+
+    if 'l2-category' in data:
+        cates = list(set(data['l2-category']))
+        for c in cates:
+            sub = data[data['l2-category'] == c]
+            res['split'].append(c)
+            res['aAcc'].append(calc_aAcc(sub))
+            res['fAcc'].append(calc_fAcc(sub))
+            res['qAcc'].append(calc_qAcc(sub))
+    return res
 
 
-def MME_rating(data):
-    stats = defaultdict(dict)
-    lt = len(data)
-    for i in range(lt):
-        item = data.iloc[i]
-        category = item['category']
-        image_path = item['image_path']
-        score = item['score']
-        if image_path not in stats[category]:
-            stats[category][image_path] = []
-        stats[category][image_path].append(score)
-
-    def acc(key, mode='normal'):
-        res = stats[key]
-        values = []
-        for val in res.values():
-            if mode == 'normal':
-                values.extend(val)
-            elif mode == 'plus':
-                values.append(val[0] * val[1])
-        return np.mean(values) * 100
-
-    scores = {}
-    for k in stats:
-        scores[k] = acc(k) + acc(k, 'plus')
-
-    super_cates = dict(
-        perception=[
-            'OCR', 'artwork', 'celebrity', 'color', 'count', 'existence',
-            'landmark', 'position', 'posters', 'scene'
-        ],
-        reasoning=['code_reasoning', 'commonsense_reasoning', 'numerical_calculation', 'text_translation']
-    )
-
-    ret = {}
-    for sc, cate_list in super_cates.items():
-        base = 0
-        for c in cate_list:
-            base += scores[c]
-        ret[sc] = base
-    ret.update(scores)
-    return ret
-
-
-class MMELLaVADataset(Dataset):
+class HallusionLLaVADataset(Dataset):
 
     def __init__(self, data_file, prompt_template, image_processor, tokenizer, pad_image_to_square=True):
         self.data_file = data_file
@@ -131,6 +133,7 @@ class MMELLaVADataset(Dataset):
             image_path = self.df.iloc[idx]['image_path']
             question = self.df.iloc[idx]['question']
             category = self.df.iloc[idx]['category']
+            l2_category = self.df.iloc[idx]['l2-category']
             answer = self.df.iloc[idx]['answer'] if 'answer' in self.df.iloc[
                 0].keys() else None
 
@@ -141,6 +144,7 @@ class MMELLaVADataset(Dataset):
                 'answer': answer,
                 'category': category,
                 'index': index,
+                'l2-category': l2_category,
                 'id': idx
             }
             data_list.append(data)
@@ -208,6 +212,7 @@ class MMELLaVADataset(Dataset):
             cur_result['index'] = filtered_rows.get('index')
             cur_result['answer'] = filtered_rows.get('answer')
             cur_result['image_path'] = filtered_rows.get('image_path')
+            cur_result['l2-category'] = filtered_rows.get('l2-category')
             results.append(cur_result)
 
         results_df = pd.DataFrame(results)
@@ -226,7 +231,7 @@ class MMELLaVADataset(Dataset):
         with pd.ExcelWriter(osp.join(work_dir, self.results_xlsx_path), engine='openpyxl') as writer:
             results_df.to_excel(writer, index=False)
 
-        score = MME_rating(data)
+        score = Hallusion_rating(data)
         print(f'YOrN_eval successfully finished evaluating')
         print(score)
         return score
