@@ -86,8 +86,8 @@ class OfficialMipha(BaseModel):
         stop_str = "<|endoftext|>"
         # data 是单张图片的数据
         data.pop('id', None)
-        input_ids = data['input_ids'].unsqueeze(0).to(self.device)
-        pixel_values = data['pixel_values'].unsqueeze(0).to(self.device)
+        input_ids = data['input_ids'].unsqueeze(0).cuda()
+        pixel_values = data['pixel_values'].unsqueeze(0).half().cuda()
 
         stopping_criteria = KeywordsStoppingCriteria([stop_str], self.tokenizer, input_ids)
 
