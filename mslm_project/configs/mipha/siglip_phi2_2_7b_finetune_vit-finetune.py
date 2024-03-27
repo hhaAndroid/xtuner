@@ -22,7 +22,7 @@ from xtuner.utils import PROMPT_TEMPLATE
 llm_name_or_path = 'microsoft/phi-2'
 visual_encoder_name_or_path = 'google/siglip-so400m-patch14-384'
 # Specify the pretrained pth
-pretrained_pth = './work_dirs/llava_v15_7b_pretrain/iter_2181.pth'
+pretrained_pth = None
 
 # Data
 data_root = './data/llava_data/'
