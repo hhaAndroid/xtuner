@@ -95,7 +95,8 @@ def MME_rating(data):
 
 class MMELLaVADataset(Dataset):
 
-    def __init__(self, data_file, prompt_template, image_processor, tokenizer, pad_image_to_square=True):
+    def __init__(self, data_file, prompt_template, image_processor, tokenizer, pad_image_to_square=True, use_system=False):
+        self.use_system = use_system
         self.data_file = data_file
         self.df = pd.read_csv(data_file, sep='\t')
 
@@ -154,7 +155,10 @@ class MMELLaVADataset(Dataset):
         text = data['question']
         text = DEFAULT_IMAGE_TOKEN + '\n' + text
 
-        inputs = ''
+        if self.use_system:
+            inputs = self.template.get('SYSTEM', '{system}').format(system='')
+        else:
+            inputs = ''
         inputs += self.template['INSTRUCTION'].format(input=text, round=1)
 
         chunk_encode = []

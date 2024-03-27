@@ -89,7 +89,9 @@ class POPELLaVADataset(Dataset):
                  prompt_template,
                  image_processor,
                  tokenizer,
-                 pad_image_to_square=True):
+                 pad_image_to_square=True,
+                 use_system=False):
+        self.use_system=use_system
         if isinstance(data_file, str):
             data_file = [data_file]
         self.raw_data = [load_jsonl(f) for f in data_file]
@@ -148,7 +150,10 @@ class POPELLaVADataset(Dataset):
         text = data['question']
         text = DEFAULT_IMAGE_TOKEN + '\n' + text
 
-        inputs = ''
+        if self.use_system:
+            inputs = self.template.get('SYSTEM', '{system}').format(system='')
+        else:
+            inputs = ''
         inputs += self.template['INSTRUCTION'].format(input=text, round=1)
 
         chunk_encode = []

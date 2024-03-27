@@ -21,7 +21,8 @@ from mmengine.logging import print_log
 # 'mmbench', 'seedbench', 'ccbench', 'mmmu', 'scienceqa', 'ai2d'
 class MultipleChoiceLLaVADataset(Dataset):
 
-    def __init__(self, data_file, prompt_template, image_processor, tokenizer, pad_image_to_square=True):
+    def __init__(self, data_file, prompt_template, image_processor, tokenizer, pad_image_to_square=True, use_system=False):
+        self.use_system = use_system
         self.data_file = data_file
         self.df = pd.read_csv(data_file, sep='\t')
         self.split = 'dev' if 'answer' in self.df.iloc[0].keys() else 'test'
@@ -102,7 +103,10 @@ class MultipleChoiceLLaVADataset(Dataset):
             text = text + ("Answer with the option's letter from the "
                            'given choices directly.')
 
-        inputs = ''
+        if self.use_system:
+            inputs = self.template.get('SYSTEM', '{system}').format(system='')
+        else:
+            inputs = ''
         inputs += self.template['INSTRUCTION'].format(input=text, round=1)
 
         chunk_encode = []

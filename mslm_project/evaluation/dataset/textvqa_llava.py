@@ -34,7 +34,8 @@ def prompt_processor(prompt):
 
 
 class TextVQALLaVADataset(Dataset):
-    def __init__(self, data_file, ann_file, image_folder, prompt_template, image_processor, tokenizer, pad_image_to_square=True):
+    def __init__(self, data_file, ann_file, image_folder, prompt_template, image_processor, tokenizer, pad_image_to_square=True, use_system=False):
+        self.use_system = use_system
         self.data_file = data_file
         self.ann_file = ann_file
         self.image_folder = image_folder
@@ -63,7 +64,10 @@ class TextVQALLaVADataset(Dataset):
 
         text = DEFAULT_IMAGE_TOKEN + '\n' + qs
 
-        inputs = ''
+        if self.use_system:
+            inputs = self.template.get('SYSTEM', '{system}').format(system='')
+        else:
+            inputs = ''
         inputs += self.template['INSTRUCTION'].format(input=text, round=1)
 
         chunk_encode = []

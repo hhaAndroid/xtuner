@@ -13,7 +13,15 @@ from xtuner.dataset.samplers import LengthGroupedSampler
 from xtuner.engine.hooks import DatasetInfoHook, EvaluateChatHook
 from xtuner.engine.runner import TrainLoop
 from mslm_project.modules import OfficialMipha
-from xtuner.utils import PROMPT_TEMPLATE
+
+mipha_prompt_temp = dict(
+    SYSTEM=('A chat between a curious user and an artificial '
+            'intelligence assistant. The assistant gives '
+            'helpful, detailed, and polite answers to the '
+            'user\'s questions. '),
+    INSTRUCTION=('USER: {input} ASSISTANT:'),
+    STOP_WORDS=['<|endoftext|>'],
+    SEP='\n')
 
 #######################################################################
 #                          PART 1  Settings                           #
@@ -28,7 +36,7 @@ pretrained_pth = None
 data_root = './data/llava_data/'
 data_path = data_root + 'LLaVA-Instruct-150K/llava_v1_5_mix665k.json'
 image_folder = data_root + 'llava_images'
-prompt_template = PROMPT_TEMPLATE.vicuna
+prompt_template = mipha_prompt_temp
 max_length = int(2048 - (384 // 14) ** 2)
 
 # Scheduler & Optimizer
@@ -203,82 +211,93 @@ eval_dataset = [
     dict(
         type=MultipleChoiceLLaVADataset,
         data_file='/mnt/petrelfs/huanghaian/code/xtuner/LMUData/MMBench_DEV_EN.tsv',
-        prompt_template=PROMPT_TEMPLATE.vicuna,
+        prompt_template=prompt_template,
         tokenizer=tokenizer,
         image_processor=image_processor,
+        use_system=True,
         pad_image_to_square=True),
     dict(
         type=MultipleChoiceLLaVADataset,
         data_file='/mnt/petrelfs/huanghaian/code/xtuner/LMUData/MMBench_TEST_EN.tsv',
-        prompt_template=PROMPT_TEMPLATE.vicuna,
+        prompt_template=prompt_template,
         tokenizer=tokenizer,
         image_processor=image_processor,
+        use_system=True,
         pad_image_to_square=True),
     dict(
         type=MultipleChoiceLLaVADataset,
         data_file='/mnt/petrelfs/huanghaian/code/xtuner/LMUData/SEEDBench_IMG.tsv',
-        prompt_template=PROMPT_TEMPLATE.vicuna,
+        prompt_template=prompt_template,
         tokenizer=tokenizer,
         image_processor=image_processor,
+        use_system=True,
         pad_image_to_square=True),
     dict(
         type=MultipleChoiceLLaVADataset,
         data_file='/mnt/petrelfs/huanghaian/code/xtuner/LMUData/ScienceQA_VAL.tsv',
-        prompt_template=PROMPT_TEMPLATE.vicuna,
+        prompt_template=prompt_template,
         tokenizer=tokenizer,
         image_processor=image_processor,
+        use_system=True,
         pad_image_to_square=True),
     dict(
         type=MultipleChoiceLLaVADataset,
         data_file='/mnt/petrelfs/huanghaian/code/xtuner/LMUData/ScienceQA_TEST.tsv',
-        prompt_template=PROMPT_TEMPLATE.vicuna,
+        prompt_template=prompt_template,
         tokenizer=tokenizer,
         image_processor=image_processor,
+        use_system=True,
         pad_image_to_square=True),
     dict(
         type=MultipleChoiceLLaVADataset,
         data_file='/mnt/petrelfs/huanghaian/code/xtuner/LMUData/MMMU_DEV_VAL.tsv',
-        prompt_template=PROMPT_TEMPLATE.vicuna,
+        prompt_template=prompt_template,
         tokenizer=tokenizer,
         image_processor=image_processor,
+        use_system=True,
         pad_image_to_square=True),
     # error
     # dict(
     #     type=MultipleChoiceLLaVADataset,
     #     data_file='/mnt/petrelfs/huanghaian/code/xtuner/LMUData/MMMU_TEST.tsv',
-    #     prompt_template=PROMPT_TEMPLATE.vicuna,
+    #     prompt_template=prompt_template,
     #     tokenizer=tokenizer,
     #     image_processor=image_processor,
+    #     use_system = True,
     #     pad_image_to_square=True),
     dict(
         type=MultipleChoiceLLaVADataset,
         data_file='/mnt/petrelfs/huanghaian/code/xtuner/LMUData/AI2D_TEST.tsv',
-        prompt_template=PROMPT_TEMPLATE.vicuna,
+        prompt_template=prompt_template,
         tokenizer=tokenizer,
         image_processor=image_processor,
+        use_system=True,
         pad_image_to_square=True),
     dict(
         type=TextVQALLaVADataset,
         data_file='/mnt/petrelfs/share_data/huanghaian/orig_llava_eval/textvqa/llava_textvqa_val_v051_ocr.jsonl',
         ann_file='/mnt/petrelfs/share_data/huanghaian/text_vqa/TextVQA_0.5.1_val.json',
         image_folder='/mnt/petrelfs/share_data/huanghaian/text_vqa/train_images',
-        prompt_template=PROMPT_TEMPLATE.vicuna,
+        prompt_template=prompt_template,
         tokenizer=tokenizer,
         image_processor=image_processor,
+        use_system=True,
         pad_image_to_square=True),
     dict(
         type=MMELLaVADataset,
         data_file='/mnt/petrelfs/huanghaian/code/xtuner/LMUData/MME.tsv',
-        prompt_template=PROMPT_TEMPLATE.vicuna,
+        prompt_template=prompt_template,
         tokenizer=tokenizer,
         image_processor=image_processor,
+        use_system=True,
         pad_image_to_square=True),
     dict(
         type=HallusionLLaVADataset,
         data_file='/mnt/petrelfs/huanghaian/code/xtuner/LMUData/HallusionBench.tsv',
-        prompt_template=PROMPT_TEMPLATE.vicuna,
+        prompt_template=prompt_template,
         tokenizer=tokenizer,
         image_processor=image_processor,
+        use_system=True,
         pad_image_to_square=True),
     dict(
         type=POPELLaVADataset,
@@ -288,8 +307,9 @@ eval_dataset = [
             '/mnt/petrelfs/share_data/linzhihao/dataset/POPE/coco_pope_random.json'
         ],
         coco_val_path='/mnt/petrelfs/share_data/linzhihao/dataset/coco/val2014/',
-        prompt_template=PROMPT_TEMPLATE.vicuna,
+        prompt_template=prompt_template,
         tokenizer=tokenizer,
         image_processor=image_processor,
+        use_system=True,
         pad_image_to_square=True),
 ]

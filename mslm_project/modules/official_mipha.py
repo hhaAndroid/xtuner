@@ -72,6 +72,10 @@ class OfficialMipha(BaseModel):
         model_name = get_model_name_from_path(model_path)
         self.tokenizer, self.model, self.image_processor, self.context_len = load_pretrained_model(model_path, None, model_name)
 
+    def forward(self,
+                *args, **kwargs):
+        pass
+
     def load_custom_weights(self, pretrained_pth):
         pass
 
@@ -81,8 +85,8 @@ class OfficialMipha(BaseModel):
     def generate(self, data, data_samples=None):
         # data 是单张图片的数据
         data.pop('id', None)
-        input_ids = data['input_ids'].unsqueeze(0).to(self.visual_encoder.device)
-        pixel_values = data['pixel_values'].unsqueeze(0).to(self.visual_encoder.device)
+        input_ids = data['input_ids'].unsqueeze(0).to(self.device)
+        pixel_values = data['pixel_values'].unsqueeze(0).to(self.device)
 
         stopping_criteria = KeywordsStoppingCriteria(["<|endoftext|>"], self.tokenizer, input_ids)
 
