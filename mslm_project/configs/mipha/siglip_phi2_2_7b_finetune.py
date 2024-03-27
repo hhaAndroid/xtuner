@@ -206,7 +206,7 @@ randomness = dict(seed=None, deterministic=False)
 log_processor = dict(by_epoch=False)
 
 # 评估时候只会读取 model + eval_dataset 参数，其他参数忽略
-from mslm_project.evaluation.dataset import MultipleChoiceLLaVADataset, MMELLaVADataset, TextVQALLaVADataset
+from mslm_project.evaluation.dataset import MultipleChoiceLLaVADataset, MMELLaVADataset, TextVQALLaVADataset, POPELLaVADataset
 
 eval_dataset = [
     # MMBench_DEV_EN/SEEDBench_IMG/MMMU/scienceqa
@@ -240,4 +240,16 @@ eval_dataset = [
         tokenizer=tokenizer,
         image_processor=image_processor,
         pad_image_to_square=True),
+    # dict(
+    #     type=POPELLaVADataset,
+    #     data_file=[
+    #         '/mnt/petrelfs/share_data/linzhihao/dataset/POPE/coco_pope_adversarial.json',
+    #         '/mnt/petrelfs/share_data/linzhihao/dataset/POPE/coco_pope_popular.json',
+    #         '/mnt/petrelfs/share_data/linzhihao/dataset/POPE/coco_pope_random.json'
+    #     ],
+    #     coco_val_path='/mnt/petrelfs/share_data/linzhihao/dataset/coco/val2014/',
+    #     prompt_template=PROMPT_TEMPLATE.vicuna,
+    #     tokenizer=tokenizer,
+    #     image_processor=image_processor,
+    #     pad_image_to_square=True),
 ]
