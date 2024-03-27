@@ -83,12 +83,13 @@ class OfficialMipha(BaseModel):
         pass
 
     def generate(self, data, data_samples=None):
+        stop_str = "<|endoftext|>"
         # data 是单张图片的数据
         data.pop('id', None)
         input_ids = data['input_ids'].unsqueeze(0).to(self.device)
         pixel_values = data['pixel_values'].unsqueeze(0).to(self.device)
 
-        stopping_criteria = KeywordsStoppingCriteria(["<|endoftext|>"], self.tokenizer, input_ids)
+        stopping_criteria = KeywordsStoppingCriteria([stop_str], self.tokenizer, input_ids)
 
         with torch.inference_mode():
             output_ids = self.model.generate(
@@ -103,8 +104,11 @@ class OfficialMipha(BaseModel):
                 stopping_criteria=[stopping_criteria]
             )
 
-        predict = self.tokenizer.decode(output_ids[0, input_ids.shape[1]:]).strip()
-
+        predict = self.tokenizer.decode(output_ids[0, input_ids.shape[1]:], skip_special_tokens=True)
+        predict = predict.strip()
+        if predict.endswith(stop_str):
+            predict = predict[:-len(stop_str)]
+        predict = predict.strip()
         return predict
 
 
