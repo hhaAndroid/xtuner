@@ -221,5 +221,5 @@ class POPELLaVADataset(Dataset):
         print_log('============================================', 'current')
         print_log(f'Average F1-score: {score}', 'current')
         print_log('============================================', 'current')
-        print_log('POPE successfully finished evaluating' 'current')
+        print_log('POPE successfully finished evaluating', 'current')
         return score

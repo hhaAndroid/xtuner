@@ -85,6 +85,9 @@ if __name__ == '__main__':
         if world_size > 1:
             dist.broadcast_object_list(objects, src=0)
         dataset = objects[0]
+        logger.info('\n')
+        logger.info(f'+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++')
+        logger.info(f'+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++')
         logger.info(f'======== Running on dataset:  {dataset.name}, total samples is {len(dataset)} ===========')
 
         model.preparing_eval(dataset, max_new_tokens=args.max_new_tokens)
