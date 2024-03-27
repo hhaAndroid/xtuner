@@ -205,12 +205,10 @@ randomness = dict(seed=None, deterministic=False)
 # set log processor
 log_processor = dict(by_epoch=False)
 
-# 评估时候只会读取 model + eval_dataset 参数，其他参数忽略
 from mslm_project.evaluation.dataset import MultipleChoiceLLaVADataset, \
     MMELLaVADataset, TextVQALLaVADataset, POPELLaVADataset, HallusionLLaVADataset
 
 eval_dataset = [
-    # MMBench_DEV_EN/SEEDBench_IMG/MMMU/scienceqa
     dict(
         type=MultipleChoiceLLaVADataset,
         data_file='/mnt/petrelfs/huanghaian/code/xtuner/LMUData/MMBench_DEV_EN.tsv',
@@ -253,13 +251,14 @@ eval_dataset = [
         tokenizer=tokenizer,
         image_processor=image_processor,
         pad_image_to_square=True),
-    dict(
-        type=MultipleChoiceLLaVADataset,
-        data_file='/mnt/petrelfs/huanghaian/code/xtuner/LMUData/MMMU_TEST.tsv',
-        prompt_template=PROMPT_TEMPLATE.vicuna,
-        tokenizer=tokenizer,
-        image_processor=image_processor,
-        pad_image_to_square=True),
+    # error
+    # dict(
+    #     type=MultipleChoiceLLaVADataset,
+    #     data_file='/mnt/petrelfs/huanghaian/code/xtuner/LMUData/MMMU_TEST.tsv',
+    #     prompt_template=PROMPT_TEMPLATE.vicuna,
+    #     tokenizer=tokenizer,
+    #     image_processor=image_processor,
+    #     pad_image_to_square=True),
     dict(
         type=MultipleChoiceLLaVADataset,
         data_file='/mnt/petrelfs/huanghaian/code/xtuner/LMUData/AI2D_TEST.tsv',

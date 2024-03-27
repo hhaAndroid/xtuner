@@ -125,7 +125,7 @@ class TextVQALLaVADataset(Dataset):
         evaluator = TextVQAAccuracyEvaluator()
         acc = 100. * evaluator.eval_pred_list(pred_list)
         print_log('============================================', 'current')
-        print_log('Samples: {}\nAccuracy: {:.2f}%\n'.format(len(pred_list), acc), 'current')
+        print_log('Samples: {}, Accuracy: {:.2f}%'.format(len(pred_list), acc), 'current')
         print_log('============================================', 'current')
         print_log(f'TextVQA successfully finished evaluating', 'current')
         return {'acc': acc}
