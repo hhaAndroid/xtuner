@@ -15,6 +15,7 @@ from xtuner.dataset.utils import decode_base64_to_image, expand2square
 from xtuner.tools.utils import is_cn_string
 from xtuner.utils import (DEFAULT_IMAGE_TOKEN, IMAGE_TOKEN_INDEX)
 from xtuner.registry import BUILDER
+from mmengine.logging import print_log
 
 
 # 'mmbench', 'seedbench', 'ccbench', 'mmmu', 'scienceqa', 'ai2d'
@@ -178,10 +179,10 @@ class MultipleChoiceLLaVADataset(Dataset):
                 table.add_row(cat_name, f'{cat_acc * 100:.1f}')
             with console.capture() as capture:
                 console.print(table, end='')
-            print('\n' + capture.get())
-            print('Note: Please be cautious if you use the results in papers, '
-                  "since we don't use ChatGPT as a helper for choice "
-                  'extraction')
+            print_log('\n' + capture.get(), 'current')
+            print_log('Note: Please be cautious if you use the results in papers, '
+                      "since we don't use ChatGPT as a helper for choice "
+                      'extraction', 'current')
 
         orig_index = [x['id'] for x in self.data]
         results = []
@@ -206,6 +207,10 @@ class MultipleChoiceLLaVADataset(Dataset):
         results_df = pd.DataFrame(results)
         with pd.ExcelWriter(osp.join(work_dir, self.results_xlsx_path), engine='openpyxl') as writer:
             results_df.to_excel(writer, index=False)
+
+        if self.split != 'dev':
+            print_log('Test set does not have answers, skip evaluation', 'current')
+            return {}
 
         data = results_df.sort_values(by='index')
         data['prediction'] = [str(x) for x in data['prediction']]
@@ -256,5 +261,8 @@ class MultipleChoiceLLaVADataset(Dataset):
             leaf = calc_acc(data_main, 'category')
             ret_json.update(leaf)
         if show:
+            print_log('============================================', 'current')
             show_result(ret_json)
+            print_log('============================================', 'current')
+            print_log('Multiple Choice successfully finished evaluating' 'current')
         return ret_json

@@ -10,7 +10,7 @@ from torch.utils.data import Dataset
 from xtuner.dataset.utils import expand2square
 from xtuner.registry import BUILDER
 from xtuner.utils import DEFAULT_IMAGE_TOKEN, IMAGE_TOKEN_INDEX
-
+from mmengine.logging import print_log
 
 def process_punctuation(inText):
     import re
@@ -57,18 +57,18 @@ def eval_func(pred_list, label_list):
         elif pred == neg and label == pos:
             FN += 1
 
-    print('TP\tFP\tTN\tFN\t')
-    print(f'{TP}\t{FP}\t{TN}\t{FN}')
+    print_log('TP\tFP\tTN\tFN\t', 'current')
+    print_log(f'{TP}\t{FP}\t{TN}\t{FN}', 'current')
 
     precision = float(TP) / float(TP + FP)
     recall = float(TP) / float(TP + FN)
     f1 = 2 * precision * recall / (precision + recall)
     acc = (TP + TN) / (TP + TN + FP + FN)
-    print(f'Accuracy: {acc}')
-    print(f'Precision: {precision}')
-    print(f'Recall: {recall}')
-    print(f'F1 score: {f1}')
-    print(f'Yes ratio: {yes_ratio}')
+    print_log(f'Accuracy: {acc}', 'current')
+    print_log(f'Precision: {precision}', 'current')
+    print_log(f'Recall: {recall}', 'current')
+    print_log(f'F1 score: {f1}', 'current')
+    print_log(f'Yes ratio: {yes_ratio}', 'current')
     return f1
 
 
@@ -211,16 +211,15 @@ class POPELLaVADataset(Dataset):
             label_list = [
                 int(YOrN_Extraction(x['answer']) == 'Yes') for x in sub_results
             ]
-            print('============================================')
-            print('Category: {}, # samples: {}'.format(sub_name,
-                                                       len(sub_results)))
+            print_log('============================================', 'current')
+            print_log('Category: {}, # samples: {}'.format(sub_name,
+                                                       len(sub_results)), 'current')
             cur_f1 = eval_func(pred_list, label_list)
             score += cur_f1
 
         score /= len(self.name)
-        print('============================================')
-        print('============================================')
-        print(f'Average F1-score: {score}')
-        print('============================================')
-        print('POPE successfully finished evaluating')
+        print_log('============================================', 'current')
+        print_log(f'Average F1-score: {score}', 'current')
+        print_log('============================================', 'current')
+        print_log('POPE successfully finished evaluating' 'current')
         return score

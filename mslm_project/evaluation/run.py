@@ -10,7 +10,7 @@ from mslm_project.evaluation.utils import get_rank_and_world_size
 from xtuner.registry import BUILDER
 from tqdm import tqdm
 import torch.distributed as dist
-from mmengine.dist import broadcast,collect_results, get_rank
+from mmengine.dist import broadcast, collect_results, get_rank
 import math
 
 TORCH_DTYPE_MAP = dict(
@@ -85,9 +85,8 @@ if __name__ == '__main__':
         if world_size > 1:
             dist.broadcast_object_list(objects, src=0)
         dataset = objects[0]
-        logger.info(f'Running on dataset:  {dataset.name}')
+        logger.info(f'======== Running on dataset:  {dataset.name}, total samples is {len(dataset)} ===========')
 
-        # 模型自己准备好评测前的事宜
         model.preparing_eval(dataset, max_new_tokens=args.max_new_tokens)
 
         results = []
@@ -101,7 +100,6 @@ if __name__ == '__main__':
             prediction = {}
             prediction['id'] = data_sample['id']
             with torch.no_grad():
-                # 模型生成，返回响应
                 response = model.generate(data_sample)
             prediction['prediction'] = response
             results.append(prediction)
@@ -112,7 +110,7 @@ if __name__ == '__main__':
         results = collect_results(results, len(dataset))
 
         if get_rank() == 0:
-            # 数据集进行后处理，可选的评估
+            logger.info(f'======== Starting the evaluation on dataset:  {dataset.name} ===========')
             dataset.postprocess_results(results, args.work_dir, timestamp)
 
         del dataset

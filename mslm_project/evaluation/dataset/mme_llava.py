@@ -13,6 +13,7 @@ from xtuner.dataset.utils import decode_base64_to_image, expand2square
 from xtuner.utils import (DEFAULT_IMAGE_TOKEN, IMAGE_TOKEN_INDEX)
 from xtuner.registry import BUILDER
 from collections import defaultdict
+from mmengine.logging import print_log
 
 
 def process_punctuation(inText):
@@ -227,8 +228,8 @@ class MMELLaVADataset(Dataset):
             results_df.to_excel(writer, index=False)
 
         score = MME_rating(data)
-        print(f'YOrN_eval successfully finished evaluating')
-        print(score)
+        print_log('============================================', 'current')
+        print_log(score, 'current')
+        print_log('============================================', 'current')
+        print_log(f'YOrN_eval successfully finished evaluating', 'current')
         return score
-
-

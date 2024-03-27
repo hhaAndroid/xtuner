@@ -12,6 +12,7 @@ from PIL import Image
 from xtuner.dataset.utils import expand2square
 from mmengine.dist import (master_only)
 from ..textvqa_utils import TextVQAAccuracyEvaluator
+from mmengine.logging import print_log
 
 
 def prompt_processor(prompt):
@@ -123,5 +124,8 @@ class TextVQALLaVADataset(Dataset):
 
         evaluator = TextVQAAccuracyEvaluator()
         acc = 100. * evaluator.eval_pred_list(pred_list)
-        print('Samples: {}\nAccuracy: {:.2f}%\n'.format(len(pred_list), acc))
+        print_log('============================================', 'current')
+        print_log('Samples: {}\nAccuracy: {:.2f}%\n'.format(len(pred_list), acc), 'current')
+        print_log('============================================', 'current')
+        print_log(f'TextVQA successfully finished evaluating', 'current')
         return {'acc': acc}
