@@ -95,8 +95,10 @@ def MME_rating(data):
 
 class MMELLaVADataset(Dataset):
 
-    def __init__(self, data_file, prompt_template, image_processor, tokenizer, pad_image_to_square=True, use_system=False):
+    def __init__(self, data_file, prompt_template, image_processor, tokenizer, pad_image_to_square=True,
+                 use_system=False, for_llava_prompt=False):
         self.use_system = use_system
+        self.for_llava_prompt = for_llava_prompt
         self.data_file = data_file
         self.df = pd.read_csv(data_file, sep='\t')
 
@@ -131,7 +133,12 @@ class MMELLaVADataset(Dataset):
             index = self.df.iloc[idx]['index']
             image = self.df.iloc[idx]['image']
             image_path = self.df.iloc[idx]['image_path']
+
             question = self.df.iloc[idx]['question']
+            if self.for_llava_prompt:
+                question = question.replace(' Please answer yes or no.',
+                                            '\nAnswer the question using a single word or phrase.')
+
             category = self.df.iloc[idx]['category']
             answer = self.df.iloc[idx]['answer'] if 'answer' in self.df.iloc[
                 0].keys() else None

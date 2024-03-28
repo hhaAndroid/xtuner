@@ -290,6 +290,7 @@ eval_dataset = [
         tokenizer=tokenizer,
         image_processor=image_processor,
         use_system=True,
+        for_llava_prompt=True,
         pad_image_to_square=True),
     dict(
         type=HallusionLLaVADataset,

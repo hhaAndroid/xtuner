@@ -96,8 +96,7 @@ class OfficialMipha(BaseModel):
                 input_ids,
                 images=pixel_values,
                 do_sample=False,
-                temperature=0,
-                max_new_tokens=1024,
+                max_new_tokens=128,
                 use_cache=True,
                 eos_token_id=self.tokenizer.eos_token_id,  # End of sequence token
                 pad_token_id=self.tokenizer.eos_token_id,  # Pad token

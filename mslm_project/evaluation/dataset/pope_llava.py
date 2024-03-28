@@ -149,7 +149,7 @@ class POPELLaVADataset(Dataset):
 
         text = data['question']
         text = DEFAULT_IMAGE_TOKEN + '\n' + text
-
+        # We did not add “\nAnswer the question using a single word or phrase.” to the prompt
         if self.use_system:
             inputs = self.template.get('SYSTEM', '{system}').format(system='')
         else:
