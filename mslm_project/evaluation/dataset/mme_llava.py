@@ -14,7 +14,7 @@ from xtuner.utils import (DEFAULT_IMAGE_TOKEN, IMAGE_TOKEN_INDEX)
 from xtuner.registry import BUILDER
 from collections import defaultdict
 from mmengine.logging import print_log
-
+from PIL import Image
 
 def process_punctuation(inText):
     import re
@@ -95,8 +95,9 @@ def MME_rating(data):
 
 class MMELLaVADataset(Dataset):
 
-    def __init__(self, data_file, prompt_template, image_processor, tokenizer, pad_image_to_square=True,
+    def __init__(self, data_file, image_folder, prompt_template, image_processor, tokenizer, pad_image_to_square=True,
                  use_system=False, for_llava_prompt=False):
+        self.image_folder = image_folder
         self.use_system = use_system
         self.for_llava_prompt = for_llava_prompt
         self.data_file = data_file
@@ -184,7 +185,10 @@ class MMELLaVADataset(Dataset):
         ids = torch.tensor(ids)
         data_dict['input_ids'] = ids
 
-        image = self.get_image(data['img']).convert('RGB')
+        # 发现重新生成数据集后，感知部分还是对不上，推理部分对的上，暂时不清楚原因
+        # image = self.get_image(data['img']).convert('RGB')
+        image = Image.open(os.path.join(self.image_folder,
+                                        data['image_path'])).convert('RGB')
         if self.pad_image_to_square:
             image = expand2square(
                 image,

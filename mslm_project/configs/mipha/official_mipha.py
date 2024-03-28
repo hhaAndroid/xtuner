@@ -286,6 +286,7 @@ eval_dataset = [
     dict(
         type=MMELLaVADataset,
         data_file='/mnt/petrelfs/huanghaian/code/xtuner/LMUData/MME.tsv',
+        image_folder='/mnt/petrelfs/share_data/duanhaodong/data/mme/MME_Benchmark_release',
         prompt_template=prompt_template,
         tokenizer=tokenizer,
         image_processor=image_processor,
