@@ -1,0 +1,14 @@
+# 准备 ram++
+
+cd xtuner
+git clone https://github.com/xinyu1205/recognize-anything.git
+cd recognize-anything
+# 建议修改 requirements.txt，否则会锁定版本
+pip install -e .
+
+
+
+
+
+
+
