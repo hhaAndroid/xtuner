@@ -278,9 +278,11 @@ eval_dataset = [
     dict(
         type=MMELLaVADataset,
         data_file='/mnt/petrelfs/huanghaian/code/xtuner/LMUData/MME.tsv',
+        image_folder='/mnt/petrelfs/share_data/duanhaodong/data/mme/MME_Benchmark_release',
         prompt_template=PROMPT_TEMPLATE.vicuna,
         tokenizer=tokenizer,
         image_processor=image_processor,
+        # for_llava_prompt=True, # 开了后，perception 会掉
         pad_image_to_square=True),
     dict(
         type=HallusionLLaVADataset,
