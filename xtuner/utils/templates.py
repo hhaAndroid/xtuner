@@ -90,6 +90,7 @@ PROMPT_TEMPLATE = ConfigDict(
                 'helpful, detailed, and polite answers to the '
                 'user\'s questions. {system}\n '),
         INSTRUCTION=('USER: {input} ASSISTANT:'),
+        SUFFIX_AS_EOS=True,
         SEP='\n'),
     deepseek_coder=dict(
         SYSTEM=('You are an AI programming assistant, utilizing '

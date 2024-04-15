@@ -10,11 +10,14 @@ def template_map_fn(example, template):
         input = single_turn_conversation.get('input', '')
         if input is None:
             input = ''
-        input_text = template.INSTRUCTION.format(input=input, round=i + 1)
-        system = single_turn_conversation.get('system', '')
-        if system != '' and system is not None:
-            system = template.SYSTEM.format(system=system)
-            input_text = system + input_text
+
+        input_text = '<image>'
+
+        # input_text = template.INSTRUCTION.format(input=input, round=i + 1)
+        # system = single_turn_conversation.get('system', '')
+        # if system != '' and system is not None:
+        #     system = template.SYSTEM.format(system=system)
+        #     input_text = system + input_text
         single_turn_conversation['input'] = input_text
 
         if template.get('SUFFIX', None):
