@@ -4,20 +4,20 @@ from functools import partial
 from mmengine.utils.misc import get_object_from_string
 
 
-def template_map_fn(example, template):
+def template_map_fn(example, template, pretrain=True):
     conversation = example.get('conversation', [])
     for i, single_turn_conversation in enumerate(conversation):
         input = single_turn_conversation.get('input', '')
         if input is None:
             input = ''
 
-        input_text = '<image>'
+        if pretrain:
+            input_text = '<image>'
+        else:
+            input_text = template.INSTRUCTION.format(input=input, round=i + 1)
+            system = single_turn_conversation.get('system', '')
+            input_text = system + input_text
 
-        # input_text = template.INSTRUCTION.format(input=input, round=i + 1)
-        # system = single_turn_conversation.get('system', '')
-        # if system != '' and system is not None:
-        #     system = template.SYSTEM.format(system=system)
-        #     input_text = system + input_text
         single_turn_conversation['input'] = input_text
 
         if template.get('SUFFIX', None):
