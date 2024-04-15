@@ -30,6 +30,10 @@ class LLaVAProxyEvalDataset:
                                'given choices directly.')
         else:
             text = data['question']
+
+            if self.eval_ds.metainfo['name'] in ['mme']:
+                text = text.replace(' Please answer yes or no.', '\nAnswer the question using a single word or phrase.')
+
             text = DEFAULT_IMAGE_TOKEN + '\n' + text
 
         if self.eval_ds.use_system:

@@ -57,7 +57,7 @@ max_norm = 1  # grad clip
 warmup_ratio = 0.03
 
 # Save
-save_steps = 500
+save_steps = 2000
 save_total_limit = 1  # Maximum checkpoints to keep (-1 means unlimited)
 
 # Evaluate the generation performance during the training
@@ -228,14 +228,14 @@ val_dataset = [
         type=MMEDataset,
         data_file='/mnt/petrelfs/huanghaian/code/xtuner/LMUData/MME.tsv',
         image_folder='/mnt/petrelfs/share_data/duanhaodong/data/mme/MME_Benchmark_release',
-        prompt_template=PROMPT_TEMPLATE.vicuna,
+        prompt_template=prompt_template,
         tokenizer=tokenizer,
         image_processor=image_processor,
         pad_image_to_square=True),
     # dict(
     #     type=MultipleChoiceDataset,
     #     data_file='/mnt/petrelfs/huanghaian/code/xtuner/LMUData/MMBench_DEV_EN.tsv',
-    #     prompt_template=PROMPT_TEMPLATE.vicuna,
+    #     prompt_template=prompt_template,
     #     tokenizer=tokenizer,
     #     image_processor=image_processor,
     #     pad_image_to_square=True)
@@ -245,49 +245,49 @@ test_dataset = [
     dict(
         type=MultipleChoiceDataset,
         data_file='/mnt/petrelfs/huanghaian/code/xtuner/LMUData/MMBench_DEV_EN.tsv',
-        prompt_template=PROMPT_TEMPLATE.vicuna,
+        prompt_template=prompt_template,
         tokenizer=tokenizer,
         image_processor=image_processor,
         pad_image_to_square=True),
     dict(
         type=MultipleChoiceDataset,
         data_file='/mnt/petrelfs/huanghaian/code/xtuner/LMUData/MMBench_TEST_EN.tsv',
-        prompt_template=PROMPT_TEMPLATE.vicuna,
+        prompt_template=prompt_template,
         tokenizer=tokenizer,
         image_processor=image_processor,
         pad_image_to_square=True),
     dict(
         type=MultipleChoiceDataset,
         data_file='/mnt/petrelfs/huanghaian/code/xtuner/LMUData/SEEDBench_IMG.tsv',
-        prompt_template=PROMPT_TEMPLATE.vicuna,
+        prompt_template=prompt_template,
         tokenizer=tokenizer,
         image_processor=image_processor,
         pad_image_to_square=True),
     dict(
         type=MultipleChoiceDataset,
         data_file='/mnt/petrelfs/huanghaian/code/xtuner/LMUData/ScienceQA_VAL.tsv',
-        prompt_template=PROMPT_TEMPLATE.vicuna,
+        prompt_template=prompt_template,
         tokenizer=tokenizer,
         image_processor=image_processor,
         pad_image_to_square=True),
     dict(
         type=MultipleChoiceDataset,
         data_file='/mnt/petrelfs/huanghaian/code/xtuner/LMUData/ScienceQA_TEST.tsv',
-        prompt_template=PROMPT_TEMPLATE.vicuna,
+        prompt_template=prompt_template,
         tokenizer=tokenizer,
         image_processor=image_processor,
         pad_image_to_square=True),
     dict(
         type=MultipleChoiceDataset,
         data_file='/mnt/petrelfs/huanghaian/code/xtuner/LMUData/MMMU_DEV_VAL.tsv',
-        prompt_template=PROMPT_TEMPLATE.vicuna,
+        prompt_template=prompt_template,
         tokenizer=tokenizer,
         image_processor=image_processor,
         pad_image_to_square=True),
     dict(
         type=MultipleChoiceDataset,
         data_file='/mnt/petrelfs/huanghaian/code/xtuner/LMUData/AI2D_TEST.tsv',
-        prompt_template=PROMPT_TEMPLATE.vicuna,
+        prompt_template=prompt_template,
         tokenizer=tokenizer,
         image_processor=image_processor,
         pad_image_to_square=True),
@@ -296,7 +296,7 @@ test_dataset = [
         data_file='/mnt/petrelfs/share_data/huanghaian/orig_llava_eval/textvqa/llava_textvqa_val_v051_ocr.jsonl',
         ann_file='/mnt/petrelfs/share_data/huanghaian/text_vqa/TextVQA_0.5.1_val.json',
         image_folder='/mnt/petrelfs/share_data/huanghaian/text_vqa/train_images',
-        prompt_template=PROMPT_TEMPLATE.vicuna,
+        prompt_template=prompt_template,
         tokenizer=tokenizer,
         image_processor=image_processor,
         pad_image_to_square=True),
@@ -304,7 +304,7 @@ test_dataset = [
         type=MMEDataset,
         data_file='/mnt/petrelfs/huanghaian/code/xtuner/LMUData/MME.tsv',
         image_folder='/mnt/petrelfs/share_data/duanhaodong/data/mme/MME_Benchmark_release',
-        prompt_template=PROMPT_TEMPLATE.vicuna,
+        prompt_template=prompt_template,
         tokenizer=tokenizer,
         image_processor=image_processor,
         # for_llava_prompt=True, # 开了后，perception 会掉
@@ -312,7 +312,7 @@ test_dataset = [
     dict(
         type=HallusionDataset,
         data_file='/mnt/petrelfs/huanghaian/code/xtuner/LMUData/HallusionBench.tsv',
-        prompt_template=PROMPT_TEMPLATE.vicuna,
+        prompt_template=prompt_template,
         tokenizer=tokenizer,
         image_processor=image_processor,
         pad_image_to_square=True),
@@ -324,7 +324,7 @@ test_dataset = [
             '/mnt/petrelfs/share_data/linzhihao/dataset/POPE/coco_pope_random.json'
         ],
         coco_val_path='/mnt/petrelfs/share_data/linzhihao/dataset/coco/val2014/',
-        prompt_template=PROMPT_TEMPLATE.vicuna,
+        prompt_template=prompt_template,
         tokenizer=tokenizer,
         image_processor=image_processor,
         pad_image_to_square=True),
@@ -333,7 +333,7 @@ test_dataset = [
         data_file='/mnt/petrelfs/share_data/zhaoxiangyu/gqa_llava_eval/llava_gqa_testdev_balanced.jsonl',
         ann_file='/mnt/petrelfs/share_data/zhaoxiangyu/gqa_llava_eval/testdev_balanced_questions.json',
         image_folder='/mnt/petrelfs/share_data/basemodel/dataset/multimodality/gqa/images',
-        prompt_template=PROMPT_TEMPLATE.vicuna,
+        prompt_template=prompt_template,
         tokenizer=tokenizer,
         image_processor=image_processor,
         pad_image_to_square=True),

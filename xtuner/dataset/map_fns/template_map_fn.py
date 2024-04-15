@@ -33,7 +33,7 @@ def template_map_fn(example, template, pretrain=True):
     return {'conversation': conversation}
 
 
-def template_map_fn_factory(template):
+def template_map_fn_factory(template, pretrain=True):
     if isinstance(template, str):  # for resume
         template = get_object_from_string(template)
-    return partial(template_map_fn, template=template)
+    return partial(template_map_fn, template=template, pretrain=pretrain)
