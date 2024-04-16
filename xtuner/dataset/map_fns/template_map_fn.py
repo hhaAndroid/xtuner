@@ -15,8 +15,11 @@ def template_map_fn(example, template, pretrain=True):
             input_text = '<image>'
         else:
             input_text = template.INSTRUCTION.format(input=input, round=i + 1)
-            system = single_turn_conversation.get('system', '')
-            input_text = system + input_text
+            if i == 0:
+                # 只有第一轮对话才 append system
+                system = single_turn_conversation.get('system', '')
+                system = template.SYSTEM.format(system=system)
+                input_text = system + input_text
 
         single_turn_conversation['input'] = input_text
 

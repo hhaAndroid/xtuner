@@ -26,7 +26,7 @@ mipha_prompt_temp = dict(
             'user\'s questions. '),
     INSTRUCTION=('USER: {input} ASSISTANT:'),
     STOP_WORDS=['<|endoftext|>'],
-    SEP=' ')
+    SEP='')
 
 #######################################################################
 #                          PART 1  Settings                           #
@@ -48,7 +48,7 @@ max_length = int(2048 - (384 // 14) ** 2)
 batch_size = 8  # per_device
 accumulative_counts = 2
 dataloader_num_workers = 4
-max_epochs = 1
+max_epochs = 2
 optim_type = AdamW
 lr = 2e-5
 betas = (0.9, 0.98)
