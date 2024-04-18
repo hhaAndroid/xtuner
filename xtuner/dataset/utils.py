@@ -122,7 +122,8 @@ def encode_fn(example,
             if sep != '':
                 sep_encode = tokenizer.encode(sep, add_special_tokens=False)
                 input_ids += sep_encode
-                labels += [IGNORE_INDEX] * len(sep_encode)
+                # labels += [IGNORE_INDEX] * len(sep_encode)
+                labels += copy.deepcopy(sep_encode)
 
     if len(input_ids) > max_length:
         input_ids = input_ids[:max_length]
