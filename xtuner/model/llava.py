@@ -12,6 +12,7 @@ from transformers import AutoConfig, GenerationConfig
 from xtuner.registry import BUILDER
 from .modules import ProjectorConfig, ProjectorModel, dispatch_modules
 from .modules.dispatch import SUPPORT_FLASH1, SUPPORT_FLASH2
+from .modules.plora import add_plora
 from .utils import (LoadWoInit, find_all_linear_names,
                     get_peft_model_state_dict, guess_load_checkpoint,
                     make_inputs_require_grad,
@@ -44,6 +45,10 @@ class LLaVAModel(BaseModel):
                  max_position_embeddings=None,
                  image_processor=None,
                  tokenizer=None,
+                 use_plora=False,
+                 plora_r=256,
+                 plora_alpha=256,
+                 plora_dropout=0.05,
                  template=None,
                  use_lldr=False,  # LearningRateDecayOptimWrapperConstructor
                  ):
@@ -68,6 +73,13 @@ class LLaVAModel(BaseModel):
 
         self.llm.config.use_cache = False
         dispatch_modules(self.llm)
+
+        self.use_plora = use_plora
+        if self.use_plora:
+            add_plora(self.llm,
+                      lora_r=plora_r,
+                      lora_alpha=plora_alpha,
+                      lora_dropout=plora_dropout)
 
         assert int(token_merge_ratio ** 0.5) ** 2 == token_merge_ratio, \
             '`token_merge_ratio` must be a square number.'
@@ -355,7 +367,10 @@ class LLaVAModel(BaseModel):
             pixel_values = self.projector(visual_outputs)
 
             data['pixel_values'] = pixel_values
-            data = prepare_inputs_labels_for_multimodal(llm=self.llm, **data)
+            data = prepare_inputs_labels_for_multimodal(
+                llm=self.llm,
+                save_im_mask=self.use_plora,
+                **data)
         return data
 
     def forward(self, data, data_samples=None, mode='loss'):

@@ -5,6 +5,7 @@ import torch
 
 from xtuner.registry import BUILDER
 from .modules import ProjectorConfig, ProjectorModel, dispatch_modules
+from .modules.plora import add_plora
 from .utils import (LoadWoInit, guess_load_checkpoint,
                     make_inputs_require_grad,
                     prepare_inputs_labels_for_multimodal)
@@ -30,6 +31,10 @@ class InternVL_v1_5_LLaVAModel(LLaVAModel):
                  max_position_embeddings=None,
                  image_processor=None,
                  tokenizer=None,
+                 use_plora=False,
+                 plora_r=256,
+                 plora_alpha=256,
+                 plora_dropout=0.05,
                  template=None,
                  use_lldr=False,  # LearningRateDecayOptimWrapperConstructor
                  merge_type='pixel_shuffle',  # or pixel_shuffle
@@ -57,6 +62,13 @@ class InternVL_v1_5_LLaVAModel(LLaVAModel):
                                                                            self.visual_encoder)
         self.llm.config.use_cache = False
         dispatch_modules(self.llm)
+
+        self.use_plora = use_plora
+        if self.use_plora:
+            add_plora(self.llm,
+                      lora_r=plora_r,
+                      lora_alpha=plora_alpha,
+                      lora_dropout=plora_dropout)
 
         self.custom_mlp = custom_mlp
         if custom_mlp is True:
@@ -162,7 +174,10 @@ class InternVL_v1_5_LLaVAModel(LLaVAModel):
         if 'pixel_values' in data:
             new_image_feature = self.__preprocess_for_pixel_values(data)
             data['pixel_values'] = new_image_feature
-            data = prepare_inputs_labels_for_multimodal(llm=self.llm, **data)
+            data = prepare_inputs_labels_for_multimodal(
+                llm=self.llm,
+                save_im_mask=self.use_plora,
+                **data)
         return data
 
     def __preprocess_for_pixel_values(self, data):
