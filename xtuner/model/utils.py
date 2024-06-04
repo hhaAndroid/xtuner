@@ -3,7 +3,8 @@ import os.path as osp
 from typing import List, Optional
 
 import torch
-from mmengine import print_log
+from mmengine.dist import get_rank
+from mmengine import print_log, MessageHub
 from mmengine.utils.misc import get_object_from_string
 from peft import PeftType
 from torch import nn
@@ -129,6 +130,7 @@ def get_peft_model_state_dict(model, state_dict=None, adapter_name='default'):
 # Modified from https://github.com/haotian-liu/LLaVA/blob/82fc5e0e5f4393a4c26851fa32c69ab37ea3b146/llava/model/llava_arch.py#L99  # noqa: E501
 def prepare_inputs_labels_for_multimodal(
         llm: PreTrainedModel,
+        save_im_mask=False,
         input_ids: torch.LongTensor = None,
         position_ids: Optional[torch.LongTensor] = None,
         attention_mask: Optional[torch.Tensor] = None,
@@ -137,7 +139,7 @@ def prepare_inputs_labels_for_multimodal(
         pixel_values: Optional[torch.FloatTensor] = None,
         **kwargs):
     if pixel_values is None:
-        return {
+        rets = {
             'input_ids': input_ids,
             'position_ids': position_ids,
             'attention_mask': attention_mask,
@@ -145,6 +147,9 @@ def prepare_inputs_labels_for_multimodal(
             'inputs_embeds': None,
             'labels': labels
         }
+        if save_im_mask:
+            rets['im_mask'] = torch.zeros_like(input_ids, dtype=torch.bool)
+        return rets
 
     _labels = labels
     _position_ids = position_ids
@@ -170,6 +175,7 @@ def prepare_inputs_labels_for_multimodal(
     ]
 
     new_inputs_embeds = []
+    new_im_mask = []
     new_labels = []
     cur_image_idx = 0
     for batch_idx, cur_input_ids in enumerate(input_ids):
@@ -180,6 +186,11 @@ def prepare_inputs_labels_for_multimodal(
             cur_inputs_embeds = torch.cat(
                 [cur_inputs_embeds_1, cur_pixel_values[0:0]], dim=0)
             new_inputs_embeds.append(cur_inputs_embeds)
+            new_im_mask.append(
+                torch.full((cur_inputs_embeds.shape[0], ),
+                           False,
+                           dtype=torch.bool,
+                           device=cur_inputs_embeds.device))
             new_labels.append(labels[batch_idx])
             cur_image_idx += 1
             continue
@@ -203,15 +214,26 @@ def prepare_inputs_labels_for_multimodal(
         cur_inputs_embeds_no_im = torch.split(
             cur_inputs_embeds, split_sizes, dim=0)
         cur_new_inputs_embeds = []
+        cur_new_im_mask = []
         cur_new_labels = []
 
         for i in range(num_images + 1):
             cur_new_inputs_embeds.append(cur_inputs_embeds_no_im[i])
+            cur_new_im_mask.append(
+                torch.full((cur_inputs_embeds_no_im[i].shape[0], ),
+                           False,
+                           dtype=torch.bool,
+                           device=cur_inputs_embeds_no_im[i].device))
             cur_new_labels.append(cur_labels_noim[i])
             if i < num_images:
                 cur_pixel_values = pixel_values[cur_image_idx]
                 cur_image_idx += 1
                 cur_new_inputs_embeds.append(cur_pixel_values)
+                cur_new_im_mask.append(
+                    torch.full((cur_pixel_values.shape[0], ),
+                               True,
+                               dtype=torch.bool,
+                               device=cur_pixel_values.device))
                 cur_new_labels.append(
                     torch.full((cur_pixel_values.shape[0], ),
                                IGNORE_INDEX,
@@ -219,9 +241,11 @@ def prepare_inputs_labels_for_multimodal(
                                dtype=cur_labels.dtype))
 
         cur_new_inputs_embeds = torch.cat(cur_new_inputs_embeds)
+        cur_new_im_mask = torch.cat(cur_new_im_mask)
         cur_new_labels = torch.cat(cur_new_labels)
 
         new_inputs_embeds.append(cur_new_inputs_embeds)
+        new_im_mask.append(cur_new_im_mask)
         new_labels.append(cur_new_labels)
 
     # Combine them
@@ -239,9 +263,12 @@ def prepare_inputs_labels_for_multimodal(
     position_ids = torch.zeros((batch_size, max_len),
                                dtype=position_ids.dtype,
                                device=position_ids.device)
+    im_mask = torch.zeros((batch_size, max_len),
+                               dtype=torch.bool,
+                               device=position_ids.device)
 
-    for i, (cur_new_embed,
-            cur_new_labels) in enumerate(zip(new_inputs_embeds, new_labels)):
+    for i, (cur_new_embed, cur_new_labels, cur_new_im_mask) in enumerate(zip(
+                new_inputs_embeds, new_labels, new_im_mask)):
         cur_len = cur_new_embed.shape[0]
         new_inputs_embeds_padded.append(
             torch.cat((cur_new_embed,
@@ -257,6 +284,7 @@ def prepare_inputs_labels_for_multimodal(
                 cur_len,
                 dtype=position_ids.dtype,
                 device=position_ids.device)
+            im_mask[i, :cur_len] = cur_new_im_mask
 
     new_inputs_embeds = torch.stack(new_inputs_embeds_padded, dim=0)
 
@@ -272,6 +300,11 @@ def prepare_inputs_labels_for_multimodal(
 
     if _position_ids is None:
         position_ids = None
+
+    if save_im_mask:
+        rank = get_rank()
+        message_hub = MessageHub.get_instance('im_mask_info')
+        message_hub.update_info(f'im_mask_{rank}', im_mask)
 
     return {
         'input_ids': None,
@@ -314,6 +347,7 @@ def guess_load_checkpoint(pth_model):
 # from https://github.com/bfshi/scaling_on_scales
 
 import math
+
 import torch.nn.functional as F
 from einops import rearrange
 
