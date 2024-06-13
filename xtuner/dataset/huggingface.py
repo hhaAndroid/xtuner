@@ -16,7 +16,10 @@ from .utils import Packer, encode_fn
 
 
 def get_lengths(example):
-    return {'length': len(example['input_ids'])}
+    cur_len = len(example['input_ids'])
+    if example.get('image', None) is None:
+        cur_len = -(cur_len + 576 + 1)  # <image>\n
+    return {'length': cur_len}
 
 
 def build_origin_dataset(dataset, split):

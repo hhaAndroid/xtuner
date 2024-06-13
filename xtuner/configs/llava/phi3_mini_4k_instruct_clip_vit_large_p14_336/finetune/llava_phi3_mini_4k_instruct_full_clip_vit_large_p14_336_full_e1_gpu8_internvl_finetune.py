@@ -19,12 +19,13 @@ from xtuner.utils import PROMPT_TEMPLATE
 #                          PART 1  Settings                           #
 #######################################################################
 # Model
-llm_name_or_path = 'microsoft/Phi-3-mini-4k-instruct'
-visual_encoder_name_or_path = 'openai/clip-vit-large-patch14-336'
+llm_name_or_path = '/mnt/petrelfs/share_data/gaojianfei/Phi-3-mini-4k-instruct/models--microsoft--Phi-3-mini-4k' \
+                   '-instruct/snapshots/3a811845d89f3c1b3f41b341d0f9f05104769f35'
+visual_encoder_name_or_path = '/mnt/hwfile/xtuner/linzhihao/model/models--openai--clip-vit-large-patch14-336/snapshots/ce19dc912ca5cd21c8a653c79e251e808ccabcd1'
 # Specify the pretrained pth
-pretrained_pth = './work_dirs/llava_phi3_mini_4k_instruct_clip_vit_large_p14_336_e1_gpu8_sharegpt4v_pretrain/iter_9742.pth'  # noqa: E501
+pretrained_pth = '/mnt/petrelfs/huanghaian/code/xtuner/work_dirs/llava_phi3_mini_4k_instruct_clip_vit_large_p14_336_e1_gpu8_pretrain/iter_2181.pth'  # noqa: E501
 # Data
-data_root = './data/internvl_sft/'
+data_root = '/mnt/hwfile/xtuner/linzhihao/dataset/internvl_sft/'
 
 sharegpt4v_caption_data_path = data_root + 'sharegpt4v_instruct_gpt4-vision_cap100k.jsonl'  # noqa: E501
 sharegpt4v_caption_image_folder = data_root + 'data'
@@ -60,7 +61,7 @@ max_length = int(4096 - (336 / 14)**2)
 batch_size = 8  # per_device
 accumulative_counts = 2
 dataloader_num_workers = 4
-max_epochs = 2
+max_epochs = 1
 optim_type = AdamW
 lr = 2e-5
 betas = (0.9, 0.999)
@@ -75,9 +76,6 @@ save_total_limit = 2  # Maximum checkpoints to keep (-1 means unlimited)
 # Evaluate the generation performance during the training
 evaluation_freq = 5000
 SYSTEM = ''
-evaluation_images = 'https://llava-vl.github.io/static/images/view.jpg'
-evaluation_inputs = ['请描述一下这张照片', 'Please describe this picture']
-
 #######################################################################
 #            PART 2  Model & Tokenizer & Image Processor              #
 #######################################################################
@@ -108,8 +106,11 @@ model = dict(
 #######################################################################
 #                      PART 3  Dataset & Dataloader                   #
 #######################################################################
+cache_root = '/mnt/hwfile/xtuner/huanghaian/phi3_internvl_v12/cache/'
+
 sharegpt4v_caption_dataset = dict(
     type=LLaVADataset,
+    offline_processed_text_folder=cache_root + 'sharegpt4v_caption_dataset',
     data_path=sharegpt4v_caption_data_path,
     image_folder=sharegpt4v_caption_image_folder,
     tokenizer=tokenizer,
@@ -122,6 +123,7 @@ sharegpt4v_caption_dataset = dict(
 
 llava_dataset = dict(
     type=LLaVADataset,
+    offline_processed_text_folder=cache_root + 'llava_dataset',
     data_path=llava_data_path,
     image_folder=llava_image_folder,
     tokenizer=tokenizer,
@@ -134,6 +136,7 @@ llava_dataset = dict(
 
 sharegpt4v_dataset = dict(
     type=LLaVADataset,
+    offline_processed_text_folder=cache_root + 'sharegpt4v_dataset',
     data_path=sharegpt4v_data_path,
     image_folder=sharegpt4v_image_folder,
     tokenizer=tokenizer,
@@ -146,6 +149,7 @@ sharegpt4v_dataset = dict(
 
 dvqa_dataset = dict(
     type=LLaVADataset,
+    offline_processed_text_folder=cache_root + 'dvqa_dataset',
     data_path=dvqa_data_path,
     image_folder=dvqa_image_folder,
     tokenizer=tokenizer,
@@ -158,6 +162,7 @@ dvqa_dataset = dict(
 
 chartqa_dataset = dict(
     type=LLaVADataset,
+    offline_processed_text_folder=cache_root + 'chartqa_dataset',
     data_path=chartqa_data_path,
     image_folder=chartqa_image_folder,
     tokenizer=tokenizer,
@@ -170,6 +175,7 @@ chartqa_dataset = dict(
 
 ai2d_dataset = dict(
     type=LLaVADataset,
+    offline_processed_text_folder=cache_root + 'ai2d_dataset',
     data_path=ai2d_data_path,
     image_folder=ai2d_image_folder,
     tokenizer=tokenizer,
@@ -182,6 +188,7 @@ ai2d_dataset = dict(
 
 docvqa_dataset = dict(
     type=LLaVADataset,
+    offline_processed_text_folder=cache_root + 'docvqa_dataset',
     data_path=docvqa_data_path,
     image_folder=docvqa_image_folder,
     tokenizer=tokenizer,
@@ -194,6 +201,7 @@ docvqa_dataset = dict(
 
 geoqa_dataset = dict(
     type=LLaVADataset,
+    offline_processed_text_folder=cache_root + 'geoqa_dataset',
     data_path=geoqa_data_path,
     image_folder=geoqa_image_folder,
     tokenizer=tokenizer,
@@ -206,6 +214,7 @@ geoqa_dataset = dict(
 
 synthdog_dataset = dict(
     type=LLaVADataset,
+    offline_processed_text_folder=cache_root + 'synthdog_dataset',
     data_path=synthdog_data_path,
     image_folder=synthdog_image_folder,
     tokenizer=tokenizer,
@@ -227,7 +236,6 @@ train_dataset = dict(
 train_dataloader = dict(
     batch_size=batch_size,
     num_workers=dataloader_num_workers,
-    pin_memory=True,
     dataset=train_dataset,
     sampler=dict(
         type=LengthGroupedSampler,
@@ -276,15 +284,6 @@ train_cfg = dict(type=TrainLoop, max_epochs=max_epochs)
 # Log the dialogue periodically during the training process, optional
 custom_hooks = [
     dict(type=DatasetInfoHook, tokenizer=tokenizer),
-    dict(
-        type=EvaluateChatHook,
-        tokenizer=tokenizer,
-        image_processor=image_processor,
-        every_n_iters=evaluation_freq,
-        evaluation_inputs=evaluation_inputs,
-        evaluation_images=evaluation_images,
-        system=SYSTEM,
-        prompt_template=prompt_template)
 ]
 
 # configure default hooks
@@ -298,6 +297,7 @@ default_hooks = dict(
     # save checkpoint per `save_steps`.
     checkpoint=dict(
         type=CheckpointHook,
+        save_optimizer=False,
         by_epoch=False,
         interval=save_steps,
         max_keep_ckpts=save_total_limit),

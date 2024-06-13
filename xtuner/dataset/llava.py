@@ -87,12 +87,7 @@ class LLaVADataset(Dataset):
 
     @property
     def modality_length(self):
-        length_list = []
-        for data_dict in self.text_data:
-            cur_len = len(data_dict['input_ids'])
-            if data_dict.get('image', None) is None:
-                cur_len = -cur_len
-            length_list.append(cur_len)
+        length_list = self.text_data['length']
         return length_list
 
     def __len__(self):
