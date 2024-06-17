@@ -6,6 +6,7 @@ import torch
 from mmengine.dist import get_dist_info, sync_random_seed
 from torch.utils.data import ConcatDataset as TorchConcatDataset
 from torch.utils.data import Sampler
+from mmengine.logging import print_log
 
 
 def get_length_grouped_indices(lengths, group_batch_size, generator=None):
@@ -109,6 +110,7 @@ class LengthGroupedSampler(Sampler):
             if mega_batch_mult == 0:
                 mega_batch_mult = 1
         self.group_batch_size = mega_batch_mult * total_batch_size
+        # self.group_batch_size = self.group_batch_size // 2 # 16 卡
 
         if isinstance(self.dataset, TorchConcatDataset):
             length = []
@@ -118,8 +120,10 @@ class LengthGroupedSampler(Sampler):
         else:
             self.length = getattr(self.dataset, length_property)
         assert isinstance(self.length, (list, tuple))
+        # self.length = [abs(x) for x in self.length] # 全部变成正数，不区分模态
 
         self.total_batch_size = total_batch_size
+        print_log(f'LengthGroupedSampler: {total_batch_size} {self.group_batch_size} {self.num_samples}', 'current')
 
     def __iter__(self) -> Iterator[int]:
         """Iterate the indices."""
