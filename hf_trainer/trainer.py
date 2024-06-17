@@ -1,0 +1,99 @@
+
+import logging
+import os
+import sys
+import warnings
+from xtuner.dataset.collate_fns import default_collate_fn
+from functools import partial
+from xtuner.registry import BUILDER
+import transformers
+from hf_trainer.dist_utils import init_dist
+from PIL import Image, ImageFile, PngImagePlugin
+from transformers import (Trainer, TrainingArguments, set_seed)
+from transformers.utils.logging import (enable_default_handler,
+                                        enable_explicit_format, set_verbosity)
+import argparse
+from mmengine.config import Config
+
+Image.MAX_IMAGE_PIXELS = None
+ImageFile.LOAD_TRUNCATED_IMAGES = True
+MaximumDecompressedSize = 1024
+MegaByte = 2 ** 20
+PngImagePlugin.MAX_TEXT_CHUNK = MaximumDecompressedSize * MegaByte
+
+warnings.filterwarnings('ignore')
+logger = logging.getLogger(__name__)
+
+os.environ['TOKENIZERS_PARALLELISM'] = 'true'
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(description='Train LLM')
+    parser.add_argument('config', help='config file name or path.')
+    parser.add_argument('--work-dir', help='the dir to save logs and models')
+    args = parser.parse_args()
+    return args
+
+
+def main():
+    args = parse_args()
+    cfg = Config.fromfile(args.config)
+
+    launcher = os.environ.get('LAUNCHER', 'slurm')
+    init_dist(launcher=launcher, backend='nccl')
+
+    training_args = TrainingArguments(**cfg.training_args)
+    training_args.output_dir = args.work_dir
+
+    # Setup logging
+    logging.basicConfig(
+        format='%(asctime)s - %(levelname)s - %(name)s - %(message)s',
+        datefmt='%m/%d/%Y %H:%M:%S',
+        handlers=[logging.StreamHandler(sys.stdout)],
+    )
+
+    if training_args.should_log:
+        # The default of training_args.log_level is passive, so we set log level at info here to have that default.
+        transformers.utils.logging.set_verbosity_info()
+
+    log_level = training_args.get_process_log_level()
+    logger.setLevel(log_level)
+    set_verbosity(log_level)
+    enable_default_handler()
+    enable_explicit_format()
+
+    # Log on each process the small summary:
+    logger.warning(
+        f'Process rank: {training_args.local_rank}, device: {training_args.device}, n_gpu: {training_args.n_gpu}'
+        + f'distributed training: {bool(training_args.local_rank != -1)}, 16-bits training: {training_args.fp16}'
+    )
+    logger.info(f'Training parameters {training_args}')
+
+    # Set seed before initializing model.
+    set_seed(training_args.seed)
+    model = BUILDER.build(cfg.model)
+
+    # set seed for torch dataloaders
+    set_seed(training_args.seed)
+    train_dataset = BUILDER.build(cfg.train_dataset)
+
+    # set seed for torch dataloaders
+    set_seed(training_args.seed)
+    data_collator = partial(default_collate_fn, return_hf_format=False)
+
+    trainer = Trainer(
+        model=model,
+        args=training_args,
+        train_dataset=train_dataset,
+        eval_dataset=None,
+        data_collator=data_collator
+    )
+
+    if training_args.do_train:
+        trainer.train()
+        trainer.save_model(output_dir=training_args.output_dir)
+        trainer.save_state()
+
+
+if __name__ == '__main__':
+    main()
