@@ -1,4 +1,3 @@
-
 import logging
 import os
 import sys
@@ -7,7 +6,7 @@ from xtuner.dataset.collate_fns import default_collate_fn
 from functools import partial
 from xtuner.registry import BUILDER
 import transformers
-from hf_trainer.dist_utils import init_dist
+from dist_utils import init_dist
 from PIL import Image, ImageFile, PngImagePlugin
 from transformers import (Trainer, TrainingArguments, set_seed)
 from transformers.utils.logging import (enable_default_handler,
@@ -42,8 +41,8 @@ def main():
     launcher = os.environ.get('LAUNCHER', 'slurm')
     init_dist(launcher=launcher, backend='nccl')
 
+    cfg.training_args['output_dir'] = args.work_dir
     training_args = TrainingArguments(**cfg.training_args)
-    training_args.output_dir = args.work_dir
 
     # Setup logging
     logging.basicConfig(
@@ -71,12 +70,15 @@ def main():
 
     # Set seed before initializing model.
     set_seed(training_args.seed)
+    logger.info('==== start model ====')
     model = BUILDER.build(cfg.model)
+    logger.info('==== end model ====')
 
     # set seed for torch dataloaders
     set_seed(training_args.seed)
+    logger.info('==== start train_dataset ====')
     train_dataset = BUILDER.build(cfg.train_dataset)
-
+    logger.info('==== end train_dataset ====')
     # set seed for torch dataloaders
     set_seed(training_args.seed)
     data_collator = partial(default_collate_fn, return_hf_format=False)
@@ -88,7 +90,7 @@ def main():
         eval_dataset=None,
         data_collator=data_collator
     )
-
+    logger.info('==== start trainer ====')
     if training_args.do_train:
         trainer.train()
         trainer.save_model(output_dir=training_args.output_dir)

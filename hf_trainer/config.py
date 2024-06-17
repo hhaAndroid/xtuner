@@ -5,8 +5,8 @@ from transformers import (AutoModelForCausalLM, AutoTokenizer,
 from xtuner.dataset import LLaVADataset
 from xtuner.dataset.map_fns import llava_map_fn, template_map_fn_factory
 from xtuner.utils import PROMPT_TEMPLATE
-from hf_trainer.model import HFLLaVAModel
-from hf_trainer.concat_new_dataset import LENConcatDataset
+from model import HFLLaVAModel
+from concat_new_dataset import LENConcatDataset
 
 
 training_args = dict(
@@ -25,7 +25,7 @@ training_args = dict(
     save_total_limit=1,
     num_train_epochs=1,
     save_only_model=True,
-    deepspeed='zero_stage2_config.json',
+    deepspeed='zero_stage2_config.json'
 )
 
 # Model
