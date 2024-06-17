@@ -44,7 +44,7 @@ if __name__ == '__main__':
 
             length_list = text_data['length']
             length_np = np.array(length_list)
-            if (length_np > 0).any():
+            if (length_np <= 0).any():
                 print('has pure text data')
             length_np = np.abs(length_list)
             min_, max_, mid_ = np.min(length_np), np.max(length_np), np.median(length_np)

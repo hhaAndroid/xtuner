@@ -18,7 +18,9 @@ from .utils import Packer, encode_fn
 def get_lengths(example):
     cur_len = len(example['input_ids'])
     if example.get('image', None) is None:
-        cur_len = -(cur_len + 576 + 1)  # <image>\n
+        cur_len = -cur_len
+    else:
+        cur_len = cur_len + 576  # <image>\n
     return {'length': cur_len}
 
 

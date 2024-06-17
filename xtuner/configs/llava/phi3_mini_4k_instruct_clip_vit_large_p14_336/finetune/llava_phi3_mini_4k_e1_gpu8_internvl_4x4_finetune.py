@@ -19,7 +19,7 @@ from xtuner.utils import PROMPT_TEMPLATE
 #                          PART 1  Settings                           #
 #######################################################################
 # Model
-llm_name_or_path = '/mnt/petrelfs/share_data/gaojianfei/Phi-3-mini-4k-instruct/models--microsoft--Phi-3-mini-4k' \
+llm_name_or_path = '/mnt/hwfile/xtuner/gaojianfei/Phi-3-mini-4k-instruct/models--microsoft--Phi-3-mini-4k' \
                    '-instruct/snapshots/3a811845d89f3c1b3f41b341d0f9f05104769f35'
 visual_encoder_name_or_path = '/mnt/hwfile/xtuner/linzhihao/model/models--openai--clip-vit-large-patch14-336/snapshots/ce19dc912ca5cd21c8a653c79e251e808ccabcd1'
 # Specify the pretrained pth
@@ -58,8 +58,8 @@ prompt_template = PROMPT_TEMPLATE.phi3_chat
 max_length = int(4096 - (336 / 14)**2)
 
 # Scheduler & Optimizer
-batch_size = 8  # per_device
-accumulative_counts = 2
+batch_size = 4  # per_device
+accumulative_counts = 4
 dataloader_num_workers = 4
 max_epochs = 1
 optim_type = AdamW
@@ -71,7 +71,7 @@ warmup_ratio = 0.03
 
 # Save
 save_steps = 5000
-save_total_limit = 2  # Maximum checkpoints to keep (-1 means unlimited)
+save_total_limit = 1  # Maximum checkpoints to keep (-1 means unlimited)
 
 # Evaluate the generation performance during the training
 evaluation_freq = 5000
@@ -134,7 +134,7 @@ llava_dataset = dict(
     max_length=max_length,
     pad_image_to_square=True)
 
-sharegpt4v_dataset = dict(
+sharegpt4v_dataset = dict( # 有纯文本数据，其他数据集没有
     type=LLaVADataset,
     offline_processed_text_folder=cache_root + 'sharegpt4v_dataset',
     data_path=sharegpt4v_data_path,
