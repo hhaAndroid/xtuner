@@ -23,7 +23,7 @@ class LENConcatDataset(TorchConcatDataset):
             length.extend(getattr(sub_dataset, 'modality_length'))
 
         length = np.abs(np.array(length).reshape(-1))
-        self.length = length  # 全部变成正数，不区分模态
+        self.length = length.tolist()  # 全部变成正数，不区分模态
         logger.info('==== end LENConcatDataset ====')
 
     def __repr__(self):

@@ -38,11 +38,11 @@ def parse_args():
 
 
 def main():
-    args = parse_args()
-    cfg = Config.fromfile(args.config)
-
     launcher = os.environ.get('LAUNCHER', 'slurm')
     init_dist(launcher=launcher, backend='nccl')
+
+    args = parse_args()
+    cfg = Config.fromfile(args.config)
 
     cfg.training_args['output_dir'] = args.work_dir
     training_args = TrainingArguments(**cfg.training_args)
@@ -84,14 +84,13 @@ def main():
     logger.info('==== end train_dataset ====')
     # set seed for torch dataloaders
     set_seed(training_args.seed)
-    data_collator = partial(default_collate_fn, return_hf_format=False)
 
     trainer = Trainer(
         model=model,
         args=training_args,
         train_dataset=train_dataset,
         eval_dataset=None,
-        data_collator=data_collator
+        data_collator=default_collate_fn
     )
     logger.info('==== start trainer ====')
     if training_args.do_train:

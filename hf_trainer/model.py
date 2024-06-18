@@ -105,6 +105,7 @@ class HFLLaVAModel(BaseModel):
         self._is_init = True
 
         self.is_first_iter = True
+        print(self)
 
     def _parse_lora_config(self, lora_config):
         if isinstance(lora_config, dict) or isinstance(
