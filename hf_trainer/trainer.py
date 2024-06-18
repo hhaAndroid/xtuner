@@ -13,6 +13,7 @@ from transformers.utils.logging import (enable_default_handler,
                                         enable_explicit_format, set_verbosity)
 import argparse
 from mmengine.config import Config
+from train_sampler_patch import replace_train_sampler
 
 Image.MAX_IMAGE_PIXELS = None
 ImageFile.LOAD_TRUNCATED_IMAGES = True
@@ -24,6 +25,8 @@ warnings.filterwarnings('ignore')
 logger = logging.getLogger(__name__)
 
 os.environ['TOKENIZERS_PARALLELISM'] = 'true'
+
+replace_train_sampler()
 
 
 def parse_args():

@@ -32,7 +32,7 @@ def _is_free_port(port):
 def init_dist(launcher, backend='nccl', **kwargs):
     if mp.get_start_method(allow_none=True) is None:
         mp.set_start_method('spawn')
-    elif launcher == 'slurm':
+    if launcher == 'slurm':
         _init_dist_slurm(backend, **kwargs)
     else:
         raise ValueError(f'Invalid launcher type: {launcher}')

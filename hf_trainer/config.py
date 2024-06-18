@@ -7,9 +7,11 @@ from xtuner.dataset.map_fns import llava_map_fn, template_map_fn_factory
 from xtuner.utils import PROMPT_TEMPLATE
 from model import HFLLaVAModel
 from concat_new_dataset import LENConcatDataset
-
+import torch
 
 training_args = dict(
+    optim='adamw_torch',
+    remove_unused_columns=False,
     bf16=True,
     do_train=True,
     group_by_length=True,
@@ -54,9 +56,11 @@ model = dict(
     llm=dict(
         type=AutoModelForCausalLM.from_pretrained,
         pretrained_model_name_or_path=llm_name_or_path,
+        torch_dtype=torch.bfloat16,
         trust_remote_code=True),
     visual_encoder=dict(
         type=CLIPVisionModel.from_pretrained,
+        torch_dtype=torch.bfloat16,
         pretrained_model_name_or_path=visual_encoder_name_or_path))
 
 # Data

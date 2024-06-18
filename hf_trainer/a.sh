@@ -1,6 +1,6 @@
 set -x
 
-export PYTHONPATH="${PYTHONPATH}:$(pwd)"
+export PYTHONPATH="${PYTHONPATH}:$(pwd)../"
 export MASTER_PORT=34227
 export TF_CPP_MIN_LOG_LEVEL=3
 
