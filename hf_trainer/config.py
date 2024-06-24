@@ -19,7 +19,7 @@ training_args = dict(
     weight_decay=0,
     warmup_ratio=0.03,
     lr_scheduler_type='cosine',
-    per_device_train_batch_size=4,
+    per_device_train_batch_size=8,
     gradient_accumulation_steps=2,
     dataloader_num_workers=4,
     save_steps=1000,
@@ -27,7 +27,7 @@ training_args = dict(
     save_total_limit=1,
     num_train_epochs=1,
     save_only_model=True,
-    deepspeed='zero_stage2_config.json'
+    deepspeed='zero_stage1_config.json'
 )
 
 # Model

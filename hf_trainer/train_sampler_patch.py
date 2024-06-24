@@ -32,6 +32,33 @@ def split_to_even_chunks(indices, lengths, num_chunks):
     return chunks
 
 
+def get_modality_length_grouped_indices(lengths, batch_size, world_size, generator=None):
+    # We need to use torch for the random part as a distributed sampler will set the random seed for torch.
+    assert all(l != 0 for l in lengths), "Should not have zero length."
+    if all(l > 0 for l in lengths) or all(l < 0 for l in lengths):
+        # all samples are in the same modality
+        return get_length_grouped_indices(lengths, batch_size, world_size, generator=generator)
+    mm_indices, mm_lengths = zip(*[(i, l) for i, l in enumerate(lengths) if l > 0])
+    lang_indices, lang_lengths = zip(*[(i, -l) for i, l in enumerate(lengths) if l < 0])
+
+    mm_shuffle = [mm_indices[i] for i in get_length_grouped_indices(mm_lengths, batch_size, world_size, generator=None)]
+    lang_shuffle = [lang_indices[i] for i in get_length_grouped_indices(lang_lengths, batch_size, world_size, generator=None)]
+    megabatch_size = world_size * batch_size
+    mm_megabatches = [mm_shuffle[i : i + megabatch_size] for i in range(0, len(mm_shuffle), megabatch_size)]
+    lang_megabatches = [lang_shuffle[i : i + megabatch_size] for i in range(0, len(lang_shuffle), megabatch_size)]
+
+    last_mm = mm_megabatches[-1]
+    last_lang = lang_megabatches[-1]
+    additional_batch = last_mm + last_lang
+    megabatches = mm_megabatches[:-1] + lang_megabatches[:-1]
+    megabatch_indices = torch.randperm(len(megabatches), generator=generator)
+    megabatches = [megabatches[i] for i in megabatch_indices]
+
+    if len(additional_batch) > 0:
+        megabatches.append(sorted(additional_batch))
+
+    return [i for megabatch in megabatches for i in megabatch]
+
 # copy from https://github.com/haotian-liu/LLaVA/blob/main/llava/train/llava_trainer.py#L88
 def get_length_grouped_indices(lengths, batch_size, world_size, generator=None, merge=True):
     # We need to use torch for the random part as a distributed sampler will set the random seed for torch.
@@ -60,6 +87,8 @@ class LengthGroupedSampler(Sampler):
             model_input_name: Optional[str] = None,
             generator=None,
     ):
+        self.group_by_modality = True
+
         if dataset is None and lengths is None:
             raise ValueError('One of dataset and lengths must be provided.')
 
@@ -88,34 +117,33 @@ class LengthGroupedSampler(Sampler):
         return len(self.lengths)
 
     def __iter__(self):
-        indices = get_length_grouped_indices(self.lengths, self.batch_size, self.world_size, generator=self.generator)
+        if self.group_by_modality:
+            indices = get_modality_length_grouped_indices(self.lengths, self.batch_size, self.world_size,
+                                                          generator=self.generator)
+        else:
+            indices = get_length_grouped_indices(self.lengths, self.batch_size, self.world_size,
+                                                 generator=self.generator)
         return iter(indices)
 
 
 # patch trainer
 def _get_train_sampler(self) -> Optional[torch.utils.data.Sampler]:
-    # if self.train_dataset is None or not has_length(self.train_dataset):
-    #     return None
-    # # Build the sampler.
-    # if self.args.group_by_length:
-    #     lengths = self.train_dataset.length
-    #     model_input_name = self.tokenizer.model_input_names[0] if self.tokenizer is not None else None
-    #     return LengthGroupedSampler(
-    #         self.args.train_batch_size,
-    #         world_size=self.args.world_size * self.args.gradient_accumulation_steps,
-    #         # self.args.train_batch_size * self.args.gradient_accumulation_steps,
-    #         dataset=self.train_dataset,
-    #         lengths=lengths,
-    #         model_input_name=model_input_name,
-    #     )
-    # else:
-    #     return RandomSampler(self.train_dataset)
-
-    from xtuner.dataset.samplers import LengthGroupedSampler
-    sampler = LengthGroupedSampler(self.train_dataset,
-                                   self.args.train_batch_size * self.args.gradient_accumulation_steps,
-                                   length_property='modality_length')
-    return sampler
+    if self.train_dataset is None or not has_length(self.train_dataset):
+        return None
+    # Build the sampler.
+    if self.args.group_by_length:
+        lengths = self.train_dataset.length
+        model_input_name = self.tokenizer.model_input_names[0] if self.tokenizer is not None else None
+        return LengthGroupedSampler(
+            self.args.train_batch_size,
+            world_size=self.args.world_size * self.args.gradient_accumulation_steps,
+            # self.args.train_batch_size * self.args.gradient_accumulation_steps,
+            dataset=self.train_dataset,
+            lengths=lengths,
+            model_input_name=model_input_name,
+        )
+    else:
+        return RandomSampler(self.train_dataset)
 
 
 def replace_train_sampler():
