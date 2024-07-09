@@ -46,12 +46,19 @@ class LazySupervisedDataset(Dataset):
         self.data_augment = data_augment
         self.pad2square = pad2square
         logger.info('Formatting inputs...Skip in lazy mode')
-        assert meta['annotation'].endswith('jsonl'), f'annotation must be jsonl, but got {meta["annotation"]}'
-        with open(meta['annotation'], 'r') as f:
-            self.raw_data = f.readlines()
-            if repeat_time < 1:
-                # choice top len(self.raw_data) * repeat_time samples
-                self.raw_data = self.raw_data[:int(len(self.raw_data) * repeat_time)]
+        assert meta['annotation'].endswith('jsonl') or meta['annotation'].endswith('json'), \
+            f'annotation must be json/jsonl, but got {meta["annotation"]}'
+
+        self.is_jsonl = meta['annotation'].endswith('jsonl')
+        if self.is_jsonl:
+            with open(meta['annotation'], 'r') as f:
+                self.raw_data = f.readlines()
+        else:
+            with open(meta['annotation']) as f:
+                self.raw_data = json.load(f)
+        if repeat_time < 1:
+            # choice top len(self.raw_data) * repeat_time samples
+            self.raw_data = self.raw_data[:int(len(self.raw_data) * repeat_time)]
         gc.collect()
 
         self.root = meta['root']  # image_root
@@ -67,7 +74,8 @@ class LazySupervisedDataset(Dataset):
             self.conv2length = {}  # using dict to speedup the calculation of token length
             self.length = []
             for data_item in self.raw_data:
-                data_item = json.loads(data_item)
+                if self.is_jsonl:
+                    data_item = json.loads(data_item)
                 if 'length' in data_item:
                     token_length = data_item['length']  # use precomputed length if exists
                 else:
@@ -173,7 +181,10 @@ class LazySupervisedDataset(Dataset):
     def __getitem__(self, i) -> Dict[str, torch.Tensor]:
         while True:
             try:
-                data_item = json.loads(self.raw_data[i])
+                if self.is_jsonl:
+                    data_item = json.loads(self.raw_data[i])
+                else:
+                    data_item = self.raw_data[i]
                 if 'image' in data_item and data_item['image'] is not None:
                     ret = self.multi_modal_get_item(data_item)
                 else:
