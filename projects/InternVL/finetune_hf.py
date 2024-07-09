@@ -16,19 +16,19 @@ from transformers.trainer_utils import get_last_checkpoint
 from transformers.utils.logging import (enable_default_handler,
                                         enable_explicit_format, set_verbosity)
 
-from projects.InternVL.module.dist_utils import init_dist
-from projects.InternVL.module.model import (InternVisionConfig,
-                                            InternVisionModel,
-                                            InternVLChatConfig,
-                                            InternVLChatModel)
-from projects.InternVL.module.constants import (BOX_END_TOKEN, BOX_START_TOKEN,
-                                                IMG_CONTEXT_TOKEN, IMG_END_TOKEN,
-                                                IMG_START_TOKEN, QUAD_END_TOKEN,
-                                                QUAD_START_TOKEN, REF_END_TOKEN,
-                                                REF_START_TOKEN)
-from projects.InternVL.module.dataset import build_datasets
-from projects.InternVL.module.pad_data_collator import concat_pad_data_collator
-from projects.InternVL.module.train_sampler_patch import replace_train_sampler
+from module.dist_utils import init_dist
+from module.model import (InternVisionConfig,
+                          InternVisionModel,
+                          InternVLChatConfig,
+                          InternVLChatModel)
+from module.constants import (BOX_END_TOKEN, BOX_START_TOKEN,
+                              IMG_CONTEXT_TOKEN, IMG_END_TOKEN,
+                              IMG_START_TOKEN, QUAD_END_TOKEN,
+                              QUAD_START_TOKEN, REF_END_TOKEN,
+                              REF_START_TOKEN)
+from module.dataset import build_datasets
+from module.pad_data_collator import concat_pad_data_collator
+from module.train_sampler_patch import replace_train_sampler
 
 Image.MAX_IMAGE_PIXELS = None
 ImageFile.LOAD_TRUNCATED_IMAGES = True
@@ -185,6 +185,7 @@ def main():
     init_dist(launcher=launcher, backend='nccl')
     parser = HfArgumentParser((ModelArguments, DataTrainingArguments, TrainingArguments))
     model_args, data_args, training_args = parser.parse_args_into_dataclasses()
+    training_args.group_by_modality = data_args.group_by_modality
 
     # Setup logging
     logging.basicConfig(

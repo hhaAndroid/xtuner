@@ -7,7 +7,6 @@ QUOTA_TYPE=${QUOTA_TYPE:-"reserved"}
 NODES=$((GPUS / GPUS_PER_NODE))
 CPUS_PER_TASK=${CPUS_PER_TASK:-16}
 SRUN_ARGS=${SRUN_ARGS:-""}
-BATCH_SIZE=${BATCH_SIZE:-(8*GPUS)} # pre_gpu_batch_size=8=4x2
 PER_DEVICE_BATCH_SIZE=${PER_DEVICE_BATCH_SIZE:-4}
 GRADIENT_ACC=2
 
@@ -27,6 +26,8 @@ export TF_CPP_MIN_LOG_LEVEL=3
 # gradient accumulation steps: 2
 # total batch size: 384
 # epoch: 1
+
+#  --save_only_model True \
 HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 srun -p ${PARTITION} --time 3-00:00:00 \
   --gres=gpu:${GPUS_PER_NODE} \
   --nodes=${NODES} \
@@ -76,5 +77,4 @@ HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 srun -p ${PARTITION} --time 3-00:00
   --use_thumbnail True \
   --ps_version 'v2' \
   --deepspeed "zero_stage1_config.json" \
-#  --save_only_model True \
   2>&1 | tee -a "${OUTPUT_DIR}/training_log.txt"

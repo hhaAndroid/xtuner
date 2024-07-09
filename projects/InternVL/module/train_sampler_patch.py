@@ -84,7 +84,6 @@ class LengthGroupedSampler(Sampler):
             world_size: int,
             dataset: Optional[Dataset] = None,
             lengths: Optional[List[int]] = None,
-            model_input_name: Optional[str] = None,
             generator=None,
             group_by_modality=False
     ):
@@ -94,18 +93,7 @@ class LengthGroupedSampler(Sampler):
             raise ValueError('One of dataset and lengths must be provided.')
 
         self.batch_size = batch_size
-        if lengths is None:
-            model_input_name = model_input_name if model_input_name is not None else 'input_ids'
-            if (
-                    not (isinstance(dataset[0], dict) or isinstance(dataset[0], BatchEncoding))
-                    or model_input_name not in dataset[0]
-            ):
-                raise ValueError(
-                    'Can only automatically infer lengths for datasets whose items are dictionaries with an '
-                    f"'{model_input_name}' key."
-                )
-            lengths = [len(feature[model_input_name]) for feature in dataset]
-        elif isinstance(lengths, torch.Tensor):
+        if isinstance(lengths, torch.Tensor):
             logger.info(
                 'If lengths is a torch.Tensor, LengthGroupedSampler will be slow. Converting lengths to List[int]...'
             )
@@ -134,19 +122,20 @@ def _get_train_sampler(self) -> Optional[torch.utils.data.Sampler]:
     # Build the sampler.
     if self.args.group_by_length:
         logger.info('========== Using Custom LengthGroupedSampler ========')
+        lengths = []
         if self.args.group_by_modality:
             logger.info('========== ON group_by_modality ========')
-            lengths = self.train_dataset.modality_length
+            for dataset in self.train_dataset.datasets:
+                lengths = lengths + dataset.modality_length
         else:
-            lengths = self.train_dataset.length
-        model_input_name = self.tokenizer.model_input_names[0] if self.tokenizer is not None else None
+            for dataset in self.train_dataset.datasets:
+                lengths = lengths + dataset.length
         return LengthGroupedSampler(
             self.args.train_batch_size,
             world_size=self.args.world_size * self.args.gradient_accumulation_steps,
             dataset=self.train_dataset,
             lengths=lengths,
-            group_by_modality=self.args.group_by_modality,
-            model_input_name=model_input_name,
+            group_by_modality=self.args.group_by_modality
         )
     else:
         return RandomSampler(self.train_dataset)
