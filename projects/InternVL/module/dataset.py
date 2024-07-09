@@ -217,7 +217,8 @@ def build_datasets(data_args, tokenizer, model, group_by_length=True,
                 normalize_type=normalize_type,
             )
         except Exception as e:
-            logger.info(f'Error in loading dataset: {ds_name},==== {e}')
+            logger.warning(f'Error in loading dataset: {ds_name},==== {e}')
+            print(f'Error in loading dataset: {ds_name},==== {e}', flush=True)
             exit()
         dataset.ds_name = ds_name
         repeat_time = 1 if repeat_time < 1 else repeat_time  # don't repeat if repeat_time is less than 1

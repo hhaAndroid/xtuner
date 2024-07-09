@@ -281,7 +281,7 @@ def main():
         state_dict = torch.load(model_args.mlp_path, map_location='cpu')
         message = model.mlp1.load_state_dict(state_dict)
         logger.info(message)
-    logger.warning(f'{dist.get_rank()} Finished')  # warning 确保每个进程都会打印
+    logger.warning(f'{dist.get_rank()} model Finished')  # warning 确保每个进程都会打印
 
     patch_size = model.config.vision_config.patch_size
     model.config.force_image_size = data_args.force_image_size
