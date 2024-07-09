@@ -1,0 +1,9 @@
+{
+  "llava_150k": {
+      "root": "coco/train2017/",
+      "annotation": "llava_150k.jsonl",
+      "data_augment": false,
+      "repeat_time": 1,
+      "length": 157712
+    }
+}
