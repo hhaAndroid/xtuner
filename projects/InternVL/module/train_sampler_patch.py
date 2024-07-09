@@ -72,6 +72,8 @@ def get_length_grouped_indices(lengths, batch_size, world_size, generator=None, 
 
 
 # modified from https://github.com/haotian-liu/LLaVA/blob/main/llava/train/llava_trainer.py#L99
+# We don't need to deal with distributed problems,
+# because Accelerator.prepare will automatically split and make it distributed.
 class LengthGroupedSampler(Sampler):
     r"""
     Sampler that samples indices in a way that groups together features of the dataset of roughly the same length while
