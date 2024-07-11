@@ -7,6 +7,7 @@ from torch.nn import CrossEntropyLoss
 from transformers.modeling_outputs import CausalLMOutputWithPast
 from transformers.modeling_utils import PreTrainedModel
 from transformers.utils import logging
+from mmengine.logging import MessageHub
 
 from .configuration_internvl_chat import InternVLChatConfig
 
@@ -59,6 +60,7 @@ class InternVLChatModel(PreTrainedModel):
             output_attentions: Optional[bool] = None,
             output_hidden_states: Optional[bool] = None,
             return_dict: Optional[bool] = None,
+            unpack_num_tokens: Optional[torch.LongTensor] = None,
     ) -> Union[Tuple, CausalLMOutputWithPast]:
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
@@ -87,6 +89,10 @@ class InternVLChatModel(PreTrainedModel):
             input_embeds[selected] = input_embeds[selected] * 0.0 + vit_embeds[:n_token]
 
         input_embeds = input_embeds.reshape(B, N, C)
+
+        if unpack_num_tokens is not None:
+            ctx = MessageHub.get_instance('packed_sequence')
+            ctx.update_info('num_tokens', unpack_num_tokens)
 
         outputs = self.language_model(
             inputs_embeds=input_embeds,

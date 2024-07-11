@@ -6,6 +6,8 @@ import torchvision.transforms as T
 import transformers
 from PIL import Image
 from torchvision.transforms.functional import InterpolationMode
+from torch.utils.data import Dataset
+import random
 
 from .constants import (CLIP_MEAN, CLIP_STD, IMAGENET_MEAN, IMAGENET_STD,
                         IMG_CONTEXT_TOKEN, IMG_END_TOKEN, IMG_START_TOKEN,
@@ -357,3 +359,87 @@ def preprocess_internlm(
         labels=targets,
         attention_mask=input_ids.ne(tokenizer.pad_token_id),
     )
+
+
+class SoftPackDataset(Dataset):
+    def __init__(self, dataset, max_length=32768):
+        super().__init__()
+
+        self.max_length = max_length
+        # unpack concat dataset
+        self.dataset = dataset
+
+        self._ori_lens = []
+        for dataset in self.dataset.datasets:
+            self._ori_lens = self._ori_lens + dataset.length
+
+        inds = [i for i in range(len(self.dataset))]
+        random.shuffle(inds)
+
+        _packed_length = 0
+        _packed_items = []
+        self.pack_lut = []
+
+        for i in inds:
+            if self._ori_lens[i] + _packed_length <= max_length:
+                _packed_items.append(i)
+                _packed_length += self._ori_lens[i]
+            else:
+                self.pack_lut.append(_packed_items)
+                _packed_items = []
+                _packed_length = 0
+
+        if len(_packed_items) > 0:
+            self.pack_lut.append(_packed_items)
+
+        # The number of data items after packing
+        self._num_packed_samples = len(self.pack_lut)
+
+    def __len__(self):
+        return self._num_packed_samples
+
+    def __getitem__(self, item):
+        """Returns a dict containing packed data in the given item.
+
+        Args:
+            item: An index to retrieve packed data.
+
+        Returns:
+            A dict including packed input_ids, labels.
+        """
+
+        packed_items = self.pack_lut[item]
+
+        packed_input_ids = []
+        packed_labels = []
+        unpack_sizes = []
+        pixel_values = []
+        image_flags = []
+        attention_masks = []
+        for i in packed_items:
+            dataset_item = self.dataset[i]
+            packed_input_ids.append(dataset_item['input_ids'])
+            packed_labels.append(dataset_item['labels'])
+            pixel_values.append(dataset_item['pixel_values'])
+            image_flags.append(dataset_item['image_flags'])
+            attention_masks.append(dataset_item['attention_mask'])
+
+            _num_tokens = torch.IntTensor(len(dataset_item['input_ids']))
+            unpack_sizes.append(_num_tokens)
+
+        packed_input_ids = torch.cat(packed_input_ids, dim=0)  # M
+        packed_labels = torch.cat(packed_labels, dim=0)  # M
+        attention_masks = torch.cat(attention_masks, dim=0)  # M
+        packed_pixel_values = torch.cat(pixel_values, dim=0)  # N, 3, 448, 448
+        packed_image_flags = torch.cat(image_flags, dim=0)  # N
+        unpack_num_tokens = torch.cat(unpack_sizes, dim=0)  # K
+
+        packed = {
+            'input_ids': packed_input_ids,
+            'labels': packed_labels,
+            'unpack_num_tokens': unpack_num_tokens,
+            'pixel_values': packed_pixel_values,
+            'image_flags': packed_image_flags,
+            'attention_masks': attention_masks,
+        }
+        return packed

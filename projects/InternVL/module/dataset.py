@@ -9,7 +9,8 @@ from PIL import Image
 import torch
 from copy import deepcopy
 import random
-from .dataset_utils import build_transform, dynamic_preprocess, preprocess_internlm, preprocess_phi3, TCSLoader
+from .dataset_utils import build_transform, dynamic_preprocess, preprocess_internlm, preprocess_phi3, TCSLoader, SoftPackDataset
+
 
 from transformers.utils import logging
 logger = logging.get_logger(__name__)
@@ -87,7 +88,7 @@ class LazySupervisedDataset(Dataset):
                             conversations, return_tensors='pt', padding=False, truncation=False,
                         ).input_ids.size(1)
                         self.conv2length[str_length] = token_length + num_image_token * (
-                                max_dynamic_patch + use_thumbnail)
+                                max_dynamic_patch + use_thumbnail) + 2  # 2 is IMG_START_TOKEN/IMG_END_TOKEN
                     else:
                         token_length = self.conv2length[str_length]
                 self.length.append(token_length)
@@ -143,8 +144,8 @@ class LazySupervisedDataset(Dataset):
             input_ids=ret['input_ids'][0],
             labels=ret['labels'][0],
             attention_mask=ret['attention_mask'][0],
-            pixel_values=pixel_values,
-            image_flags=torch.tensor([1] * num_patches, dtype=torch.long)
+            pixel_values=pixel_values,  # n, 3, 448, 448
+            image_flags=torch.tensor([1] * num_patches, dtype=torch.long)  # n
         )
         return ret
 
@@ -173,8 +174,8 @@ class LazySupervisedDataset(Dataset):
             input_ids=ret['input_ids'][0],
             labels=ret['labels'][0],
             attention_mask=ret['attention_mask'][0],
-            pixel_values=pixel_values,
-            image_flags=torch.tensor([0] * num_patches, dtype=torch.long)
+            pixel_values=pixel_values,  # 1, 3, 448, 448
+            image_flags=torch.tensor([0] * num_patches, dtype=torch.long)  # 1
         )
         return ret
 
@@ -238,4 +239,9 @@ def build_datasets(data_args, tokenizer, model, group_by_length=True,
             datasets.append(dataset)
     train_dataset = ConcatDataset(datasets)
     logger.warning(f'{dist.get_rank()} ===== End of all dataset =====')
+    if data_args.varlen_attn:
+        logger.warning(f'{dist.get_rank()} ===== Start to process packing dataset=====')
+        train_dataset = SoftPackDataset(train_dataset, data_args.max_seq_length_for_varlen)
+        logger.warning(f'{dist.get_rank()} ===== End of process packing dataset=====')
+
     return train_dataset

@@ -279,28 +279,20 @@ def phi3_varlen_attn_forward(
 
     is_training = self.training
 
-    message_hub = MessageHub.get_instance('varlen_attn_args')
-    rank = dist.get_rank()
-    cumulative_len = message_hub.get_info(f'cumulative_len_rank_{rank}')
-    max_seqlen = message_hub.get_info(f'max_seqlen_rank_{rank}')
-
-    assert is_training == (past_key_value is None)
-    use_varlen_atten = (cumulative_len is not None)
-
-    if 'padding_mask' in kwargs:
-        warnings.warn(
-            'Passing `padding_mask` is deprecated and will be removed in v4.37'
-            ' Please make sure use `attention_mask` instead.`')
-
-        # overwrite attention_mask with padding_mask
-        attention_mask = kwargs.pop('padding_mask')
-
     bsz, q_len, _ = hidden_states.size()
     assert bsz == 1, (f'If utilizing local attention, the batch size should be'
                       f' set to 1, but got {bsz}')
-    # attention_mask is set to None if no padding token in input_ids
-    # varlen attn need data packing so no padding tokens in input_ids
-    assert attention_mask is None
+
+    attn_context = MessageHub.get_instance('packed_sequence')
+
+    num_tokens = attn_context.get_info('num_tokens')
+    if num_tokens is not None:
+        position_ids = [torch.arange(num.item()) for num in num_tokens]
+        position_ids = torch.cat(position_ids, dim=0).to(hidden_states.device)
+        position_ids = position_ids.unsqueeze(0)
+        assert position_ids.size(1) == q_len
+
+    assert is_training == (past_key_value is None)
 
     qkv = self.qkv_proj(hidden_states)
     query_pos = self.num_heads * self.head_dim
@@ -340,42 +332,8 @@ def phi3_varlen_attn_forward(
     query_states, key_states = apply_rotary_pos_emb(query_states, key_states,
                                                     cos, sin, position_ids)
 
-    use_sliding_windows = (
-        _flash_supports_window_size
-        and getattr(self.config, 'sliding_window', None) is not None
-        and kv_seq_len > self.config.sliding_window)
-
     if past_key_value is not None:
-        # Activate slicing cache only if the config has a value
-        # `sliding_windows` attribute
-        cache_has_contents = past_key_value.get_seq_length(self.layer_idx) > 0
-        if (getattr(self.config, 'sliding_window', None) is not None
-                and kv_seq_len > self.config.sliding_window
-                and cache_has_contents):
-            slicing_tokens = 1 - self.config.sliding_window
-
-            past_key = past_key_value[self.layer_idx][0]
-            past_value = past_key_value[self.layer_idx][1]
-
-            past_key = past_key[:, :, slicing_tokens:, :].contiguous()
-            past_value = past_value[:, :, slicing_tokens:, :].contiguous()
-
-            if past_key.shape[-2] != self.config.sliding_window - 1:
-                raise ValueError(
-                    'past key must have a shape of (`batch_size, num_heads, '
-                    'self.config.sliding_window-1, head_dim`), got'
-                    f' {past_key.shape}')
-
-            if attention_mask is not None:
-                attention_mask = attention_mask[:, slicing_tokens:]
-                attention_mask = torch.cat(
-                    [attention_mask,
-                     torch.ones_like(attention_mask[:, -1:])],
-                    dim=-1)
-
-        cache_kwargs = {'sin': sin, 'cos': cos}  # Specific to RoPE models
-        key_states, value_states = past_key_value.update(
-            key_states, value_states, self.layer_idx, cache_kwargs)
+        raise ValueError('Past key value is not supported for varlen attention')
 
     # repeat k/v heads if n_kv_heads < n_heads
     key_states = repeat_kv(key_states, self.num_key_value_groups)
@@ -421,17 +379,14 @@ def phi3_varlen_attn_forward(
                                                                             -1)
     attn_dropout = self.attention_dropout if self.training else 0.0
 
-    if use_varlen_atten:
-        attn_output = varlen_flash_attn(
-            query_states,
-            key_states,
-            value_states,
-            cumulative_len,
-            max_seqlen,
-            causal=causal,
-            dropout_p=attn_dropout,
-            window_size=window_size,
-            training=self.training)
+    if num_tokens is not None:
+        _zero_length = torch.zeros(1, device=num_tokens.device)
+        _pad_length = torch.cat([_zero_length, num_tokens]).int()
+        cumulative_lengths = torch.cumsum(_pad_length, 0).int()
+
+        attn_output = varlen_flash_attn(query_states, key_states,
+                                        value_states, cumulative_lengths,
+                                        num_tokens.max())
     else:
         attn_output = flash_attn_wo_mask(
             query_states,

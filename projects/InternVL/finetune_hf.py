@@ -15,7 +15,8 @@ from transformers import (AutoConfig, AutoModelForCausalLM, AutoTokenizer,
 from transformers.trainer_utils import get_last_checkpoint
 from transformers.utils.logging import (enable_default_handler,
                                         enable_explicit_format, set_verbosity)
-
+from transformers.utils.import_utils import is_flash_attn_2_available
+from xtuner.model.modules import dispatch_modules
 from module.dist_utils import init_dist
 from module.model import (InternVisionConfig,
                           InternVisionModel,
@@ -27,7 +28,7 @@ from module.constants import (BOX_END_TOKEN, BOX_START_TOKEN,
                               QUAD_START_TOKEN, REF_END_TOKEN,
                               REF_START_TOKEN)
 from module.dataset import build_datasets
-from module.pad_data_collator import concat_pad_data_collator
+from module.pad_data_collator import concat_pad_data_collator, packing_concat_pad_data_collator
 from module.train_sampler_patch import replace_train_sampler
 
 Image.MAX_IMAGE_PIXELS = None
@@ -176,6 +177,14 @@ class DataTrainingArguments:
     group_by_modality: Optional[bool] = field(
         default=False,
         metadata={'help': 'group by modality.'},
+    ),
+    varlen_attn: Optional[bool] = field(
+        default=False,
+        metadata={'help': 'Use variable length attention.'},
+    ),
+    max_seq_length_for_varlen: Optional[int] = field(
+        default=32768,
+        metadata={'help': 'Max sequence length for variable length attention.'},
     )
 
 
@@ -186,6 +195,12 @@ def main():
     parser = HfArgumentParser((ModelArguments, DataTrainingArguments, TrainingArguments))
     model_args, data_args, training_args = parser.parse_args_into_dataclasses()
     training_args.group_by_modality = data_args.group_by_modality
+    training_args.varlen_attn = data_args.varlen_attn
+    training_args.max_seq_length_for_varlen = data_args.max_seq_length_for_varlen
+
+    if data_args.varlen_attn:
+        assert training_args.per_device_train_batch_size == 1, 'Variable length attention requires batch size 1'
+        assert is_flash_attn_2_available(), 'Variable length attention requires flash_attn_2'
 
     # Setup logging
     logging.basicConfig(
@@ -261,6 +276,10 @@ def main():
         llm = AutoModelForCausalLM.from_pretrained(
             model_args.llm_path, torch_dtype=torch.bfloat16,
             config=llm_config, trust_remote_code=True)
+
+        if data_args.varlen_attn:
+            logger.info('====== dispatch to flash_attention_2=====')
+            dispatch_modules(llm, use_varlen_attn=True)
 
         logger.info('Building InternVLChatConfig...')
         internvl_chat_config = InternVLChatConfig(
@@ -356,7 +375,7 @@ def main():
         train_dataset=train_dataset if training_args.do_train else None,
         eval_dataset=None,
         tokenizer=tokenizer,
-        data_collator=concat_pad_data_collator
+        data_collator=concat_pad_data_collator if not training_args.varlen_attn else packing_concat_pad_data_collator
     )
 
     # Training
