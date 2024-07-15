@@ -122,10 +122,10 @@ def _get_train_sampler(self) -> Optional[torch.utils.data.Sampler]:
     if self.train_dataset is None or not has_length(self.train_dataset):
         return None
     # Build the sampler.
-    if self.args.group_by_length:
+    if self.args.group_by_length is True:
         logger.info('========== Using Custom LengthGroupedSampler ========')
         lengths = []
-        if self.args.group_by_modality:
+        if self.args.group_by_modality is True:
             logger.info('========== ON group_by_modality ========')
             for dataset in self.train_dataset.datasets:
                 lengths = lengths + dataset.modality_length

@@ -205,7 +205,7 @@ def preprocess_phi3(
     input_ids = tokenizer(
         conversations,
         return_tensors='pt',
-        padding=False if group_by_length else 'max_length',
+        padding=False,
         max_length=tokenizer.model_max_length,
         truncation=True,
     ).input_ids
@@ -424,7 +424,7 @@ class SoftPackDataset(Dataset):
             image_flags.append(dataset_item['image_flags'])
             attention_masks.append(dataset_item['attention_mask'])
 
-            _num_tokens = torch.IntTensor(len(dataset_item['input_ids']))
+            _num_tokens = torch.IntTensor([len(dataset_item['input_ids'])])
             unpack_sizes.append(_num_tokens)
 
         packed_input_ids = torch.cat(packed_input_ids, dim=0)  # M
@@ -440,6 +440,6 @@ class SoftPackDataset(Dataset):
             'unpack_num_tokens': unpack_num_tokens,
             'pixel_values': packed_pixel_values,
             'image_flags': packed_image_flags,
-            'attention_masks': attention_masks,
+            'attention_mask': attention_masks,
         }
         return packed

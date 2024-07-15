@@ -61,9 +61,9 @@ def packing_concat_pad_data_collator(features, pad_id=0):
     input_ids = features[0]['input_ids'][None]
     labels = features[0]['labels'][None]
     attention_mask = features[0]['attention_mask'][None]
-    image_flags = features[0]['image_flags'][None]
-    pixel_values = features[0]['pixel_values'][None]
-    unpack_num_tokens = features[0]['unpack_num_tokens'][None]
+    image_flags = features[0]['image_flags']
+    pixel_values = features[0]['pixel_values']
+    unpack_num_tokens = features[0]['unpack_num_tokens']
     data_dict = {
             'input_ids': input_ids,
             'labels': labels,

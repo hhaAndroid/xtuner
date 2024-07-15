@@ -7,7 +7,7 @@ QUOTA_TYPE=${QUOTA_TYPE:-"reserved"}
 NODES=$((GPUS / GPUS_PER_NODE))
 CPUS_PER_TASK=${CPUS_PER_TASK:-16}
 SRUN_ARGS=${SRUN_ARGS:-""}
-PER_DEVICE_BATCH_SIZE=${PER_DEVICE_BATCH_SIZE:-4}
+PER_DEVICE_BATCH_SIZE=1
 GRADIENT_ACC=2
 
 OUTPUT_DIR=${OUTPUT_DIR:-'work_dirs/phi3_finetune'}
@@ -40,6 +40,7 @@ HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 srun -p ${PARTITION} --time 3-00:00
   python finetune_hf.py \
   --varlen_attn True \
   --max_seq_length_for_varlen 32768 \
+  --group_by_length False \
   --vision_path '/mnt/hwfile/xtuner/huanghaian/model/InternViT-300M-448px' \
   --mlp_path '/mnt/hwfile/xtuner/huanghaian/model/InternViT-300M-448px/mlp_projector/phi_3_mini_128k_instruct.pth' \
   --llm_path '/mnt/hwfile/xtuner/huanghaian/model/Phi-3-mini-128k-instruct' \
@@ -74,7 +75,6 @@ HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 srun -p ${PARTITION} --time 3-00:00
   --max_seq_length 8192 \
   --do_train True \
   --grad_checkpoint True \
-  --group_by_length True \
   --dynamic_image_size True \
   --use_thumbnail True \
   --ps_version 'v2' \

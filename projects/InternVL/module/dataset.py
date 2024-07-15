@@ -31,7 +31,8 @@ class LazySupervisedDataset(Dataset):
     def __init__(self, template_name, meta, tokenizer, tcs_loader, num_image_token,
                  image_size=448, data_augment=False, pad2square=False, group_by_length=True,
                  dynamic_image_size=True, use_thumbnail=True, min_dynamic_patch=1,
-                 max_dynamic_patch=12, repeat_time=1, normalize_type='imagenet'):
+                 max_dynamic_patch=12, repeat_time=1, normalize_type='imagenet',
+                 varlen_attn=False):
         super(LazySupervisedDataset, self).__init__()
         self.tokenizer = tokenizer
         self.template_name = template_name
@@ -71,7 +72,7 @@ class LazySupervisedDataset(Dataset):
         self.min_dynamic_patch = min_dynamic_patch
         self.max_dynamic_patch = max_dynamic_patch
         self.normalize_type = normalize_type
-        if self.group_by_length:
+        if self.group_by_length or varlen_attn:
             self.conv2length = {}  # using dict to speedup the calculation of token length
             self.length = []
             for data_item in self.raw_data:
@@ -227,6 +228,7 @@ def build_datasets(data_args, tokenizer, model, group_by_length=True,
                 max_dynamic_patch=max_num,
                 repeat_time=repeat_time,
                 normalize_type=normalize_type,
+                varlen_attn=data_args.varlen_attn
             )
         except Exception as e:
             logger.warning(f'Error in loading dataset: {ds_name},==== {e}')
