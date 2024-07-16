@@ -10,6 +10,9 @@ from transformers.utils import logging
 from mmengine.logging import MessageHub
 
 from .configuration_internvl_chat import InternVLChatConfig
+from .modeling_intern_vit import InternVisionModel
+from ..phi3.modeling_phi3 import Phi3ForCausalLM
+from ..internlm2.modeling_internlm2 import InternLM2ForCausalLM
 
 logger = logging.get_logger(__name__)
 
@@ -34,7 +37,24 @@ class InternVLChatModel(PreTrainedModel):
         logger.info(f'num_image_token: {self.num_image_token}')
 
         self.vision_model = vision_model
-        self.language_model = language_model
+        if vision_model is not None:
+            self.vision_model = vision_model
+        else:
+            # In this case, it is sufficient to just construct an empty model,
+            # as the weights will be automatically assigned when using from_pretrained().
+            self.vision_model = InternVisionModel(config.vision_config)
+
+        if language_model is not None:
+            self.language_model = language_model
+        else:
+            # In this case, it is sufficient to just construct an empty model,
+            # as the weights will be automatically assigned when using from_pretrained().
+            if config.llm_config.architectures[0] == 'InternLM2ForCausalLM':
+                self.language_model = InternLM2ForCausalLM(config.llm_config)
+            elif config.llm_config.architectures[0] == 'Phi3ForCausalLM':
+                self.language_model = Phi3ForCausalLM(config.llm_config)
+            else:
+                raise NotImplementedError(f'{config.llm_config.architectures[0]} is not implemented.')
 
         vit_hidden_size = config.vision_config.hidden_size
         llm_hidden_size = config.llm_config.hidden_size
