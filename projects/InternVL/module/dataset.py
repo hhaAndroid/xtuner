@@ -99,7 +99,9 @@ class LazySupervisedDataset(Dataset):
                             assert conversations.count(
                                 "<image>") == num_images, 'image count should be equal to the number of <image> tokens ' \
                                                           f'{conversations},{num_images}'
-                            token_length += (num_images * num_image_token + 2)  # 2 is IMG_START_TOKEN/IMG_END_TOKEN
+                            # 2 is IMG_START_TOKEN/IMG_END_TOKEN
+                            # These two tokens need to be added to each image.
+                            token_length += num_images * (num_image_token + 2)
                     else:
                         if 'image' in data_item and data_item['image'] is not None:
                             if isinstance(data_item['image'], list):

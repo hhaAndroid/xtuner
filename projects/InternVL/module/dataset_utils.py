@@ -196,7 +196,10 @@ def preprocess_phi3(
         image_tokens = f'{IMG_START_TOKEN}{IMG_CONTEXT_TOKEN * num_image_token}{IMG_END_TOKEN}'
         new_conversations = []
         for conversation in conversations:
-            conversation = conversation.replace('<image>', image_tokens, 1)
+            # In multi-image mode, we do not use dynamic resolution,
+            # so we can directly replace everything without the need for dynamic replacement
+            # conversation = conversation.replace('<image>', image_tokens, 1)
+            conversation = conversation.replace('<image>', image_tokens)
             new_conversations.append(conversation)
         conversations = new_conversations
 
