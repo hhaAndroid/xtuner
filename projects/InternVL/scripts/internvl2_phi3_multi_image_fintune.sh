@@ -17,7 +17,7 @@ if [ ! -d "$OUTPUT_DIR" ]; then
   mkdir -p "$OUTPUT_DIR"
 fi
 
-export PYTHONPATH="$(pwd)"
+export PYTHONPATH="$(pwd):$(pwd)/../../"
 export MASTER_PORT=34233
 export TF_CPP_MIN_LOG_LEVEL=3
 

@@ -5,7 +5,9 @@
 # --------------------------------------------------------
 
 import copy
-
+from .configuration_intern_vit import InternVisionConfig
+from ..phi3.configuration_phi3 import Phi3Config
+from ..internlm2.configuration_internlm2 import InternLM2Config
 from transformers.configuration_utils import PretrainedConfig
 from transformers.utils import logging
 
@@ -36,7 +38,18 @@ class InternVLChatConfig(PretrainedConfig):
         super().__init__(**kwargs)
 
         self.vision_config = vision_config
+        if isinstance(vision_config, dict):
+            self.vision_config = InternVisionConfig(**vision_config)
+
         self.llm_config = llm_config
+        if isinstance(llm_config, dict):
+            if llm_config['architectures'][0] == 'InternLM2ForCausalLM':
+                self.llm_config = InternLM2Config(**llm_config)
+            elif llm_config['architectures'][0] == 'Phi3ForCausalLM':
+                self.llm_config = Phi3Config(**llm_config)
+            else:
+                raise ValueError('Unsupported architecture: {}'.format(llm_config['architectures'][0]))
+
         self.use_backbone_lora = use_backbone_lora
         self.use_llm_lora = use_llm_lora
         self.pad2square = pad2square
