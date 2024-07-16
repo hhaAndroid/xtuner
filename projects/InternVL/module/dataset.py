@@ -9,12 +9,12 @@ from PIL import Image
 import torch
 from copy import deepcopy
 import random
-from .dataset_utils import build_transform, dynamic_preprocess, preprocess_internlm, preprocess_phi3, TCSLoader, SoftPackDataset
-
+from .dataset_utils import build_transform, dynamic_preprocess, preprocess_internlm, preprocess_phi3, TCSLoader, \
+    SoftPackDataset
 
 from transformers.utils import logging
-logger = logging.get_logger(__name__)
 
+logger = logging.get_logger(__name__)
 
 try:
     from petrel_client.client import Client
@@ -32,11 +32,14 @@ class LazySupervisedDataset(Dataset):
                  image_size=448, data_augment=False, pad2square=False, group_by_length=True,
                  dynamic_image_size=True, use_thumbnail=True, min_dynamic_patch=1,
                  max_dynamic_patch=12, repeat_time=1, normalize_type='imagenet',
-                 varlen_attn=False):
+                 varlen_attn=False, is_multi_style=False):
         super(LazySupervisedDataset, self).__init__()
         self.tokenizer = tokenizer
         self.template_name = template_name
         self.num_image_token = num_image_token
+        # multi image or video, not use dynamic_image_size
+        self.is_multi_style = is_multi_style
+
         self.ds_name = meta['annotation']
         logger.warning(f"{dist.get_rank()} ======= Start to process dataset: {meta['annotation']}")
         logger.info(f'[Dataset] num_image_token: {num_image_token}')
@@ -47,6 +50,8 @@ class LazySupervisedDataset(Dataset):
         self.image_size = image_size
         self.data_augment = data_augment
         self.pad2square = pad2square
+        self.transform = build_transform(data_augment=self.data_augment, input_size=self.image_size,
+                                         pad2square=self.pad2square, normalize_type=normalize_type)
         logger.info('Formatting inputs...Skip in lazy mode')
         assert meta['annotation'].endswith('jsonl') or meta['annotation'].endswith('json'), \
             f'annotation must be json/jsonl, but got {meta["annotation"]}'
@@ -81,17 +86,36 @@ class LazySupervisedDataset(Dataset):
                 if 'length' in data_item:
                     token_length = data_item['length']  # use precomputed length if exists
                 else:
-                    # compute token length using tokenizer
-                    conversations = '\n'.join([temp['value'] for temp in data_item['conversations']])
-                    str_length = len(conversations)
-                    if str_length not in self.conv2length:
+                    if self.is_multi_style:
+                        # In multi-image and video mode, due to the varying number of images,
+                        # the text length alone cannot accurately estimate the content.
+                        conversations = '\n'.join([temp['value'] for temp in data_item['conversations']])
                         token_length = tokenizer(
                             conversations, return_tensors='pt', padding=False, truncation=False,
                         ).input_ids.size(1)
-                        self.conv2length[str_length] = token_length + num_image_token * (
-                                max_dynamic_patch + use_thumbnail) + 2  # 2 is IMG_START_TOKEN/IMG_END_TOKEN
+                        if 'image' in data_item and data_item['image'] is not None:
+                            assert isinstance(data_item['image'], list), 'image should be a list'
+                            num_images = len(data_item['image'])
+                            assert conversations.count(
+                                "<image>") == num_images, 'image count should be equal to the number of <image> tokens ' \
+                                                          f'{conversations},{num_images}'
+                            token_length += (num_images * num_image_token + 2)  # 2 is IMG_START_TOKEN/IMG_END_TOKEN
                     else:
-                        token_length = self.conv2length[str_length]
+                        if 'image' in data_item and data_item['image'] is not None:
+                            if isinstance(data_item['image'], list):
+                                assert len(data_item['image']) == 1, 'image should be one element ' \
+                                                                     'when not multi image style'
+                        # compute token length using tokenizer
+                        conversations = '\n'.join([temp['value'] for temp in data_item['conversations']])
+                        str_length = len(conversations)
+                        if str_length not in self.conv2length:
+                            token_length = tokenizer(
+                                conversations, return_tensors='pt', padding=False, truncation=False,
+                            ).input_ids.size(1)
+                            self.conv2length[str_length] = token_length + num_image_token * (
+                                    max_dynamic_patch + use_thumbnail) + 2  # 2 is IMG_START_TOKEN/IMG_END_TOKEN
+                        else:
+                            token_length = self.conv2length[str_length]
                 self.length.append(token_length)
 
     def __len__(self):
@@ -118,14 +142,12 @@ class LazySupervisedDataset(Dataset):
             image = self.tcs_loader(image_path)
         else:
             image = Image.open(image_path).convert('RGB')
-        transform = build_transform(data_augment=self.data_augment, input_size=self.image_size,
-                                    pad2square=self.pad2square, normalize_type=self.normalize_type)
         if self.dynamic_image_size:
             images = dynamic_preprocess(image, min_num=self.min_dynamic_patch, max_num=self.max_dynamic_patch,
                                         image_size=self.image_size, use_thumbnail=self.use_thumbnail)
         else:
             images = [image]
-        pixel_values = [transform(image) for image in images]
+        pixel_values = [self.transform(image) for image in images]
         pixel_values = torch.stack(pixel_values)
         num_patches = pixel_values.size(0)
         if not self.dynamic_image_size:
@@ -147,6 +169,42 @@ class LazySupervisedDataset(Dataset):
             attention_mask=ret['attention_mask'][0],
             pixel_values=pixel_values,  # n, 3, 448, 448
             image_flags=torch.tensor([1] * num_patches, dtype=torch.long)  # n
+        )
+        return ret
+
+    def multi_modal_multi_images_get_item(self, data_item):
+        image_paths = data_item['image']
+        assert isinstance(image_paths, list), 'image should be a list'
+        image_paths = [os.path.join(self.root, path) for path in image_paths]
+
+        pixel_values = []
+        for image_path in image_paths:
+            if "s3://" in image_path:
+                if self.tcs_loader is None:
+                    raise ValueError('petrel_client is not installed !!!')
+                image = self.tcs_loader(image_path)
+            else:
+                image = Image.open(image_path).convert('RGB')
+            pixel_value = self.transform(image)
+            pixel_values.append(pixel_value)
+        pixel_values = torch.stack(pixel_values)
+
+        if self.template_name == 'internlm2-chat':
+            preprocess_function = preprocess_internlm
+        elif self.template_name == 'phi3-chat':
+            preprocess_function = preprocess_phi3
+        else:
+            raise NotImplementedError()
+
+        ret = preprocess_function(self.template_name, [deepcopy(data_item['conversations'])],
+                                  self.tokenizer, self.num_image_token * 1,
+                                  group_by_length=self.group_by_length, ds_name=self.ds_name)
+        ret = dict(
+            input_ids=ret['input_ids'][0],
+            labels=ret['labels'][0],
+            attention_mask=ret['attention_mask'][0],
+            pixel_values=pixel_values,  # n, 3, 448, 448
+            image_flags=torch.tensor([1] * 1, dtype=torch.long)  # n
         )
         return ret
 
@@ -188,7 +246,10 @@ class LazySupervisedDataset(Dataset):
                 else:
                     data_item = self.raw_data[i]
                 if 'image' in data_item and data_item['image'] is not None:
-                    ret = self.multi_modal_get_item(data_item)
+                    if self.is_multi_style:
+                        ret = self.multi_modal_multi_images_get_item(data_item)
+                    else:
+                        ret = self.multi_modal_get_item(data_item)
                 else:
                     ret = self.pure_text_get_item(data_item)
                 break
@@ -212,6 +273,10 @@ def build_datasets(data_args, tokenizer, model, group_by_length=True,
             logger.info(f'max_dynamic_patch is set to {max_num} according to the meta file')
         else:
             max_num = max_dynamic_patch
+
+        # multi image or video
+        is_multi_style = ds_collections[ds_name].get('is_multi_style', False)
+
         try:
             dataset = LazySupervisedDataset(
                 data_args.conv_style, ds_collections[ds_name],
@@ -228,7 +293,8 @@ def build_datasets(data_args, tokenizer, model, group_by_length=True,
                 max_dynamic_patch=max_num,
                 repeat_time=repeat_time,
                 normalize_type=normalize_type,
-                varlen_attn=data_args.varlen_attn
+                varlen_attn=data_args.varlen_attn,
+                is_multi_style=is_multi_style
             )
         except Exception as e:
             logger.warning(f'Error in loading dataset: {ds_name},==== {e}')

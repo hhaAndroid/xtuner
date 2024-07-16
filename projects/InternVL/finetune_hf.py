@@ -177,11 +177,11 @@ class DataTrainingArguments:
     group_by_modality: Optional[bool] = field(
         default=False,
         metadata={'help': 'group by modality.'},
-    ),
+    )
     varlen_attn: Optional[bool] = field(
         default=False,
         metadata={'help': 'Use variable length attention.'},
-    ),
+    )
     max_seq_length_for_varlen: Optional[int] = field(
         default=32768,
         metadata={'help': 'Max sequence length for variable length attention.'},

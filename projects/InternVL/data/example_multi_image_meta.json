@@ -3,7 +3,6 @@
     "root": "/mnt/hwfile/xtuner/linzhihao/dataset/internvl_sft/data/chartqa/",
     "annotation": "/mnt/hwfile/xtuner/huanghaian/data/chartqa_trainval_30k_bk.jsonl",
     "data_augment": false,
-    "is_multi_style": false,
     "repeat_time": 0.01,
     "length": 30219
   },
@@ -13,5 +12,13 @@
     "data_augment": false,
     "repeat_time": 0.1,
     "length": 15011
+  },
+  "M4-Instruct-Data_part": {
+    "root": "/mnt/hwfile/xtuner/huanghaian/data/M4-Instruct-Data/",
+    "annotation": "/mnt/hwfile/xtuner/huanghaian/data/M4-Instruct-Data/Image_Edit_Instruction.jsonl",
+    "data_augment": false,
+    "is_multi_style": true,
+    "repeat_time": 0.5,
+    "length": 67705
   }
 }

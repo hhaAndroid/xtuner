@@ -192,8 +192,8 @@ def preprocess_phi3(
             conv.append_message(role, sentence['value'])
         conversations.append(conv.get_prompt())
 
-    image_tokens = f'{IMG_START_TOKEN}{IMG_CONTEXT_TOKEN * num_image_token}{IMG_END_TOKEN}'
     if not text_only:
+        image_tokens = f'{IMG_START_TOKEN}{IMG_CONTEXT_TOKEN * num_image_token}{IMG_END_TOKEN}'
         new_conversations = []
         for conversation in conversations:
             conversation = conversation.replace('<image>', image_tokens, 1)
