@@ -244,7 +244,7 @@ def main():
     set_seed(training_args.seed)
 
     # Load pretrained model, tokenizer, and image processor
-    tokenizer_path = model_args.llm_path
+    tokenizer_path = model_args.model_name_or_path or model_args.llm_path
     logger.info(f'Loading Tokenizer: {tokenizer_path}')
     tokenizer = AutoTokenizer.from_pretrained(
         tokenizer_path, add_eos_token=False, trust_remote_code=True, use_fast=False)  # ？
@@ -257,8 +257,27 @@ def main():
     num_new_tokens = tokenizer.add_tokens(token_list, special_tokens=True)
 
     if model_args.model_name_or_path is not None:
-        raise NotImplementedError('model_name_or_path is not supported yet.')
+        # Fine-tuning based on official models
+        logger.info('Loading InternVLChatModel...')
+        config = InternVLChatConfig.from_pretrained(model_args.model_name_or_path)
+        config.vision_config.drop_path_rate = model_args.drop_path_rate
+        if config.llm_config.model_type == 'internlm2':
+            config.llm_config.attn_implementation = 'flash_attention_2'  # for InternLM
+            logger.info('Using flash_attention_2 for InternLM')
+        else:
+            config.llm_config._attn_implementation = 'flash_attention_2'  # for LLaMA
+            logger.info('Using flash_attention_2 for LLaMA')
+        config.template = data_args.conv_style
+        config.select_layer = model_args.vision_select_layer
+        config.dynamic_image_size = data_args.dynamic_image_size
+        config.use_thumbnail = data_args.use_thumbnail
+        config.ps_version = model_args.ps_version
+        config.min_dynamic_patch = data_args.min_dynamic_patch
+        config.max_dynamic_patch = data_args.max_dynamic_patch
+        model = InternVLChatModel.from_pretrained(
+            model_args.model_name_or_path, torch_dtype=torch.bfloat16, config=config)
     else:
+        # Running from scratch or fine-tuning based on pre-trained weights
         logger.info('Loading ViT...')
         vision_config = InternVisionConfig.from_pretrained(model_args.vision_path)
         vision_config.drop_path_rate = model_args.drop_path_rate

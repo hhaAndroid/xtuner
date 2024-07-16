@@ -153,9 +153,9 @@ class LazySupervisedDataset(Dataset):
         if not self.dynamic_image_size:
             assert num_patches == 1, f'The number of patches should be 1, but got {num_patches}.'
 
-        if self.template_name == 'internlm2-chat':
+        if self.template_name in ['internlm2-chat', 'internlm2-chat-internvl2']:
             preprocess_function = preprocess_internlm
-        elif self.template_name == 'phi3-chat':
+        elif self.template_name in ['phi3-chat', 'phi3-chat-internvl2']:
             preprocess_function = preprocess_phi3
         else:
             raise NotImplementedError()
@@ -189,9 +189,9 @@ class LazySupervisedDataset(Dataset):
             pixel_values.append(pixel_value)
         pixel_values = torch.stack(pixel_values)
 
-        if self.template_name == 'internlm2-chat':
+        if self.template_name in ['internlm2-chat', 'internlm2-chat-internvl2']:
             preprocess_function = preprocess_internlm
-        elif self.template_name == 'phi3-chat':
+        elif self.template_name in ['phi3-chat', 'phi3-chat-internvl2']:
             preprocess_function = preprocess_phi3
         else:
             raise NotImplementedError()
@@ -219,9 +219,9 @@ class LazySupervisedDataset(Dataset):
         num_patches = pixel_values.size(0)
         assert num_patches == 1, f'The number of patches should be 1, but got {num_patches}.'
 
-        if self.template_name == 'internlm2-chat':
+        if self.template_name in ['internlm2-chat', 'internlm2-chat-internvl2']:
             preprocess_function = preprocess_internlm
-        elif self.template_name == 'phi3-chat':
+        elif self.template_name in ['phi3-chat', 'phi3-chat-internvl2']:
             preprocess_function = preprocess_phi3
         else:
             raise NotImplementedError()
