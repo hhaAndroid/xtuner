@@ -50,8 +50,7 @@ class LazySupervisedDataset(Dataset):
         self.image_size = image_size
         self.data_augment = data_augment
         self.pad2square = pad2square
-        self.transform = build_transform(data_augment=self.data_augment, input_size=self.image_size,
-                                         pad2square=self.pad2square, normalize_type=normalize_type)
+
         logger.info('Formatting inputs...Skip in lazy mode')
         assert meta['annotation'].endswith('jsonl') or meta['annotation'].endswith('json'), \
             f'annotation must be json/jsonl, but got {meta["annotation"]}'
@@ -149,7 +148,9 @@ class LazySupervisedDataset(Dataset):
                                         image_size=self.image_size, use_thumbnail=self.use_thumbnail)
         else:
             images = [image]
-        pixel_values = [self.transform(image) for image in images]
+        transform = build_transform(data_augment=self.data_augment, input_size=self.image_size,
+                                    pad2square=self.pad2square, normalize_type=self.normalize_type)
+        pixel_values = [transform(image) for image in images]
         pixel_values = torch.stack(pixel_values)
         num_patches = pixel_values.size(0)
         if not self.dynamic_image_size:
@@ -178,7 +179,8 @@ class LazySupervisedDataset(Dataset):
         image_paths = data_item['image']
         assert isinstance(image_paths, list), 'image should be a list'
         image_paths = [os.path.join(self.root, path) for path in image_paths]
-
+        transform = build_transform(data_augment=self.data_augment, input_size=self.image_size,
+                                    pad2square=self.pad2square, normalize_type=self.normalize_type)
         pixel_values = []
         for image_path in image_paths:
             if "s3://" in image_path:
@@ -187,7 +189,7 @@ class LazySupervisedDataset(Dataset):
                 image = self.tcs_loader(image_path)
             else:
                 image = Image.open(image_path).convert('RGB')
-            pixel_value = self.transform(image)
+            pixel_value = transform(image)
             pixel_values.append(pixel_value)
         pixel_values = torch.stack(pixel_values)
 
@@ -206,7 +208,7 @@ class LazySupervisedDataset(Dataset):
             labels=ret['labels'][0],
             attention_mask=ret['attention_mask'][0],
             pixel_values=pixel_values,  # n, 3, 448, 448
-            image_flags=torch.tensor([1] * 1, dtype=torch.long)  # n
+            image_flags=torch.tensor([1] * len(image_paths), dtype=torch.long)  # n
         )
         return ret
 
