@@ -35,13 +35,14 @@ class TextTokenizeFunction():
 
 class SoftPackerForText(torch.utils.data.Dataset):
 
-    def __init__(self, dataset, max_length=2048):
+    def __init__(self, dataset, max_length=2048, pad_token_id=DEFAULT_PAD_TOKEN_INDEX):
         super().__init__()
 
         self.max_length = max_length
 
         # unpack dataset
         self.dataset = dataset
+        self.pad_token_id = pad_token_id
 
         self._ori_lens = dataset['num_tokens']
 
@@ -89,14 +90,19 @@ class SoftPackerForText(torch.utils.data.Dataset):
         num_tokens = []
         for i in packed_items:
             input_ids.extend(self.dataset[i]['input_ids'])
-            labels.extend(self.dataset[i]['labels'])
+            if 'labels' not in self.dataset[i]:
+                # pretrain
+                labels.extend(self.dataset[i]['input_ids'])
+            else:
+                # sft
+                labels.extend(self.dataset[i]['labels'])
 
             _num_tokens = self.dataset[i]['num_tokens']
             num_tokens.append(_num_tokens)
 
         if len(input_ids) < self.max_length:
             num_pad_tokens = self.max_length - len(input_ids)
-            input_ids.extend([DEFAULT_PAD_TOKEN_INDEX] * num_pad_tokens)
+            input_ids.extend([self.pad_token_id] * num_pad_tokens)
             labels.extend([IGNORE_INDEX] * num_pad_tokens)
             num_tokens.append(num_pad_tokens)
 

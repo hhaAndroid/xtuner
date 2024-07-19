@@ -31,7 +31,12 @@ class SkyPile_150B_TextTokenizeFunction:
         self.eos_token = tokenizer.eos_token
 
     def __call__(self, item):
-        text = item['text'] + self.eos_token
+        # text: sky pile 150b
+        # content: wanjuan_1
+        try:
+            text = item['text'] + self.eos_token
+        except:
+            text = item['content'] + self.eos_token
         input_ids = self.tokenizer.encode(text, add_special_tokens=False)
         training_data = {
             'input_ids': input_ids,
@@ -50,8 +55,21 @@ if __name__ == '__main__':
     rank = get_rank()
 
     work_dir = 'work_dirs/llm'
-    dset_cache_dir = '/mnt/hwfile/xtuner/huanghaian/data/llm/SkyPile-150B/dataset_cache/'
-    datasets_roots = '/mnt/hwfile/xtuner/huanghaian/data/llm/SkyPile-150B/data/'
+
+    # dset_cache_dir = '/mnt/hwfile/xtuner/huanghaian/data/llm/SkyPile-150B/dataset_cache/'
+    # datasets_roots = '/mnt/hwfile/xtuner/huanghaian/data/llm/SkyPile-150B/data/'
+    # [XTuner][RANK 0][2024-07-19 12:10:19][INFO][__main__:<module>:89] [Dataset] 41687436151 tokens. 42b tokens 157GB 源文件 172GB
+    # [XTuner][RANK 0][2024-07-19 12:10:19][INFO][__main__:<module>:94] [Dataset] (> 16384 tokens) 1569 samples
+    # [XTuner][RANK 0][2024-07-19 12:10:19][INFO][__main__:<module>:94] [Dataset] (> 8192 tokens) 31075 samples
+    # [XTuner][RANK 0][2024-07-19 12:10:20][INFO][__main__:<module>:94] [Dataset] (> 5461 tokens) 118131 samples
+    # [XTuner][RANK 0][2024-07-19 12:10:20][INFO][__main__:<module>:94] [Dataset] (> 4096 tokens) 283140 samples
+    # 16 卡 处理 40 分钟，
+
+    dset_cache_dir = '/mnt/hwfile/xtuner/huanghaian/data/llm/wanjuan_1/dataset_cache/'
+    datasets_roots = '/mnt/hwfile/xtuner/huanghaian/data/llm/wanjuan_1/orig_jsonl/'
+    # 原始文件 435GB，一共 105 个 jsonl
+
+
     datasets = []
     before_count = 0
     for path in scandir(datasets_roots):
@@ -61,7 +79,7 @@ if __name__ == '__main__':
         if file_size > 1000:
             datasets.append(jsonl_path)
 
-    num_workers = 16
+    num_workers = 8
     max_length = 32768
 
     mkdir_or_exist(work_dir)
