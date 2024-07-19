@@ -35,7 +35,7 @@ class SkyPile_150B_TextTokenizeFunction:
         input_ids = self.tokenizer.encode(text, add_special_tokens=False)
         training_data = {
             'input_ids': input_ids,
-            'labels': input_ids,
+            # 'labels': input_ids, # save many disk space
             'num_tokens': len(input_ids),
         }
         return training_data
