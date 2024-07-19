@@ -6,6 +6,7 @@ x = "Hey how are you doing today?"
 print(tokenizer(x, return_tensors="pt"))
 x = "你好呀，今天天气是真的好，你也这么觉得吧？"+tokenizer.eos_token
 print(tokenizer(x, return_tensors="pt"))
+print(tokenizer.encode(x, add_special_tokens=False))
 
 # y = '是的'
 # messages = [
