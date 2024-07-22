@@ -357,7 +357,12 @@ class HardPackerForText(torch.utils.data.Dataset):
             # Get original data and labels
             ori_idx = self.shfl_inds[i]
             ori_input_ids = self.dataset[ori_idx]['input_ids']
-            ori_labels = self.dataset[ori_idx]['labels']
+            if 'labels' in self.dataset[ori_idx]:
+                # sft
+                ori_labels = self.dataset[ori_idx]['labels']
+            else:
+                # pretrain
+                ori_labels = self.dataset[ori_idx]['input_ids']
 
             # Add original data and labels from calculated positions
             # to trunc_ids and trunc_labels
