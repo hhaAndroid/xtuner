@@ -14,8 +14,6 @@ SUPPORT_FLASH2 = False
 
 try:
     from flash_attn import flash_attn_func
-    _flash_supports_window_size = 'window_size' in list(
-        inspect.signature(flash_attn_func).parameters)
     SUPPORT_FLASH2 = True
 except ImportError:
     pass
@@ -134,11 +132,7 @@ def qwen2_varlen_attn_forward(
     value_states = value_states.transpose(1, 2)
 
     # ----------------- flash attention forward ------------------------#
-    use_sliding_windows = (
-        _flash_supports_window_size
-        and getattr(self.config, 'sliding_window', None) is not None
-        and kv_seq_len > self.config.sliding_window
-        and self.config.use_sliding_window)
+    use_sliding_windows = False
     # Decide whether to use SWA or not by layer index.
     if use_sliding_windows and self.layer_idx >= self.config.max_window_layers:
         use_sliding_windows = False

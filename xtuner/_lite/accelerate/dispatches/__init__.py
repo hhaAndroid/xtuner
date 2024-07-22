@@ -26,9 +26,9 @@ def dispatch_clip_attn_forward(module):
 
 def dispatch_qwen2_varlen_attn_forward(module):
     assert module.__class__.__name__ == 'Qwen2FlashAttention2'
-    from .internlm2 import internlm2_varlen_attn_forward
-    _dispatch_forward_fn(module, internlm2_varlen_attn_forward)
-    return internlm2_varlen_attn_forward.__name__
+    from .qwen2 import qwen2_varlen_attn_forward
+    _dispatch_forward_fn(module, qwen2_varlen_attn_forward)
+    return qwen2_varlen_attn_forward.__name__
 
 
 DISPATCH_MAP = {

@@ -45,6 +45,6 @@ HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 srun -p ${PARTITION} --time 5:00:00
   --dset-pack-level 'hard' \
   --dset-from-cache \
   --checkpoint-interval 1000 \
-  --shard-strategy 'hybrid' \
+  --shard-strategy 'full' \
   --dset-cache-dir '/mnt/hwfile/xtuner/huanghaian/data/llm/SkyPile-150B/dataset_cache/' \
   2>&1 | tee -a "${OUTPUT_DIR}/training_log.txt"

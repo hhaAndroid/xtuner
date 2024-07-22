@@ -33,7 +33,7 @@ HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 srun -p ${PARTITION} \
   --quotatype=${QUOTA_TYPE} \
   ${SRUN_ARGS} \
   python -u fsdp_pretrain.py \
-  --mirco-batch-size 16 \
+  --mirco-batch-size 8 \
   --global-batch-size 512 \
   --lr 1e-4 \
   --wd 0.1 \
@@ -45,6 +45,6 @@ HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 srun -p ${PARTITION} \
   --dset-pack-level 'hard' \
   --dset-from-cache \
   --checkpoint-interval 1000 \
-  --shard-strategy 'hybrid' \
+  --shard-strategy 'full' \
   --dset-cache-dir '/mnt/hwfile/xtuner/huanghaian/data/llm/wanjuan_1/dataset_cache/' '/mnt/hwfile/xtuner/huanghaian/data/llm/SkyPile-150B/dataset_cache/' \
   2>&1 | tee -a "${OUTPUT_DIR}/training_log.txt"
