@@ -1,3 +1,5 @@
+import json
+
 from mmengine.dist import infer_launcher, init_dist, get_rank
 from mmengine.runner import set_random_seed
 from mmengine.utils import mkdir_or_exist, scandir
@@ -25,7 +27,7 @@ def log_format(rank, debug=False):
     return formatter
 
 
-class SkyPile_150B_TextTokenizeFunction:
+class PretrainTextTokenizeFunction:
     def __init__(self, tokenizer):
         self.tokenizer = tokenizer
         self.eos_token = tokenizer.eos_token
@@ -69,7 +71,6 @@ if __name__ == '__main__':
     datasets_roots = '/mnt/hwfile/xtuner/huanghaian/data/llm/wanjuan_1/orig_jsonl/'
     # 原始文件 435GB，一共 105 个 jsonl, token 后 375 GB
 
-
     datasets = []
     before_count = 0
     for path in scandir(datasets_roots):
@@ -80,7 +81,7 @@ if __name__ == '__main__':
             datasets.append(jsonl_path)
 
     num_workers = 8
-    max_length = 32768
+    max_length = 32768  # just for logging
 
     mkdir_or_exist(work_dir)
     timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
@@ -91,7 +92,7 @@ if __name__ == '__main__':
     logger.info(f'dataset filter, before: {before_count}, after: {len(datasets)}')
 
     tokenizer = AutoTokenizer.from_pretrained("tokenizer")
-    tokenize_fn = SkyPile_150B_TextTokenizeFunction(tokenizer)
+    tokenize_fn = PretrainTextTokenizeFunction(tokenizer)
 
     _datasets = load_datasets(
         paths=datasets,
@@ -103,11 +104,10 @@ if __name__ == '__main__':
         init_fns=[Dataset.from_list])
 
     if rank == 0:
-        num_tokens = [torch.tensor(dset['num_tokens']) for dset in _datasets]
-        num_tokens = torch.cat(num_tokens, dim=0)
-        logger.info(f'[Dataset] {sum(num_tokens)} tokens.')
+        _path = os.path.join(dset_cache_dir, 'local_infos.json')
+        world_cached_infos = json.load(open(_path))
 
-        for i in range(4):
-            length = max_length // ((i+1)*2)
-            greater = (num_tokens > length).sum()
-            logger.info(f'[Dataset] (> {length} tokens) {greater} samples')
+        total_tokens = 0
+        for key, value in world_cached_infos.items():
+            total_tokens += value['num_tokens']
+        logger.info(f'total tokens: {total_tokens}')
