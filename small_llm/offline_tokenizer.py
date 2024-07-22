@@ -47,7 +47,8 @@ class PretrainTextTokenizeFunction:
         }
         return training_data
 
-
+# export PYTHONPATH="$(pwd):$(pwd)/../"
+# srun -p llm_razor -N 4 --gres=gpu:8 --ntasks=32 --cpus-per-task=16 --time=1:00:00 python offline_tokenizer.py
 if __name__ == '__main__':
     dist_launcher = infer_launcher()
     init_dist(dist_launcher)
@@ -58,8 +59,8 @@ if __name__ == '__main__':
 
     work_dir = 'work_dirs/llm'
 
-    # dset_cache_dir = '/mnt/hwfile/xtuner/huanghaian/data/llm/SkyPile-150B/dataset_cache/'
-    # datasets_roots = '/mnt/hwfile/xtuner/huanghaian/data/llm/SkyPile-150B/data/'
+    dset_cache_dir = '/mnt/hwfile/xtuner/huanghaian/data/llm/SkyPile-150B/dataset_cache/'
+    datasets_roots = '/mnt/hwfile/xtuner/huanghaian/data/llm/SkyPile-150B/data/'
     # [XTuner][RANK 0][2024-07-19 12:10:19][INFO][__main__:<module>:89] [Dataset] 41687436151 tokens. 42b tokens 157GB 源文件 172GB
     # [XTuner][RANK 0][2024-07-19 12:10:19][INFO][__main__:<module>:94] [Dataset] (> 16384 tokens) 1569 samples
     # [XTuner][RANK 0][2024-07-19 12:10:19][INFO][__main__:<module>:94] [Dataset] (> 8192 tokens) 31075 samples
@@ -67,8 +68,8 @@ if __name__ == '__main__':
     # [XTuner][RANK 0][2024-07-19 12:10:20][INFO][__main__:<module>:94] [Dataset] (> 4096 tokens) 283140 samples
     # 16 卡 处理 40 分钟，
 
-    dset_cache_dir = '/mnt/hwfile/xtuner/huanghaian/data/llm/wanjuan_1/dataset_cache/'
-    datasets_roots = '/mnt/hwfile/xtuner/huanghaian/data/llm/wanjuan_1/orig_jsonl/'
+    # dset_cache_dir = '/mnt/hwfile/xtuner/huanghaian/data/llm/wanjuan_1/dataset_cache/'
+    # datasets_roots = '/mnt/hwfile/xtuner/huanghaian/data/llm/wanjuan_1/orig_jsonl/'
     # 原始文件 435GB，一共 105 个 jsonl, token 后 375 GB
 
     datasets = []
@@ -81,7 +82,6 @@ if __name__ == '__main__':
             datasets.append(jsonl_path)
 
     num_workers = 8
-    max_length = 32768  # just for logging
 
     mkdir_or_exist(work_dir)
     timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
