@@ -300,12 +300,6 @@ def sft(args):
                          f'should be divisible by the world_size{world_size}*'
                          f'`mirco_batch_size`({args.mirco_batch_size})')
 
-    if args.dset_cache_dir and os.path.isdir(args.dset_cache_dir):
-        if len(os.listdir(args.dset_cache_dir)):
-            logger.warning(f'`{args.dset_cache_dir}` is not an empty '
-                           'folder, which may lead to inaccurate '
-                           'cache results.')
-
     device_mesh = init_device_mesh(
         'cuda', (dp_size,), mesh_dim_names=('dp',))
 
@@ -352,16 +346,19 @@ def sft(args):
 
     start_load_data_t = time.time()
 
-    chat_template = CHAT_TEMPLATE_MAP[args.chat_template]
+    chat_template = None
 
     tokenizer = AutoTokenizer.from_pretrained("tokenizer")
     pad_token_id = tokenizer.pad_token_id
 
     if args.dset_from_cache:
+        logger.info('---- start to loading dataset ----')
         _datasets = []
         for dset_cache_dir in args.dset_cache_dir:
+            logger.info(f'---- loading: {dset_cache_dir}----')
             _datasets_ = load_from_cache(dset_cache_dir)
             _datasets.extend(_datasets_)
+        logger.info('---- end of loading dataset ----')
     else:
 
         tokenize_fns = []

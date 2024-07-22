@@ -67,7 +67,7 @@ if __name__ == '__main__':
 
     dset_cache_dir = '/mnt/hwfile/xtuner/huanghaian/data/llm/wanjuan_1/dataset_cache/'
     datasets_roots = '/mnt/hwfile/xtuner/huanghaian/data/llm/wanjuan_1/orig_jsonl/'
-    # 原始文件 435GB，一共 105 个 jsonl
+    # 原始文件 435GB，一共 105 个 jsonl, token 后 375 GB
 
 
     datasets = []
