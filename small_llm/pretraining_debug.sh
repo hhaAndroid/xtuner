@@ -1,7 +1,7 @@
 set -x
 
 PARTITION=${PARTITION:-"llm_razor"}
-GPUS=${GPUS:-32}
+GPUS=${GPUS:-16}
 GPUS_PER_NODE=${GPUS_PER_NODE:-8}
 QUOTA_TYPE=${QUOTA_TYPE:-"reserved"}
 NODES=$((GPUS / GPUS_PER_NODE))
@@ -9,7 +9,7 @@ CPUS_PER_TASK=${CPUS_PER_TASK:-16}
 SRUN_ARGS=${SRUN_ARGS:-""}
 
 export PYTHONPATH="$(pwd):$(pwd)/../"
-export MASTER_PORT=34229
+export MASTER_PORT=34228
 export TF_CPP_MIN_LOG_LEVEL=3
 
 OUTPUT_DIR='work_dirs/qwen2_pretrain'
@@ -23,7 +23,7 @@ fi
 # total batch size: 40
 # epoch: 1
 
-HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 srun -p ${PARTITION} \
+HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 srun -p ${PARTITION} --time 5:00:00 \
   --gres=gpu:${GPUS_PER_NODE} \
   --nodes=${NODES} \
   --ntasks=${GPUS} \
@@ -46,5 +46,5 @@ HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 srun -p ${PARTITION} \
   --dset-from-cache \
   --checkpoint-interval 1000 \
   --shard-strategy 'hybrid' \
-  --dset-cache-dir '/mnt/hwfile/xtuner/huanghaian/data/llm/wanjuan_1/dataset_cache/' '/mnt/hwfile/xtuner/huanghaian/data/llm/SkyPile-150B/dataset_cache/' \
+  --dset-cache-dir '/mnt/hwfile/xtuner/huanghaian/data/llm/SkyPile-150B/dataset_cache/' \
   2>&1 | tee -a "${OUTPUT_DIR}/training_log.txt"

@@ -302,8 +302,7 @@ class HardPackerForText(torch.utils.data.Dataset):
             rank = 0
 
         num_dsets = len(datasets)
-        avg_num = math.ceil(num_dsets // world_size)
-
+        avg_num = math.ceil(num_dsets / world_size)
         pack_infos = []
         start = rank * avg_num
         end = min((rank + 1) * avg_num, num_dsets)

@@ -49,7 +49,7 @@ from xtuner._lite.accelerate.fsdp import (RECOMPUTE_MODULES,
 from xtuner._lite.chat import CHAT_TEMPLATE_MAP
 from xtuner._lite.datasets import (OPENAI_FORMAT_MAP, HardPackerForText,
                                    SoftPackerForText, TextCollator,
-                                   TextRawDataset, TextTokenizeFunction)
+                                   TextTokenizeFunction)
 from xtuner._lite.datasets.load import (LOAD_FN_MAP, load_datasets,
                                         load_from_cache)
 from xtuner._lite.parallel import ParallelSampler
@@ -357,7 +357,11 @@ def sft(args):
 
     if args.dset_from_cache:
         logger.info('---- start to loading dataset ----')
-        _datasets = load_from_cache(args.dset_cache_dir)
+        _datasets = []
+        for dset_cache_dir in args.dset_cache_dir:
+            logger.info(f'---- loading: {dset_cache_dir}----')
+            _datasets_ = load_from_cache(dset_cache_dir)
+            _datasets.extend(_datasets_)
         logger.info('---- end of loading dataset ----')
     else:
 
