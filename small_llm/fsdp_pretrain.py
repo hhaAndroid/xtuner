@@ -287,7 +287,7 @@ def sft(args):
     ###########################################################################
     dist_launcher = infer_launcher()
 
-    mp.set_start_method('fork')
+    # mp.set_start_method('fork')
     init_dist(dist_launcher)
     set_random_seed(args.seed)
 
@@ -428,6 +428,9 @@ def sft(args):
         pass
 
     train_dataset = ConcatDataset(datasets)
+
+    for dset in train_dataset.datasets:
+        dset.cache()
 
     if args.dset_pack_level and rank == 0:
         ori_samples = sum([len(dset) for dset in _datasets])
@@ -654,8 +657,6 @@ def sft(args):
     ###########################################################################
     #                          5. Training                                    #
     ###########################################################################
-    # data_iterator = data_prefetcher(train_dataloader)
-
     start_train_t = time.time()
     torch.cuda.empty_cache()
     torch.cuda.reset_peak_memory_stats()
@@ -699,17 +700,12 @@ def sft(args):
 
             _data_start_t = time.time()
             data = next(data_iterator)
-            # data = data_iterator.next()
             step_data_time += time.time() - _data_start_t
 
             input_ids = data['input_ids'].cuda(non_blocking=True)
             labels = data['labels'].cuda(non_blocking=True)
             attention_mask = data['attention_mask'].cuda(non_blocking=True)
             num_tokens = data['num_tokens'].cuda(non_blocking=True)
-            # input_ids = data['input_ids']
-            # labels = data['labels']
-            # attention_mask = data['attention_mask']
-            # num_tokens = data['num_tokens']
 
             packed_ctx = packed_sequence(num_tokens, enable=pack_batch)
 

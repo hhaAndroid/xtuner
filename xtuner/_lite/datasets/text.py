@@ -169,7 +169,10 @@ class SoftPackerForText(torch.utils.data.Dataset):
         num_tokens = []
         for i in packed_items:
             input_ids.extend(self.dataset[i]['input_ids'])
-            labels.extend(self.dataset[i]['labels'])
+            if 'labels' in self.dataset[i]:
+                labels.extend(self.dataset[i]['labels'])
+            else:
+                labels.extend(self.dataset[i]['input_ids'])
 
             _num_tokens = self.dataset[i]['num_tokens']
             num_tokens.append(_num_tokens)
@@ -307,7 +310,7 @@ class HardPackerForText(torch.utils.data.Dataset):
         self.max_length_per_pack = pack_info['max_length_per_pack']
 
     @classmethod
-    def _cal_max_length(begin, end, shfl_item_rngs_left, shfl_item_rngs_right):
+    def _cal_max_length(cls, begin, end, shfl_item_rngs_left, shfl_item_rngs_right):
         left = bisect.bisect(shfl_item_rngs_right, begin)
         right = bisect.bisect(shfl_item_rngs_left, end)
         max_length = 0

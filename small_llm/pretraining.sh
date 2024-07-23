@@ -39,7 +39,8 @@ HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 srun -p ${PARTITION} \
   --wd 0.1 \
   --warmup-ratio 0.006 \
   --work-dir ${OUTPUT_DIR} \
-  --log-interval 10 \
+  --log-interval 1 \
+  --num-workers 1 \
   --seed 42 \
   --max-length 2048 \
   --dset-pack-level 'hard' \
