@@ -67,6 +67,7 @@ if __name__ == '__main__':
     datasets_roots = '/mnt/hwfile/xtuner/huanghaian/data/llm/wanjuan_1/orig_jsonl/'
     # 原始文件 435GB，一共 105 个 jsonl, token 后 379 GB
     # 100381726640，100b, 32 卡处理 1 个小时
+    # 1 个 token 大概占 4 个字节，因此 100b 大概就是 400GB, 1T 的token大概就是 4T 的数据
 
     datasets = []
     before_count = 0
