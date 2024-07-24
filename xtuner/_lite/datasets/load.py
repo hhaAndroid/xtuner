@@ -129,7 +129,7 @@ def load_from_cache(cache_dir):
     datasets = []
     for _sub_dir in tqdm(os.listdir(cache_dir)):
         sub_dir = os.path.join(cache_dir, _sub_dir)
-        if _sub_dir.endswith('.json'):
+        if _sub_dir.endswith('.json') or _sub_dir.endswith('.pkl'):
             continue
         dset = load_from_disk(sub_dir)
         datasets.append(dset)

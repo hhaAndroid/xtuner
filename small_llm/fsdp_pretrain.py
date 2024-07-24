@@ -54,6 +54,8 @@ from xtuner._lite.datasets import (OPENAI_FORMAT_MAP, HardPackerForText,
 from xtuner._lite.datasets.load import (LOAD_FN_MAP, load_datasets,
                                         load_from_cache)
 from xtuner._lite.parallel import ParallelSampler
+from modeling_internlm2 import InternLM2ForCausalLM
+from configuration_internlm2 import InternLM2Config
 
 logger = get_logger()
 
@@ -287,7 +289,7 @@ def sft(args):
     ###########################################################################
     dist_launcher = infer_launcher()
 
-    # mp.set_start_method('fork')
+    mp.set_start_method('fork')
     init_dist(dist_launcher)
     set_random_seed(args.seed)
 
@@ -352,13 +354,11 @@ def sft(args):
     ###########################################################################
 
     start_load_data_t = time.time()
-
-    chat_template = None
-
-    tokenizer = AutoTokenizer.from_pretrained("tokenizer")
-    pad_token_id = tokenizer.pad_token_id
+    tokenizer = AutoTokenizer.from_pretrained("qwen2_tokenizer")
 
     if args.dset_from_cache:
+        xtuner_dataset_timeout = timedelta(minutes=260)
+        group = dist.new_group(backend='gloo', timeout=xtuner_dataset_timeout)
         logger.info('---- start to loading dataset ----')
         _datasets = []
         for dset_cache_dir in args.dset_cache_dir:
@@ -366,7 +366,7 @@ def sft(args):
             _datasets_ = load_from_cache(dset_cache_dir)
             _datasets.extend(_datasets_)
         logger.info('---- end of loading dataset ----')
-        dist.barrier()
+        dist.monitored_barrier(group=group, timeout=xtuner_dataset_timeout)
     else:
 
         tokenize_fns = []
@@ -429,8 +429,8 @@ def sft(args):
 
     train_dataset = ConcatDataset(datasets)
 
-    for dset in train_dataset.datasets:
-        dset.cache()
+    # for dset in train_dataset.datasets:
+    #     dset.cache()
 
     if args.dset_pack_level and rank == 0:
         ori_samples = sum([len(dset) for dset in _datasets])
@@ -441,9 +441,10 @@ def sft(args):
     pack_batch = is_flash_attn_2_available()
     collator = TextCollator(pack_batch=pack_batch)
 
-    from torch.utils.data import DistributedSampler
-    sampler = DistributedSampler(train_dataset, num_replicas=world_size, rank=rank, shuffle=False, drop_last=True)
-
+    # from torch.utils.data import DistributedSampler
+    # sampler = DistributedSampler(train_dataset, num_replicas=world_size, rank=rank, shuffle=False, drop_last=True)
+    sampler = ParallelSampler(
+        train_dataset, dp_mesh, args.global_batch_size, shuffle=True)
     train_dataloader = DataLoader(
         train_dataset,
         batch_size=args.mirco_batch_size,
@@ -491,12 +492,18 @@ def sft(args):
                            f'but found {args.dtype}.')
 
     # llm_cfg = AutoConfig.from_pretrained(args.llm, trust_remote_code=True)
+
+    # config_path = 'internlm2_1_8b_config.json'
+    # config_dict = json.load(open(config_path))
+    # llm_cfg = InternLM2Config(**config_dict)
+
     config_path = 'qwen2_1_5b_config.json'
     config_dict = json.load(open(config_path))
     llm_cfg = Qwen2Config(**config_dict)
 
     if is_flash_attn_2_available():
         llm_cfg._attn_implementation = 'flash_attention_2'
+        llm_cfg.attn_implementation = 'flash_attention_2'
     elif is_torch_sdpa_available():
         llm_cfg._attn_implementation = 'sdpa'
     llm_cfg.use_cache = False
@@ -507,6 +514,7 @@ def sft(args):
         # meta_llm = AutoModelForCausalLM.from_pretrained(
         #     args.llm, config=llm_cfg, trust_remote_code=True)
         meta_llm = Qwen2ForCausalLM(llm_cfg)
+        # meta_llm = InternLM2ForCausalLM(llm_cfg)
 
         # Ensure all numerical values in the optimizer are fp32.
         # FSDP will use low precision during forward.
@@ -538,7 +546,10 @@ def sft(args):
         with torch.device('cpu'):
             # llm = AutoModelForCausalLM.from_pretrained(
             #     args.llm, config=llm_cfg, trust_remote_code=True)
+
             llm = Qwen2ForCausalLM(llm_cfg)
+            # llm = InternLM2ForCausalLM(llm_cfg)
+
             # Ensure all numerical values in the optimizer are fp32.
             # FSDP will use low precision during forward.
             llm.to(torch.float32)
@@ -577,7 +588,8 @@ def sft(args):
         policies.append(all_required_grad_wrap_policy)
 
     if args.shard_strategy == 'full':
-        strategy = ShardingStrategy.FULL_SHARD
+        # strategy = ShardingStrategy.FULL_SHARD
+        strategy = ShardingStrategy.SHARD_GRAD_OP  # ZERO2
     elif args.shard_strategy == 'hybrid':
         strategy = ShardingStrategy.HYBRID_SHARD
     else:

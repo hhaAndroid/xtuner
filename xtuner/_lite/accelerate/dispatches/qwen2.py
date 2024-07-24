@@ -29,6 +29,9 @@ def qwen2_varlen_attn_forward(
     use_cache: bool = False,
     **kwargs,
 ):
+    # torch.cuda.synchronize()
+    # import time
+    # start_time = time.perf_counter()
     bsz, q_len, _ = hidden_states.size()
     attn_context = MessageHub.get_instance('packed_sequence')
 
@@ -157,10 +160,13 @@ def qwen2_varlen_attn_forward(
 
     # ---------------- flash attention forward end ------------------- #
 
-    attn_output = attn_output.reshape(bsz, q_len, self.hidden_size)
+    attn_output = attn_output.reshape(bsz, q_len, self.hidden_size).contiguous()
     attn_output = self.o_proj(attn_output)
 
     if not output_attentions:
         attn_weights = None
-
+    # from mmengine.dist import get_rank
+    # torch.cuda.synchronize()
+    # elapsed = time.perf_counter() - start_time
+    # print('qwen2_varlen_attn_forward',get_rank(), elapsed)
     return attn_output, attn_weights, past_key_value
