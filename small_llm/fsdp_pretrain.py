@@ -492,14 +492,14 @@ def sft(args):
                            f'but found {args.dtype}.')
 
     # llm_cfg = AutoConfig.from_pretrained(args.llm, trust_remote_code=True)
-
-    # config_path = 'internlm2_1_8b_config.json'
-    # config_dict = json.load(open(config_path))
-    # llm_cfg = InternLM2Config(**config_dict)
-
-    config_path = 'qwen2_1_5b_config.json'
-    config_dict = json.load(open(config_path))
-    llm_cfg = Qwen2Config(**config_dict)
+    if args.llm == 'qwen2':
+        config_path = 'qwen2_1_5b_config.json'
+        config_dict = json.load(open(config_path))
+        llm_cfg = Qwen2Config(**config_dict)
+    else:
+        config_path = 'internlm2_1_8b_config.json'
+        config_dict = json.load(open(config_path))
+        llm_cfg = InternLM2Config(**config_dict)
 
     if is_flash_attn_2_available():
         llm_cfg._attn_implementation = 'flash_attention_2'
@@ -513,8 +513,10 @@ def sft(args):
 
         # meta_llm = AutoModelForCausalLM.from_pretrained(
         #     args.llm, config=llm_cfg, trust_remote_code=True)
-        meta_llm = Qwen2ForCausalLM(llm_cfg)
-        # meta_llm = InternLM2ForCausalLM(llm_cfg)
+        if args.llm == 'qwen2':
+            meta_llm = Qwen2ForCausalLM(llm_cfg)
+        else:
+            meta_llm = InternLM2ForCausalLM(llm_cfg)
 
         # Ensure all numerical values in the optimizer are fp32.
         # FSDP will use low precision during forward.
@@ -546,9 +548,10 @@ def sft(args):
         with torch.device('cpu'):
             # llm = AutoModelForCausalLM.from_pretrained(
             #     args.llm, config=llm_cfg, trust_remote_code=True)
-
-            llm = Qwen2ForCausalLM(llm_cfg)
-            # llm = InternLM2ForCausalLM(llm_cfg)
+            if args.llm == 'qwen2':
+                llm = Qwen2ForCausalLM(llm_cfg)
+            else:
+                llm = InternLM2ForCausalLM(llm_cfg)
 
             # Ensure all numerical values in the optimizer are fp32.
             # FSDP will use low precision during forward.

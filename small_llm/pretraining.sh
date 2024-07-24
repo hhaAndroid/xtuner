@@ -33,6 +33,7 @@ HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 srun -p ${PARTITION} \
   --quotatype=${QUOTA_TYPE} \
   ${SRUN_ARGS} \
   python -u fsdp_pretrain.py \
+  --llm 'qwen2' \
   --mirco-batch-size 8 \
   --global-batch-size 512 \
   --lr 1e-4 \

@@ -50,7 +50,7 @@ try:
 except Exception:
     BaseStreamer = None
 
-from .configuration_internlm2 import InternLM2Config
+from configuration_internlm2 import InternLM2Config
 
 
 try:
