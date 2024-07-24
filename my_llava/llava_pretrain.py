@@ -36,7 +36,7 @@ from torch.optim import AdamW
 from torch.optim.lr_scheduler import CosineAnnealingLR, LambdaLR
 from torch.utils.data import ConcatDataset, DataLoader
 from transformers import (AutoConfig, AutoModelForCausalLM, AutoProcessor,
-                          CLIPVisionModel, LlavaConfig,
+                          CLIPVisionModel, LlavaConfig, CLIPImageProcessor,
                           LlavaForConditionalGeneration, LlavaProcessor)
 from transformers.utils.import_utils import (is_flash_attn_2_available,
                                              is_torch_sdpa_available)
@@ -61,7 +61,6 @@ logger = get_logger()
 
 
 def log_format(rank, debug=False):
-
     formatter = f'[XTuner][RANK {rank}]'
     formatter += '[{time:YYYY-MM-DD HH:mm:ss}][<level>{level}</level>]'
 
@@ -176,7 +175,7 @@ def parse_args():
     model_args.add_argument(
         '--shard-strategy',
         default='full',
-        choices=['full', 'hybrid'],
+        choices=['full', 'hybrid', 'no', 'zero2'],
         help=('The sharding strategy to be used for distributed training.'))
     data_args = parser.add_argument_group('data', 'Dataset Related Settings')
     data_args.add_argument(
@@ -310,7 +309,6 @@ def build_llava_model(args,
                       device='cpu',
                       dtype=torch.float32,
                       resize_emb=False):
-
     with torch.device(device):
         _cfg = copy.deepcopy(config)
         llava = LlavaForConditionalGeneration(_cfg)
@@ -408,14 +406,14 @@ def llava_pretrain(args):
     # During data packing, it is essential to tokenize the data in
     # advance, cache the tokenized data, so that it can be quickly
     # loaded for the second training without the need to re-tokenize.
-    if os.path.isdir(args.dset_cache_dir):
+    if args.dset_cache_dir and os.path.isdir(args.dset_cache_dir):
         if len(os.listdir(args.dset_cache_dir)):
             logger.warning(f'`{args.dset_cache_dir}` is not an empty '
                            'folder, which may lead to inaccurate '
                            'cache results.')
 
     device_mesh = init_device_mesh(
-        'cuda', (dp_size, ), mesh_dim_names=('dp', ))
+        'cuda', (dp_size,), mesh_dim_names=('dp',))
 
     dp_mesh = device_mesh['dp']
 
@@ -477,7 +475,7 @@ def llava_pretrain(args):
     register_remote_code()
     _llm_config = AutoConfig.from_pretrained(args.llm)
     _vision_config = AutoConfig.from_pretrained(args.vit).vision_config
-    _img_processor = AutoProcessor.from_pretrained(args.vit).image_processor
+    _img_processor = CLIPImageProcessor.from_pretrained(args.vit)
     processor = LlavaProcessor(_img_processor, tokenizer)
     img_processor = processor.image_processor
 
@@ -488,19 +486,17 @@ def llava_pretrain(args):
 
     img_token = chat_template.image_token
     need_resize_emb = False
-    if len(tokenizer.convert_tokens_to_ids([img_token])) > 1:
-        tokenizer.add_tokens([img_token], special_tokens=True)
-        img_token_id = tokenizer.convert_tokens_to_ids([img_token])[0]
-        logger.info(f'[Tokenizer] Added a new token `{img_token}`, '
-                    f'token id is {img_token_id}, the new vocab size is '
-                    f'{len(tokenizer)}')
 
-        _llm_vocab_size = _llm_config.vocab_size
+    tokenizer.add_tokens([img_token], special_tokens=True)
+    img_token_id = tokenizer.convert_tokens_to_ids([img_token])[0]
+    logger.info(f'[Tokenizer] Added a new token `{img_token}`, '
+                f'token id is {img_token_id}, the new vocab size is '
+                f'{len(tokenizer)}')
 
-        if _llm_vocab_size < len(tokenizer):
-            need_resize_emb = True
-    else:
-        img_token_id = tokenizer.convert_tokens_to_ids([img_token])[0]
+    _llm_vocab_size = _llm_config.vocab_size
+
+    if _llm_vocab_size < len(tokenizer):
+        need_resize_emb = True
 
     if args.dset_from_cache:
         _datasets = load_from_cache(args.dset_cache_dir)
@@ -647,7 +643,7 @@ def llava_pretrain(args):
         autocast = nullcontext()
         scaler = None
 
-    _text_config = AutoConfig.from_pretrained(args.llm, trust_remote_code=True)
+    _text_config = AutoConfig.from_pretrained(args.llm, trust_remote_code=False)
     if is_flash_attn_2_available():
         _text_config.attn_implementation = 'flash_attention_2'
     elif is_torch_sdpa_available():
@@ -670,7 +666,7 @@ def llava_pretrain(args):
     # Only load parameters on rank 0 to avoid each rank repeatedly loading the
     # same model into the CPU, wasting memory
     if rank == 0:
-
+        logger.info(f'=====[Build Model]=======')
         llava = build_llava_model(args, llava_config, tokenizer, world_size,
                                   'cpu', dtype, need_resize_emb)
         rank0_meta_llava = copy.deepcopy(meta_llava)

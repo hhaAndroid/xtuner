@@ -105,10 +105,12 @@ class LlavaRawDataset(LlavaTokenizedDataset):
         self.tokenize_fn = tokenize_fn
 
     def __getitem__(self, item):
-
         raw_data = self.dataset[item]
         tokenized_data = self.tokenize_fn(raw_data)
         return self.process_tokenized_data(tokenized_data)
+
+    def __len__(self):
+        return len(self.dataset)
 
 
 class SoftPackerForLlava(SoftPackerForText):
