@@ -114,7 +114,7 @@ class ParallelSampler(Sampler):
         self.step = step
 
 
-def get_length_grouped_indices(max_lengths,
+def get_length_grouped_indices11(max_lengths,
                                group_batch_size,
                                dp_size,
                                seed=1024):
@@ -142,6 +142,68 @@ def get_length_grouped_indices(max_lengths,
     return output
 
 
+def get_length_grouped_indices(max_lengths, group_batch_size, generator=None, **kwargs):
+
+    def process(lengths, group_batch_size, generator=None):
+        indices = torch.randperm(len(lengths), generator=generator)
+        megabatches = [
+            indices[i:i + group_batch_size].tolist()
+            for i in range(0, len(lengths), group_batch_size)
+        ]
+        megabatches = [
+            sorted(megabatch, key=lambda i: lengths[i], reverse=True)
+            for megabatch in megabatches
+        ]
+        return megabatches
+
+    lengths = max_lengths
+    assert all(leng != 0 for leng in lengths), 'Should not have zero length.'
+    if all(leng > 0 for leng in lengths) or all(leng < 0 for leng in lengths):
+        # all samples are in the same modality
+        megabatches = process(lengths, group_batch_size, generator=generator)
+    else:
+        mm_indices, mm_lengths = zip(*[(i, l) for i, l in enumerate(lengths)
+                                       if l > 0])
+        lang_indices, lang_lengths = zip(*[(i, -l)
+                                           for i, l in enumerate(lengths)
+                                           if l < 0])
+        mm_megabatches = []
+        for mm_megabatch in process(
+                mm_lengths, group_batch_size, generator=generator):
+            mm_megabatches.append([mm_indices[i] for i in mm_megabatch])
+        lang_megabatches = []
+        for lang_megabatch in process(
+                lang_lengths, group_batch_size, generator=generator):
+            lang_megabatches.append([lang_indices[i] for i in lang_megabatch])
+
+        last_mm = mm_megabatches[-1]
+        last_lang = lang_megabatches[-1]
+        last_batch = last_mm + last_lang
+        megabatches = mm_megabatches[:-1] + lang_megabatches[:-1]
+
+        megabatch_indices = torch.randperm(
+            len(megabatches), generator=generator)
+        megabatches = [megabatches[i] for i in megabatch_indices]
+
+        if len(last_batch) > 0:
+            megabatches.append(
+                sorted(
+                    last_batch, key=lambda i: abs(lengths[i]), reverse=True))
+
+    # The rest is to get the biggest batch first.
+    # Since each megabatch is sorted by descending length,
+    # the longest element is the first
+    megabatch_maximums = [
+        abs(lengths[megabatch[0]]) for megabatch in megabatches
+    ]
+    max_idx = torch.argmax(torch.tensor(megabatch_maximums)).item()
+    # Switch to put the longest element in first position
+    megabatches[0][0], megabatches[max_idx][0] = megabatches[max_idx][
+        0], megabatches[0][0]
+
+    return [i for megabatch in megabatches for i in megabatch]
+
+
 class LengthGroupedSampler(Sampler):
 
     def __init__(self,
@@ -150,7 +212,8 @@ class LengthGroupedSampler(Sampler):
                  global_batch_size: int,
                  mega_batch_mult: Optional[int] = None,
                  seed: Optional[int] = None,
-                 round_up: bool = True) -> None:
+                 round_up: bool = True,
+                 length_property='length') -> None:
         rank = dp_mesh.get_local_rank()
         world_size = dp_mesh.size()
         self.rank = rank
@@ -188,10 +251,10 @@ class LengthGroupedSampler(Sampler):
         if isinstance(self.dataset, TorchConcatDataset):
             max_lengths = []
             for sub_dataset in self.dataset.datasets:
-                max_lengths.extend(sub_dataset.max_length_per_pack)
+                max_lengths.extend(getattr(sub_dataset, length_property))
             self.max_lengths = max_lengths
         else:
-            self.max_lengths = self.dataset.max_length_per_pack
+            self.max_lengths = getattr(self.dataset, length_property)
         assert isinstance(self.max_lengths, (list, tuple))
 
         self.global_batch_size = global_batch_size

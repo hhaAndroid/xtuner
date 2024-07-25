@@ -4,6 +4,7 @@ from io import BytesIO
 import torch
 from datasets import load_from_disk
 from mmengine import fileio
+import numpy as np
 from PIL import Image
 from torch.nn.utils.rnn import pad_sequence
 
@@ -100,9 +101,43 @@ class LlavaTokenizedDataset(torch.utils.data.Dataset):
 class LlavaRawDataset(LlavaTokenizedDataset):
 
     def __init__(self, dataset, image_processor, tokenize_fn):
+        # dataset is json raw file of items
         super().__init__(dataset, image_processor)
 
         self.tokenize_fn = tokenize_fn
+        self.conv2length_text = {}  # using dict to speedup the calculation of token length
+        self.group_length = []
+        print('Calculating the length of text data...')
+        for data_item in dataset:
+            conversations = '\n'.join(
+                [temp['value'] for temp in data_item['conversations']])
+            str_length = len(conversations)
+            if str_length not in self.conv2length_text:
+                token_length = self.tokenize_fn.tokenizer(
+                    conversations,
+                    return_tensors='pt',
+                    padding=False,
+                    truncation=False,
+                ).input_ids.size(1)
+                self.conv2length_text[str_length] = token_length
+            else:
+                token_length = self.conv2length_text[str_length]
+            if 'image' in data_item and data_item['image'] is not None:
+                token_length += self.tokenize_fn.per_img_tokens
+            else:
+                token_length = -token_length
+            self.group_length.append(token_length)
+        print('Finished calculating the length of text data...')
+
+    @property
+    def modality_length(self):
+        return self.group_length
+
+    @property
+    def length(self):
+        group_length = np.array(self.group_length)
+        group_length = np.abs(group_length).tolist()
+        return group_length
 
     def __getitem__(self, item):
         raw_data = self.dataset[item]
