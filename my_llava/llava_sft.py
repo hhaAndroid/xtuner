@@ -36,8 +36,7 @@ from torch.distributed.fsdp.wrap import _or_policy
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import CosineAnnealingLR, LambdaLR
 from torch.utils.data import ConcatDataset, DataLoader
-from transformers import (AutoConfig, AutoProcessor,
-                          LlavaForConditionalGeneration)
+from transformers import (AutoConfig, AutoProcessor)
 from transformers.utils.import_utils import (is_flash_attn_2_available,
                                              is_torch_sdpa_available)
 
@@ -55,12 +54,12 @@ from xtuner._lite.datasets.load import (LOAD_FN_MAP, load_datasets,
                                         load_from_cache)
 from xtuner._lite.modelings import register_remote_code
 from xtuner._lite.parallel import LengthGroupedSampler, ParallelSampler
+from llava_model import LlavaForConditionalGeneration
 
 logger = get_logger()
 
 
 def log_format(rank, debug=False):
-
     formatter = f'[XTuner][RANK {rank}]'
     formatter += '[{time:YYYY-MM-DD HH:mm:ss}][<level>{level}</level>]'
 
@@ -169,7 +168,11 @@ def parse_args():
               'The maximum is 1; the larger the value, the less memory '
               'required for training. The default is 1, meaning all layers '
               'need to be re-computated.'))
-
+    model_args.add_argument(
+        '--shard-strategy',
+        default='full',
+        choices=['full', 'hybrid', 'no', 'zero2'],
+        help=('The sharding strategy to be used for distributed training.'))
     data_args = parser.add_argument_group('data', 'Dataset Related Settings')
     data_args.add_argument(
         '--datasets',
@@ -389,7 +392,7 @@ def llava_sft(args):
               ' the `group_by_modality_length` will be used.')
 
     device_mesh = init_device_mesh(
-        'cuda', (dp_size, ), mesh_dim_names=('dp', ))
+        'cuda', (dp_size,), mesh_dim_names=('dp',))
 
     dp_mesh = device_mesh['dp']
 
@@ -446,6 +449,16 @@ def llava_sft(args):
         args.tokenizer if args.tokenizer else args.llava,
         trust_remote_code=True,
         padding_side='right')
+
+    # If you directly use the pre-trained tokenizer, you may encounter
+    # a pickle error of InternLM2TokenizerFast, but the reason is currently unclear.
+    # Therefore, we need to append the tokenizer again.
+    img_token = '<image>'
+    tokenizer.add_tokens([img_token], special_tokens=True)
+    img_token_id = tokenizer.convert_tokens_to_ids([img_token])[0]
+    logger.info(f'[Tokenizer] Added a new token `{img_token}`, '
+                f'token id is {img_token_id}, the new vocab size is '
+                f'{len(tokenizer)}')
 
     register_remote_code()
     llava_config = AutoConfig.from_pretrained(args.llava)
@@ -556,7 +569,7 @@ def llava_sft(args):
         sampler = LengthGroupedSampler(train_dataset, dp_mesh,
                                        args.global_batch_size,
                                        length_property='length')
-    elif args.args.group_by_modality_length:
+    elif args.group_by_modality_length:
         sampler = LengthGroupedSampler(train_dataset, dp_mesh,
                                        args.global_batch_size,
                                        length_property='modality_length')
@@ -842,7 +855,7 @@ def llava_sft(args):
             digits = len(str(abs(total_steps)))
             work_dir = args.work_dir
 
-            ckpt_id = f'{(step+1):0{digits}}-of-{total_steps:0{digits}}'
+            ckpt_id = f'{(step + 1):0{digits}}-of-{total_steps:0{digits}}'
             ckpt_dir = os.path.join(work_dir, f'ckpt-{ckpt_id}')
             hf_dir = os.path.join(work_dir, f'hf-{ckpt_id}')
             _options = StateDictOptions(cpu_offload=True, full_state_dict=True)
@@ -911,6 +924,5 @@ def llava_sft(args):
 
 
 if __name__ == '__main__':
-
     args = parse_args()
     llava_sft(args)

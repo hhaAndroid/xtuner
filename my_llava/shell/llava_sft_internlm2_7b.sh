@@ -29,12 +29,13 @@ HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 srun -p ${PARTITION} --time 1-00:00
   --kill-on-bad-exit=1 \
   --quotatype=${QUOTA_TYPE} \
   ${SRUN_ARGS} \
-  python -u llava_pretrain.py \
+  python -u llava_sft.py \
   --llava work_dirs/llava_pretrain_internlm2_7b/20240724201849/hf-2180 \
+  --tokenizer /mnt/hwfile/llmeval/opencompass/checkpoints/llm/hf_hub/models--internlm--internlm2-chat-7b/snapshots/70e6cdc9643ce7e3d9a369fb984dc5f1a1b2cec6 \
   --chat-template 'internlm2' \
   --freeze-vit \
   --datasets data/llava_sft.json \
-  --group_by_modality_length \
+  --group-by-modality-length \
   --max-length 2048 \
   --num-workers 4 \
   --mirco-batch-size $MIRCO_BATCH_SIZE \

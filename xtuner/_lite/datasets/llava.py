@@ -64,22 +64,24 @@ class LlavaTokenizedDataset(torch.utils.data.Dataset):
 
     def process_tokenized_data(self, tokenized_data):
         images = []
-        for url in tokenized_data['image_urls']:
+        for url in tokenized_data.get('image_urls', []):
             img = Image.open(url)
             images.append(img)
 
         if len(images):
             outputs = self.image_processor(images, return_tensors='pt')
             pixel_values = outputs['pixel_values']
+            num_img_tokens = [tokenized_data['num_img_tokens']]
         else:
             pixel_values = None
+            num_img_tokens = [0]
 
         data = {
             'input_ids': tokenized_data['input_ids'],
             'labels': tokenized_data['labels'],
             'pixel_values': pixel_values,
             'num_tokens': [tokenized_data['num_tokens']],
-            'num_img_tokens': [tokenized_data['num_img_tokens']],
+            'num_img_tokens': num_img_tokens,
         }
 
         return data
@@ -128,6 +130,8 @@ class LlavaRawDataset(LlavaTokenizedDataset):
                 token_length = -token_length
             self.group_length.append(token_length)
         print('Finished calculating the length of text data...')
+
+        del self.conv2length_text
 
     @property
     def modality_length(self):
