@@ -23,5 +23,9 @@ bash shell/llava_sft_internlm2_7b.sh
 # 评测
 
 ```shell
+git clone https://github.com/open-compass/VLMEvalKit.git
+cd VLMEvalKit
+pip install -e .
+
 MASTER_PORT=29501 srun -p llm_razor --job-name=eval --time=02:00:00 --cpus-per-task=16 --nodes=1 --gres=gpu:8 --ntasks-per-node=1 --kill-on-bad-exit=1 torchrun --nproc-per-node=8 vlmevalkit/run.py --data MMBench_DEV_EN MMStar SEEDBench_IMG MMMU_DEV_VAL ScienceQA_TEST TextVQA_VAL ChartQA_TEST AI2D_TEST DocVQA_VAL InfoVQA_VAL OCRBench RealWorldQA SEEDBench2_Plus HallusionBench --model-path work_dirs/llava_sft_internlm2_7b/20240725194745/hf-5198-of-5198
 ```
