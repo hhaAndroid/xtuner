@@ -643,7 +643,7 @@ def llava_pretrain(args):
         autocast = nullcontext()
         scaler = None
 
-    _text_config = AutoConfig.from_pretrained(args.llm, trust_remote_code=False)
+    _text_config = AutoConfig.from_pretrained(args.llm)
     if is_flash_attn_2_available():
         _text_config.attn_implementation = 'flash_attention_2'
     elif is_torch_sdpa_available():

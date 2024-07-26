@@ -46,6 +46,7 @@ HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 srun -p ${PARTITION} --time 1-00:00
   --work-dir ${OUTPUT_DIR} \
   --log-interval 10 \
   --seed 42 \
-  --checkpoint-interval 1000 \
+  --checkpoint-interval 2000 \
+  --checkpoint-drop-optimizer \
   --shard-strategy 'zero2' \
   2>&1 | tee -a "${OUTPUT_DIR}/training_log.txt"
