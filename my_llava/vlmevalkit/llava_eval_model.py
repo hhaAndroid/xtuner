@@ -1,24 +1,33 @@
 from vlmeval.vlm.base import BaseModel
 import torch
-from transformers import LlavaForConditionalGeneration, AutoProcessor
+from transformers import LlavaForConditionalGeneration, AutoProcessor, StoppingCriteriaList
 from vlmeval.smp import *
 from vlmeval.dataset import DATASET_TYPE
+from xtuner._lite.modelings import register_remote_code
+from xtuner.utils import StopWordStoppingCriteria
 
 
 class LLaVAEvalModel(BaseModel):
     INSTALL_REQ = True
     INTERLEAVE = False
 
-    def __init__(self, model_pth,  **kwargs):
+    def __init__(self, model_pth, stop_words=['<|im_end|>'], **kwargs):
         super().__init__()
         assert osp.exists(model_pth)
-        self.model = LlavaForConditionalGeneration.from_pretrained(model_pth)
-        self.processor = AutoProcessor.from_pretrained(model_pth)
+        register_remote_code()
+        with torch.device('cpu'):
+            self.model = LlavaForConditionalGeneration.from_pretrained(model_pth, torch_dtype=torch.float16)
+            self.model.eval()
         self.model = self.model.cuda()
+        self.processor = AutoProcessor.from_pretrained(model_pth, trust_remote_code=True)
         kwargs_default = dict(do_sample=False, temperature=0, max_new_tokens=512, top_p=None, num_beams=1,
                               use_cache=True)  # noqa E501
         kwargs_default.update(kwargs)
         self.kwargs = kwargs_default
+        self.stop_criteria = StoppingCriteriaList()
+        for word in stop_words:
+            self.stop_criteria.append(
+                StopWordStoppingCriteria(self.processor.tokenizer, word))
 
     def use_custom_prompt(self, dataset):
         assert dataset is not None
@@ -59,33 +68,18 @@ class LLaVAEvalModel(BaseModel):
 
     def generate_inner(self, message, dataset=None):
         # TODO: Support interleave text and image
-        # msg2 = [
-        #     dict(type='image', value=IMAGE_URL),
-        #     dict(type='text', value='How many apples are there in these images?')
-        # ]
-        texts, images = [], []
-        for msg in message:
-            if msg['type'] == 'text':
-                texts.append(msg['value'])
-            elif msg['type'] == 'image':
-                images.append(msg['value'])
-        assert len(texts) == 1 and len(images) == 1
-
+        prompt, image_path = self.message_to_promptimg(message, dataset=dataset)
+        prompt = prompt.replace('<image>', '')
         conversation = [
-            {
+            {"role": "user", "content": '<image>\n' + prompt}]
 
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": texts[0]},
-                    {"type": "image"},
-                ],
-            },
-        ]
-
-        prompt = self.processor.apply_chat_template(conversation, add_generation_prompt=True)
-        raw_image = Image.open(images[0]).convert('RGB')
-        inputs = self.processor(prompt, raw_image, return_tensors='pt').to(0, torch.float16)
+        prompt = self.processor.tokenizer.apply_chat_template(conversation, add_generation_prompt=True, tokenize=False)
+        # prompt=prompt[len('<s>'):]
+        # print(prompt)
+        raw_image = Image.open(image_path).convert('RGB')
+        inputs = self.processor(prompt, raw_image, return_tensors='pt').to('cuda', torch.float16)
         with torch.inference_mode():
-            output = self.model.generate(**inputs, **self.kwargs)
-            output = self.processor.decode(output[0][2:], skip_special_tokens=True).strip()
+            output = self.model.generate(**inputs, stopping_criteria=self.stop_criteria, **self.kwargs)
+            output = self.processor.tokenizer.decode(output[0][len(inputs['input_ids'][0]):],
+                                                     skip_special_tokens=True).strip()
         return output

@@ -13,8 +13,10 @@ from functools import partial
 def parse_args():
     parser = argparse.ArgumentParser()
     # Essential Args
+    # ==============================================
     parser.add_argument('--model-path', type=str, required=True)
     parser.add_argument('--model-name', type=str, default='llava_hf_xtuner')
+    # ==============================================
     parser.add_argument('--data', type=str, nargs='+', required=True)
     # Args that only apply to Video Dataset
     parser.add_argument('--nframe', type=int, default=8)
@@ -46,8 +48,11 @@ def main():
     args = parse_args()
     assert len(args.data), '--data should be a list of data files'
 
-    supported_VLM[args.model_name] = partial(LLaVAEvalModel, model_path=args.model_path)
+    # ==============================================
+    stop_words = ['<|im_end|>']  # internlm2
+    supported_VLM[args.model_name] = partial(LLaVAEvalModel, model_pth=args.model_path, stop_words=stop_words)
     args.model = [args.model_name]
+    # ==============================================
 
     if args.retry is not None:
         for k, v in supported_VLM.items():
