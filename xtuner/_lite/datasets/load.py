@@ -260,6 +260,10 @@ def load_local_datasets(paths,
         logger.debug(f'All files:\n\t{str_files}')
     logger.debug(f'Assigned Files: {per_rank_files[rank]}')
 
+    if dist.is_available() and world_size > 1:
+        timeout = timedelta(
+            minutes=int(os.getenv('XTUNER_DATASET_TIMEOUT', default=130)))
+        group = dist.new_group(backend='gloo', timeout=timeout)
     rank_datasets = []
     rank_cached_infos = {}
     for ind in per_rank_files[rank]:
@@ -315,7 +319,7 @@ def load_local_datasets(paths,
 
     if dist.is_available() and world_size > 1:
         logger.info('Waiting for other ranks...... ')
-        dist.barrier()
+        dist.monitored_barrier(group=group, timeout=timeout)
 
         timeout = timedelta(
             minutes=int(os.getenv('XTUNER_DATASET_TIMEOUT', default=30)))

@@ -667,7 +667,7 @@ def sft(args):
     warmup_scheduler = LambdaLR(optimizer, warmup_fn)
 
     cosine_scheduler = CosineAnnealingLR(
-        optimizer, T_max=total_steps - warmup_steps, eta_min=args.lr*0.1)
+        optimizer, T_max=total_steps - warmup_steps, eta_min=args.lr * 0.1)
 
     start_step = 0
 
@@ -770,6 +770,10 @@ def sft(args):
                         f'time: {step_time:.2f}s  '
                         f'eta: {eta}')
 
+        save_hf_ckpt_names = []
+        save_pt_ckpt_names = []
+        max_keep_ckpts = 1
+
         if is_interval(step, total_steps, checkpoint_interval):
             torch.cuda.empty_cache()
             torch.cuda.reset_peak_memory_stats()
@@ -801,6 +805,13 @@ def sft(args):
             dist.barrier()
             del full_model_state_dict
 
+            if rank == 0:
+                save_hf_ckpt_names.append(hf_dir)
+                if len(save_hf_ckpt_names) > max_keep_ckpts:
+                    # 移除最先加入的
+                    remove_hf_ckpt_name = save_hf_ckpt_names.pop(0)
+                    os.system(f'rm -rf {remove_hf_ckpt_name}')
+
             if not args.checkpoint_drop_optimizer:
                 # FSDP cannot be saved via torch.save
                 # Refer to https://pytorch.org/tutorials/recipes/distributed_checkpoint_recipe.html  # noqa: E501
@@ -822,6 +833,13 @@ def sft(args):
                 writer = dcp.FileSystemWriter(ckpt_dir)
                 mkdir_or_exist(ckpt_dir)
                 dcp.save(state_dict, writer)
+
+                if rank == 0:
+                    save_pt_ckpt_names.append(ckpt_dir)
+                    if len(save_pt_ckpt_names) > max_keep_ckpts:
+                        # 移除最先加入的
+                        remove_pt_ckpt_name = save_pt_ckpt_names.pop(0)
+                        os.system(f'rm -rf {remove_pt_ckpt_name}')
 
             max_memory = torch.cuda.max_memory_allocated()
             logger.info('[Checkpoint] During saving checkpoint, the peak GPU '

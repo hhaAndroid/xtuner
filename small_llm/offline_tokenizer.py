@@ -34,7 +34,7 @@ class PretrainTextTokenizeFunction:
 
     def __call__(self, item):
         # text: sky pile 150b
-        # content: wanjuan_1
+        # content: wanjuan_1 or cc
         try:
             text = item['text'] + self.eos_token
         except:
@@ -68,6 +68,11 @@ if __name__ == '__main__':
     # 原始文件 435GB，一共 105 个 jsonl, token 后 379 GB
     # 100381726640，100b, 32 卡处理 1 个小时
     # 1 个 token 大概占 4 个字节，因此 100b 大概就是 400GB, 1T 的token大概就是 4T 的数据
+
+    # 云处理点 en cc 数据进行测试
+    # torchrun --nproc-per-node=8
+    # dset_cache_dir = '/fs-computility/llm/shared/huanghaian/llm_data/en_cc_cache/CC-MAIN-2013-48/'  # 6b
+    # datasets_roots = '/fs-computility/llm/shared/llm_data/en-cc-90-dedup-0130_v003/raw_data_0130_rearrange/en/CC-MAIN-2013-48/'
 
     datasets = []
     before_count = 0

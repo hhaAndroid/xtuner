@@ -18,9 +18,9 @@ if [ ! -d "$OUTPUT_DIR" ]; then
 fi
 
 # number of gpus: 32
-# batch size per gpu: 1
-# gradient accumulation steps: 1
-# total token per batch: 32gx16bsx2accx2048len = 2m
+# batch size per gpu: 8
+# gradient accumulation steps: 2
+# total token per batch: 32gx8bsx2accx2048len = 1m
 # epoch: 1
 #
 HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 srun -p ${PARTITION} \
@@ -34,13 +34,13 @@ HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 srun -p ${PARTITION} \
   ${SRUN_ARGS} \
   python -u fsdp_pretrain.py \
   --llm 'qwen2' \
-  --mirco-batch-size 16 \
-  --global-batch-size 1024 \
-  --lr 1.5e-4 \
+  --mirco-batch-size 8 \
+  --global-batch-size 512 \
+  --lr 1e-4 \
   --wd 0.01 \
   --warmup-ratio 2000 \
   --work-dir ${OUTPUT_DIR} \
-  --log-interval 1 \
+  --log-interval 10 \
   --num-workers 4 \
   --seed 42 \
   --max-length 2048 \
