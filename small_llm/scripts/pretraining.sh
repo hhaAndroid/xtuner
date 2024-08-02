@@ -20,9 +20,9 @@ fi
 # number of gpus: 32
 # batch size per gpu: 1
 # gradient accumulation steps: 1
-# total batch size: 40
+# total token per batch: 32gx16bsx2accx2048len = 2m
 # epoch: 1
-
+#
 HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 srun -p ${PARTITION} \
   --gres=gpu:${GPUS_PER_NODE} \
   --nodes=${NODES} \
@@ -34,19 +34,19 @@ HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 srun -p ${PARTITION} \
   ${SRUN_ARGS} \
   python -u fsdp_pretrain.py \
   --llm 'qwen2' \
-  --mirco-batch-size 8 \
-  --global-batch-size 512 \
-  --lr 1e-4 \
-  --wd 0.1 \
-  --warmup-ratio 0.006 \
+  --mirco-batch-size 16 \
+  --global-batch-size 1024 \
+  --lr 1.5e-4 \
+  --wd 0.01 \
+  --warmup-ratio 2000 \
   --work-dir ${OUTPUT_DIR} \
   --log-interval 1 \
-  --num-workers 1 \
+  --num-workers 4 \
   --seed 42 \
   --max-length 2048 \
   --dset-pack-level 'hard' \
   --dset-from-cache \
-  --checkpoint-interval 1000 \
+  --checkpoint-interval 5000 \
   --shard-strategy 'full' \
   --dset-cache-dir '/mnt/hwfile/xtuner/huanghaian/data/llm/wanjuan_1/dataset_cache/' '/mnt/hwfile/xtuner/huanghaian/data/llm/SkyPile-150B/dataset_cache/' \
   2>&1 | tee -a "${OUTPUT_DIR}/training_log.txt"

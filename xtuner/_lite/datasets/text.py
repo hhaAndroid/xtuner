@@ -473,8 +473,8 @@ class HardPackerForText(torch.utils.data.Dataset):
         packed = {
             'input_ids': packed_input_ids,
             'labels': packed_labels,
-            # 'num_tokens': num_tokens,
-            'num_tokens': [self.max_length],
+            'num_tokens': num_tokens,
+            # 'num_tokens': [self.max_length],
         }
 
         return packed

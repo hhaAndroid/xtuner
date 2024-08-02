@@ -493,7 +493,7 @@ def sft(args):
 
     # llm_cfg = AutoConfig.from_pretrained(args.llm, trust_remote_code=True)
     if args.llm == 'qwen2':
-        config_path = 'qwen2_1_5b_config.json'
+        config_path = 'qwen2_0_5b_config.json'
         config_dict = json.load(open(config_path))
         llm_cfg = Qwen2Config(**config_dict)
     else:
@@ -635,7 +635,8 @@ def sft(args):
     requried_grad_params = [
         param for param in shard_llm.parameters() if param.requires_grad
     ]
-    optimizer = AdamW(requried_grad_params, lr=args.lr, weight_decay=args.wd)
+    optimizer = AdamW(requried_grad_params, lr=args.lr, weight_decay=args.wd,
+                      betas=(0.9, 0.95), eps=1e-8, )
 
     global_batch_size = args.global_batch_size
     mirco_batch_size = args.mirco_batch_size
@@ -655,7 +656,10 @@ def sft(args):
     else:
         checkpoint_interval = int(args.checkpoint_interval)
 
-    warmup_steps = int(args.warmup_ratio * total_steps)
+    if args.warmup_ratio < 1:
+        warmup_steps = int(args.warmup_ratio * total_steps)
+    else:
+        warmup_steps = int(args.warmup_ratio)
 
     def warmup_fn(x):
         return x / warmup_steps if x < warmup_steps else 1
@@ -663,7 +667,7 @@ def sft(args):
     warmup_scheduler = LambdaLR(optimizer, warmup_fn)
 
     cosine_scheduler = CosineAnnealingLR(
-        optimizer, T_max=total_steps - warmup_steps, eta_min=0)
+        optimizer, T_max=total_steps - warmup_steps, eta_min=args.lr*0.1)
 
     start_step = 0
 
