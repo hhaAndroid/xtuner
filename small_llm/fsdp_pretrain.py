@@ -682,6 +682,9 @@ def sft(args):
     max_memory = torch.cuda.max_memory_allocated()
     logger.info('[Train] Begin Train Loop. The current GPU memory is '
                 f'{(max_memory / 1024 ** 3):.1f}GB')
+    save_hf_ckpt_names = []
+    save_pt_ckpt_names = []
+    max_keep_ckpts = 1
     for step in range(start_step, total_steps):
 
         epoch = step // per_epoch_steps
@@ -769,10 +772,6 @@ def sft(args):
                         f'tgs: {tgs}  data_time: {step_data_time:.2f}s  '
                         f'time: {step_time:.2f}s  '
                         f'eta: {eta}')
-
-        save_hf_ckpt_names = []
-        save_pt_ckpt_names = []
-        max_keep_ckpts = 1
 
         if is_interval(step, total_steps, checkpoint_interval):
             torch.cuda.empty_cache()
