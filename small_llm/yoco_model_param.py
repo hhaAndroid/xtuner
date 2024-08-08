@@ -34,26 +34,26 @@ def model_forward(config):
     tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
     input_str = "你好啊，你觉得今天天气咋样"
     input_ids = tokenizer(input_str, return_tensors='pt')['input_ids']
+    print(input_ids.shape)
     output = model(input_ids.to(model.device))
-    print(output.shape)
+    print(output.logits.shape)
 
 
 def model_generate(config):
     # 默认是 1b 参数 1073.30 M
     config.use_cache = True
     model = AutoModelForCausalLM.from_config(config=config, trust_remote_code=True)
-    print(model)
     model = model.bfloat16()
 
     model.cuda()
     model.eval()
     tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
     input_str = ["你好啊，你觉得今天天气咋样"]
-    inputs = tokenizer(input_str, return_tensors='pt')['input_ids']
-    for k, v in inputs.items():
-        inputs[k] = v.cuda()
+    inputs = tokenizer(input_str, return_tensors='pt')
 
     gen_kwargs = {"max_length": 16, "top_p": 0.8, "temperature": 0.8, "do_sample": True, "repetition_penalty": 1.0}
+    for k, v in inputs.items():
+        inputs[k] = v.cuda()
     output = model.generate(**inputs, **gen_kwargs)
     output = tokenizer.decode(output[0].tolist(), skip_special_tokens=True)
     print(output)

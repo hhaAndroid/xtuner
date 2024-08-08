@@ -559,6 +559,7 @@ class InternLM2SelfDecoderLayer(nn.Module):
 
         return outputs
 
+
 class InternLM2CrossFlashAttention2(nn.Module):
     """
     InternLM2 flash attention module. This module inherits from `InternLM2Attention` as the weights of the module stays
@@ -783,7 +784,6 @@ class InternLM2CrossDecoderLayer(nn.Module):
         self.attention_norm = InternLM2RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         self.ffn_norm = InternLM2RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
 
-
     def forward(
             self,
             hidden_states: torch.Tensor,
@@ -851,6 +851,7 @@ class InternLM2CrossDecoder(nn.Module):
     def __init__(self, config, num_cross_decoder_layers):
         super().__init__()
         self.hidden_size = config.hidden_size
+        self.layer_idx = config.num_hidden_layers - num_cross_decoder_layers
 
         self.layers = nn.ModuleList([InternLM2CrossDecoderLayer(config) for _ in range(num_cross_decoder_layers)])
 
@@ -1219,18 +1220,18 @@ class YOCOInternLM2ForCausalLM(YOCOInternLM2PreTrainedModel):
         return self.model
 
     def forward(
-        self,
-        input_ids: torch.LongTensor = None,
-        attention_mask: Optional[torch.Tensor] = None,
-        position_ids: Optional[torch.LongTensor] = None,
-        past_key_values: Optional[Union[Cache, List[torch.FloatTensor]]] = None,
-        inputs_embeds: Optional[torch.FloatTensor] = None,
-        labels: Optional[torch.LongTensor] = None,
-        use_cache: Optional[bool] = None,
-        output_attentions: Optional[bool] = None,
-        output_hidden_states: Optional[bool] = None,
-        return_dict: Optional[bool] = None,
-        cache_position: Optional[torch.LongTensor] = None,
+            self,
+            input_ids: torch.LongTensor = None,
+            attention_mask: Optional[torch.Tensor] = None,
+            position_ids: Optional[torch.LongTensor] = None,
+            past_key_values: Optional[Union[Cache, List[torch.FloatTensor]]] = None,
+            inputs_embeds: Optional[torch.FloatTensor] = None,
+            labels: Optional[torch.LongTensor] = None,
+            use_cache: Optional[bool] = None,
+            output_attentions: Optional[bool] = None,
+            output_hidden_states: Optional[bool] = None,
+            return_dict: Optional[bool] = None,
+            cache_position: Optional[torch.LongTensor] = None,
     ) -> Union[Tuple, CausalLMOutputWithPast]:
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
         output_hidden_states = (
@@ -1282,14 +1283,14 @@ class YOCOInternLM2ForCausalLM(YOCOInternLM2PreTrainedModel):
         )
 
     def prepare_inputs_for_generation(
-        self,
-        input_ids,
-        past_key_values=None,
-        attention_mask=None,
-        inputs_embeds=None,
-        cache_position=None,
-        use_cache=True,
-        **kwargs,
+            self,
+            input_ids,
+            past_key_values=None,
+            attention_mask=None,
+            inputs_embeds=None,
+            cache_position=None,
+            use_cache=True,
+            **kwargs,
     ):
         past_length = 0
         if past_key_values is not None:
@@ -1310,7 +1311,7 @@ class YOCOInternLM2ForCausalLM(YOCOInternLM2PreTrainedModel):
             # 1 - If the length of the attention_mask exceeds the length of input_ids, then we are in a setting where
             # some of the inputs are exclusively passed as part of the cache (e.g. when passing input_embeds as input)
             if attention_mask is not None and attention_mask.shape[1] > input_ids.shape[1]:
-                input_ids = input_ids[:, -(attention_mask.shape[1] - past_length) :]
+                input_ids = input_ids[:, -(attention_mask.shape[1] - past_length):]
             # 2 - If the past_length is smaller than input_ids', then input_ids holds all input tokens. We can discard
             # input_ids based on the past_length.
             elif past_length < input_ids.shape[1]:
@@ -1319,9 +1320,9 @@ class YOCOInternLM2ForCausalLM(YOCOInternLM2PreTrainedModel):
 
             # If we are about to go beyond the maximum cache length, we need to crop the input attention mask.
             if (
-                max_cache_length is not None
-                and attention_mask is not None
-                and cache_length + input_ids.shape[1] > max_cache_length
+                    max_cache_length is not None
+                    and attention_mask is not None
+                    and cache_length + input_ids.shape[1] > max_cache_length
             ):
                 attention_mask = attention_mask[:, -max_cache_length:]  # pylint: disable=E1130
 
@@ -1331,7 +1332,7 @@ class YOCOInternLM2ForCausalLM(YOCOInternLM2PreTrainedModel):
             position_ids = attention_mask.long().cumsum(-1) - 1
             position_ids.masked_fill_(attention_mask == 0, 1)
             if past_key_values:
-                position_ids = position_ids[:, -input_ids.shape[1] :]
+                position_ids = position_ids[:, -input_ids.shape[1]:]
 
         # if `inputs_embeds` are passed, we only want to use them in the 1st generation step
         if inputs_embeds is not None and past_key_values is None:
