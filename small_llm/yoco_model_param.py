@@ -34,7 +34,7 @@ def model_forward(config):
     model.cuda()
     model.train()
     tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
-    input_str = ["你好啊，你觉得今天天气咋样", '这是一个测试代码']
+    input_str = "你好啊，你觉得今天天气咋样"
     input_ids = tokenizer(input_str, return_tensors='pt')['input_ids']
     print(input_ids.shape)
     output = model(input_ids.to(model.device))
