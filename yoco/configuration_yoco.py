@@ -34,6 +34,7 @@ class YOCOConfig(PretrainedConfig):
         bias=True,
         rope_theta=10000,
         attn_implementation=None,
+        max_window_layers=9999,
         **kwargs,
     ):
         self.vocab_size = vocab_size
@@ -56,6 +57,7 @@ class YOCOConfig(PretrainedConfig):
         self.use_cache = use_cache
         self.rope_theta = rope_theta
         self.attn_implementation = attn_implementation
+        self.max_window_layers = max_window_layers
 
         super().__init__(
             pad_token_id=pad_token_id,

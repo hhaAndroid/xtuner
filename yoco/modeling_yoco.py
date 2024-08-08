@@ -1,6 +1,3 @@
-import math
-import queue
-import threading
 from typing import List, Optional, Tuple, Union
 
 import torch
@@ -8,25 +5,18 @@ import torch.nn.functional as F
 import torch.utils.checkpoint
 from einops import rearrange
 from torch import nn
-from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
+from torch.nn import  CrossEntropyLoss
 from transformers.activations import ACT2FN
-from transformers.cache_utils import Cache, DynamicCache, StaticCache
+from transformers.cache_utils import Cache, StaticCache
 from transformers.modeling_attn_mask_utils import AttentionMaskConverter
 from transformers.modeling_outputs import (
     BaseModelOutputWithPast,
-    CausalLMOutputWithPast,
-    QuestionAnsweringModelOutput,
-    SequenceClassifierOutputWithPast,
-    TokenClassifierOutput,
+    CausalLMOutputWithPast
 )
 from transformers.modeling_utils import PreTrainedModel
-from transformers.pytorch_utils import ALL_LAYERNORM_LAYERS
 from transformers.utils import (
-    add_start_docstrings,
-    add_start_docstrings_to_model_forward,
     is_flash_attn_greater_or_equal_2_10,
     logging,
-    replace_return_docstrings,
 )
 import inspect
 
@@ -47,7 +37,7 @@ except:
 
 logger = logging.get_logger(__name__)
 
-_CONFIG_FOR_DOC = "InternLM2Config"
+_CONFIG_FOR_DOC = "YOCOConfig"
 
 
 def _get_unpad_data(attention_mask):
@@ -432,37 +422,42 @@ class InternLM2WindowFlashAttention2(nn.Module):
 
             attn_output = pad_input(attn_output_unpad, indices_q, batch_size, query_length)  # pylint: disable=E0606
         else:
-            attn_output = flash_attn_func(  # pylint: disable=E0606
-                query_states, key_states, value_states, dropout, softmax_scale=softmax_scale, causal=causal
-            )
+            if not use_sliding_windows:
+                attn_output = flash_attn_func(
+                    query_states,
+                    key_states,
+                    value_states,
+                    dropout,
+                    softmax_scale=softmax_scale,
+                    causal=causal,
+                )
+            else:
+                attn_output = flash_attn_func(
+                    query_states,
+                    key_states,
+                    value_states,
+                    dropout,
+                    softmax_scale=softmax_scale,
+                    causal=causal,
+                    window_size=(self.config.sliding_window, self.config.sliding_window),
+                )
 
         return attn_output
 
-    def _upad_input(self, query_layer, key_layer, value_layer, attention_mask,
-                    query_length):
-        batch_size, kv_seq_len, num_heads, head_dim = key_layer.shape
+    def _upad_input(self, query_layer, key_layer, value_layer, attention_mask, query_length):
+        indices_k, cu_seqlens_k, max_seqlen_in_batch_k = _get_unpad_data(attention_mask)
+        batch_size, kv_seq_len, num_key_value_heads, head_dim = key_layer.shape
 
-        # On the first iteration we need to properly re-create the padding mask
-        # by slicing it on the proper place
-        if kv_seq_len != attention_mask.shape[-1]:
-            attention_mask_num_tokens = attention_mask.shape[-1]
-            attention_mask = attention_mask[:, attention_mask_num_tokens -
-                                               kv_seq_len:]
-
-        indices_k, cu_seqlens_k, max_seqlen_in_batch_k = _get_unpad_data(
-            attention_mask)
-
-        key_layer = index_first_axis(
-            key_layer.reshape(batch_size * kv_seq_len, num_heads, head_dim),
-            indices_k)
-        value_layer = index_first_axis(
-            value_layer.reshape(batch_size * kv_seq_len, num_heads, head_dim),
-            indices_k)
-
+        key_layer = index_first_axis(  # pylint: disable=E0606
+            key_layer.reshape(batch_size * kv_seq_len, num_key_value_heads, head_dim), indices_k
+        )
+        value_layer = index_first_axis(  # pylint: disable=E0606
+            value_layer.reshape(batch_size * kv_seq_len, num_key_value_heads, head_dim), indices_k
+        )
         if query_length == kv_seq_len:
-            query_layer = index_first_axis(
-                query_layer.reshape(batch_size * kv_seq_len, num_heads,
-                                    head_dim), indices_k)
+            query_layer = index_first_axis(  # pylint: disable=E0606
+                query_layer.reshape(batch_size * kv_seq_len, self.num_heads, head_dim), indices_k
+            )
             cu_seqlens_q = cu_seqlens_k
             max_seqlen_in_batch_q = max_seqlen_in_batch_k
             indices_q = indices_k
@@ -476,8 +471,9 @@ class InternLM2WindowFlashAttention2(nn.Module):
         else:
             # The -q_len: slice assumes left padding.
             attention_mask = attention_mask[:, -query_length:]
-            query_layer, indices_q, cu_seqlens_q, max_seqlen_in_batch_q = unpad_input(
-                query_layer, attention_mask)
+            query_layer, indices_q, cu_seqlens_q, max_seqlen_in_batch_q = unpad_input(  # pylint: disable=E0606
+                query_layer, attention_mask
+            )
 
         return (
             query_layer,
