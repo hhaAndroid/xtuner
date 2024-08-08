@@ -139,8 +139,14 @@ def apply_rotary_pos_emb(q, k, cos, sin, position_ids=None, unsqueeze_dim=1):  #
     """
     cos = cos.unsqueeze(unsqueeze_dim)
     sin = sin.unsqueeze(unsqueeze_dim)
-    q_embed = (q * cos) + (rotate_half(q) * sin)
-    k_embed = (k * cos) + (rotate_half(k) * sin)
+    if q is not None:
+        q_embed = (q * cos) + (rotate_half(q) * sin)
+    else:
+        q_embed = None
+    if k is not None:
+        k_embed = (k * cos) + (rotate_half(k) * sin)
+    else:
+        k_embed = None
     return q_embed, k_embed
 
 
@@ -589,6 +595,12 @@ class InternLM2CrossFlashAttention2(nn.Module):
         #   produces a wrong mask (top-left).
         self._flash_attn_uses_top_left_mask = not is_flash_attn_greater_or_equal_2_10()
 
+        self.rotary_emb = InternLM2RotaryEmbedding(
+            self.head_dim,
+            max_position_embeddings=config.max_position_embeddings,
+            base=config.rope_theta,
+        )
+
     def forward(
             self,
             hidden_states: torch.Tensor,
@@ -613,6 +625,13 @@ class InternLM2CrossFlashAttention2(nn.Module):
         bsz, q_len, _ = hidden_states.size()
 
         query_states = self.wq(hidden_states)
+
+        # hidden_states used
+        query_states = query_states.view(bsz, q_len, -1, self.head_dim).transpose(1, 2)
+        cos, sin = self.rotary_emb(query_states, position_ids)
+        query_states, _ = apply_rotary_pos_emb(query_states, None, cos, sin)
+        # [batch_size, sequence_length, num_heads, head_dim]
+        query_states = query_states.transpose(1, 2)
 
         # dropout_rate = self.attention_dropout if self.training else 0.0
         dropout_rate = 0.0
@@ -764,6 +783,7 @@ class InternLM2CrossDecoderLayer(nn.Module):
         self.attention_norm = InternLM2RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         self.ffn_norm = InternLM2RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
 
+
     def forward(
             self,
             hidden_states: torch.Tensor,
@@ -870,7 +890,7 @@ class InternLM2CrossDecoder(nn.Module):
                 (see `past_key_values`).
             past_key_value (`Tuple(torch.FloatTensor)`, *optional*): cached past key and value projection states
         """
-        bsz, seqlen, embed_dim = hidden_states.size()
+        bsz, seqlen, _ = hidden_states.size()
         query_states = self.kv_layer_norm(hidden_states)
         key_states, value_states = self.k_proj(query_states), self.v_proj(query_states)
 
@@ -879,7 +899,7 @@ class InternLM2CrossDecoder(nn.Module):
 
         cos, sin = self.rotary_emb(value_states, position_ids)
         # hidden_states unused
-        _, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin)
+        _, key_states = apply_rotary_pos_emb(None, key_states, cos, sin)
 
         # global kv cache
         if past_key_value is not None:
@@ -891,13 +911,8 @@ class InternLM2CrossDecoder(nn.Module):
         value_states = value_states.transpose(1, 2)
 
         for layer in self.layers:
-            # hidden_states used
-            query_states = hidden_states.view(bsz, seqlen, -1, self.head_dim).transpose(1, 2)
-            query_states, _ = apply_rotary_pos_emb(query_states, key_states, cos, sin)
-            # [batch_size, sequence_length, num_heads, head_dim]
-            query_states = query_states.transpose(1, 2)
-            query_states, _, _ = layer(
-                query_states,
+            hidden_states = layer(
+                hidden_states,
                 key_states,
                 value_states,
                 attention_mask=attention_mask,
@@ -907,7 +922,8 @@ class InternLM2CrossDecoder(nn.Module):
                 use_cache=use_cache,
                 cache_position=cache_position,
             )
-        return query_states
+            hidden_states = hidden_states[0]
+        return hidden_states
 
 
 class YOCOInternLM2PreTrainedModel(PreTrainedModel):
