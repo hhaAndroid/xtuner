@@ -391,8 +391,8 @@ def map_meta_modules(model, meta_model):
 
 def build_llm_model(args, config, world_size, dtype=torch.float32):
     with LoadWoInit():
-        llm = AutoModelForCausalLM.from_pretrained(
-            args.llm, config=config, trust_remote_code=True
+        llm = AutoModelForCausalLM.from_config(
+             config=config, trust_remote_code=True
         )
 
     # Ensure all numerical values in the optimizer are fp32.
@@ -786,9 +786,9 @@ def sft(args):
             step_data_time += time.time() - _data_start_t
 
             input_ids = data["input_ids"].cuda(non_blocking=True)
-            labels = data["labels"](non_blocking=True)
-            attention_mask = data["attention_mask"](non_blocking=True)
-            num_tokens = data["num_tokens"](non_blocking=True)
+            labels = data["labels"].cuda(non_blocking=True)
+            attention_mask = data["attention_mask"].cuda(non_blocking=True)
+            num_tokens = data["num_tokens"].cuda(non_blocking=True)
 
             packed_ctx = packed_sequence(
                 num_tokens, enable=pack_batch, sp_size=get_sp_world_size()
@@ -844,6 +844,7 @@ def sft(args):
         max_memory = torch.cuda.max_memory_allocated()
         ####################################################################################################
         # all reduce loss
+        step_loss_pre_rank = step_loss
         step_loss = torch.tensor(step_loss, device="cuda")
         dist.all_reduce(step_loss)
         step_loss = step_loss.item() / world_size
@@ -854,7 +855,7 @@ def sft(args):
             logger.info(
                 f"[Train] (Epoch {epoch + 1}) Step "
                 f"{step + 1}/{total_steps}  "
-                f"lr: {cur_lr:.6f}  loss: {step_loss:.3f}  "
+                f"lr: {cur_lr:.6f}  loss: {step_loss_pre_rank:.3f}  "
                 f"grad_norm: {grad_norm:.2f}  "
                 f"max_memory: {(max_memory / 1024 ** 3):.1f}GB  "
                 f"text_tokens: {step_consumed_tokens}  "
