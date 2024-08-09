@@ -34,6 +34,7 @@ HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 srun -p ${PARTITION} \
   ${SRUN_ARGS} \
   python -u fsdp_train.py \
   --llm '../internlm2_5-05b' \
+  --tokenizer '../yoco' \
   --dset-length 25000 \
   --mirco-batch-size 16 \
   --global-batch-size 2048 \
