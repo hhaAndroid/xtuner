@@ -15,14 +15,13 @@ class PretrainTokenizeFunction:
         self.tokenizer = tokenizer
 
     def __call__(self, item):
-
-        content = item["content"]
-        input_ids = self.tokenizer.encode(content)
-        labels = copy.deepcopy(input_ids)
-        labels[0] = -100
-        labels[-1] = -100
+        try:
+            text = item['text'] + self.tokenizer.eos_token
+        except:
+            text = item['content'] + self.tokenizer.eos_token
+        input_ids = self.tokenizer.encode(text, add_special_tokens=False)
         num_tokens = [len(input_ids)]
-        return {"input_ids": input_ids, "labels": labels, "num_tokens": num_tokens}
+        return {"input_ids": input_ids, "labels": copy.deepcopy(input_ids), "num_tokens": num_tokens}
 
 
 class Streaming:
@@ -115,6 +114,7 @@ class MultiStreamingDataset(IterableDataset):
 
         if sum(self.activated) == 0:
             raise RuntimeError(
+
                 f"[DP_RANK {dp_rank}] All streaming contain "
                 f"less than {dp_rank} samples, please ensure that "
                 "the number of samples in each streaming is greater "

@@ -92,13 +92,14 @@ if __name__ == '__main__':
     config = AutoConfig.from_pretrained(model_path, trust_remote_code=True, attn_implementation="flash_attention_2")
 
     # 修改参数进行快速调试
-    config.num_hidden_layers = 4
+    config.num_hidden_layers = 24
+    config.hidden_size = 1024
     config.num_self_decoder_layers = int(config.num_hidden_layers * 0.5)
     config.tie_word_embeddings = True  # 小模型要开启，否则 embedding 占比太大了
 
     # 计算模型参数量
     calc_param_count(config)
-    # 模拟一次生成
-    model_forward(config)
-    # 模拟生成
-    model_generate(config)
+    # # 模拟一次生成
+    # model_forward(config)
+    # # 模拟生成
+    # model_generate(config)

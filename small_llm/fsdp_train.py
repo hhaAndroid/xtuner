@@ -26,6 +26,7 @@ from torch.distributed.checkpoint.state_dict import (
     get_model_state_dict,
     get_state_dict,
 )
+from accelerate.utils import set_module_tensor_to_device
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp import MixedPrecision
@@ -74,6 +75,12 @@ from xtuner._lite.parallel.fsdp import (
     dp_sp_lazy_init,
     layer_auto_wrap_policy,
 )
+from streaming import (
+    MultiStreamingDataset,
+    Streaming,
+    PretrainTokenizeFunction,
+    StreamingDataset,
+)
 
 logger = get_logger()
 
@@ -81,7 +88,6 @@ SUPPORT_DATA_FORMATS = OPENAI_FORMAT_MAP.keys()
 
 
 def log_format(rank, debug=False):
-
     formatter = f"[XTuner][RANK {rank}]"
     formatter += "[{time:YYYY-MM-DD HH:mm:ss}][<level>{level}</level>]"
 
@@ -165,7 +171,7 @@ def parse_args():
     model_args.add_argument(
         "--shard-strategy",
         default="full",
-        choices=["full", "hybrid"],
+        choices=["full", "hybrid", 'zero2', 'no'],
         help=("The sharding strategy to be used for distributed training."),
     )
     model_args.add_argument("--cpu-offload", action="store_true", help=(""))
@@ -520,114 +526,30 @@ def sft(args):
         trust_remote_code=True,
         padding_side="right",
     )
-    # ##########################################################################
-    # if args.dset_from_cache:
-    #     if args.dset_pack_level == "soft":
-    #         init_fn = partial(SoftPackerForText.from_cache, max_length=args.max_length)
-    #     elif args.dset_pack_level == "hard":
-    #         raise NotImplementedError
-    #     else:
-    #         init_fn = partial(
-    #             TextTokenizeFunction.from_cache, max_length=args.max_length
-    #         )
-    #     _datasets = load_from_cache(args.dset_cache_dir, init_fn)
-    #     dist.barrier()
-
-    # else:
-    #     chat_template = CHAT_TEMPLATE_MAP[args.chat_template]
-    #     tokenize_fns = []
-    #     init_fns = []
-    #     for dset_format in args.dset_formats:
-    #         # If your data format is not in `SUPPORT_DATA_FORMATS`, you should
-    #         # redefine a `tokenize_fn`, defining how to convert a piece of raw
-    #         # data into tokenized data.
-    #         # The tokenized data must include `input_ids`, `labels``,
-    #         # and `num_tokens`.
-    #         tokenize_fn = TextTokenizeFunction(tokenizer, chat_template, dset_format)
-
-    #         if args.dset_pack_level == "soft":
-    #             init_fn = partial(SoftPackerForText, max_length=args.max_length)
-    #         elif args.dset_cache_dir:
-    #             init_fn = partial(TextTokenizedDataset, max_length=args.max_length)
-    #         else:
-    #             init_fn = partial(TextOnlineTokenizeDataset, tokenize_fn=tokenize_fn)
-    #             # Online tokenization is used when not using a pack dataset,
-    #             # saving startup time.
-    #             tokenize_fn = None
-
-    #         tokenize_fns.append(tokenize_fn)
-    #         init_fns.append(init_fn)
-
-    #     _datasets = load_datasets(
-    #         paths=args.datasets,
-    #         cache_dir=args.dset_cache_dir,
-    #         file_types=args.dset_file_types,
-    #         sources=args.dset_sources,
-    #         sample_ratios=args.dset_sample_ratios,
-    #         num_proc=args.num_proc,
-    #         map_fns=tokenize_fns,
-    #         init_fns=init_fns,
-    #         file_pattern=args.file_pattern,
-    #     )
-    # if (args.dset_pack_level or args.dset_cache_dir) and rank == 0 and args.debug:
-    #     #########################################################################################
-    #     # Only the tokenized datasets can count the number of tokens
-    #     num_tokens = sum(dset.total_tokens for dset in _datasets)
-    #     logger.debug(f"[Dataset] {num_tokens} tokens.")
-
-    # train_dataset = ConcatDataset(_datasets)
-
-    # if args.dset_pack_level and rank == 0:
-    #     ori_samples = sum([dset.num_samples for dset in _datasets])
-    #     packed_samples = len(train_dataset)
-    #     logger.info(f"[Dataset] (Original) {ori_samples} samples.")
-    #     logger.info(f"[Dataset] (Packed) {packed_samples} samples.")
 
     pack_batch = is_flash_attn_2_available()
     collator = TextCollator(pack_batch=pack_batch)
 
-    # if args.group_by_length:
-    #     sampler = LengthGroupedSampler(train_dataset, dp_mesh, args.global_batch_size)
-    # else:
-    #     sampler = ParallelSampler(
-    #         train_dataset, dp_mesh, args.global_batch_size, shuffle=True
-    #     )
-
-    # train_dataloader = DataLoader(
-    #     train_dataset,
-    #     batch_size=args.mirco_batch_size,
-    #     num_workers=args.num_workers,
-    #     # Ensure to round up or drop last based on the `global_batch_size`,
-    #     # if you want to replace a custom sampler.
-    #     sampler=sampler,
-    #     collate_fn=collator,
-    #     persistent_workers=args.num_workers > 0,
-    # )
-
-    # if rank == 0:
-    #     logger.info(f"[Dataloader] {len(train_dataloader)} batches.")
-    #     _first_batch = [train_dataset[i] for i in range(args.mirco_batch_size)]
-    #     _first_batch = collator(_first_batch)
-    #     _decoded = tokenizer.batch_decode(_first_batch["input_ids"])
-    #     logger.debug(f"[Dataloader] Training Batch:\n{_first_batch}")
-    #     logger.debug(f"[Dataloader] Training Batch(Decoded):\n{_decoded}")
-
-    from streaming import (
-        MultiStreamingDataset,
-        Streaming,
-        PretrainTokenizeFunction,
-        StreamingDataset,
-    )
-
     tokenize_fn = PretrainTokenizeFunction(tokenizer)
-    train_dataset = StreamingDataset(
-        args.datasets[0], args.weights, 2048, tokenize_fn, 1, 0, 1
-    )
 
+    streamings = []
+    for train_dataset in args.datasets:
+        for dirpath, dirnames, filenames in os.walk(train_dataset):
+            for filename in filenames:
+                if filename.endswith(".jsonl"):
+                    path = os.path.join(dirpath, filename)
+                    file_size = os.path.getsize(path)
+                    if file_size > 1000:
+                        streamings.append(Streaming(path, max_epoch=1))
+
+    logger.info(f"Found {len(streamings)} streaming datasets.")
+    weights = [1] * len(streamings)
+    train_dataset = MultiStreamingDataset(streamings, weights, args.max_length, tokenize_fn,
+                                          seed=42, dp_rank=rank, dp_world_size=dp_size)
     train_dataloader = DataLoader(
         dataset=train_dataset,
         batch_size=args.mirco_batch_size,
-        num_workers=0,
+        num_workers=1,
         collate_fn=collator,
         # Ensure to round up or drop last based on the `global_batch_size`,
         # if you want to replace a custom sampler.
@@ -668,16 +590,15 @@ def sft(args):
             f"but found {args.dtype}."
         )
     ###################################################################################################
-    if args.llm in MODEL_CONFIG:
-        llm_cfg = AutoConfig.from_pretrained(args.tokenizer, trust_remote_code=True)
-    else:
-        llm_cfg = AutoConfig.from_pretrained(args.llm, trust_remote_code=True)
-    ###################################################################################################
-    if is_flash_attn_2_available():
-        llm_cfg.attn_implementation = "flash_attention_2"
-    elif is_torch_sdpa_available():
-        llm_cfg.attn_implementation = "sdpa"
+    llm_cfg = AutoConfig.from_pretrained(args.llm, trust_remote_code=True)
 
+    # 暂时写死 453M 参数
+    llm_cfg.num_hidden_layers = 24
+    llm_cfg.hidden_size = 1024
+    llm_cfg.num_self_decoder_layers = int(llm_cfg.num_hidden_layers * 0.5)
+    llm_cfg.tie_word_embeddings = True  # 小模型要开启，否则 embedding 占比太大了
+    llm_cfg.attn_implementation = "flash_attention_2"
+    ###################################################################################################
     llm_cfg.use_cache = False
     llm_cfg.torch_dtype = dtype
 
@@ -720,6 +641,12 @@ def sft(args):
     if args.shard_strategy == "full":
         fsdp_device_mesh = init_device_mesh("cuda", (world_size,))
         strategy = ShardingStrategy.FULL_SHARD
+    elif args.shard_strategy == "zero2":
+        fsdp_device_mesh = init_device_mesh("cuda", (dp_size // 2, 2))
+        strategy = ShardingStrategy.SHARD_GRAD_OP
+    elif args.shard_strategy == "no":
+        fsdp_device_mesh = init_device_mesh("cuda", (dp_size // 2, 2))
+        strategy = ShardingStrategy.NO_SHARD
     elif args.shard_strategy == "hybrid":
         fsdp_device_mesh = init_device_mesh("cuda", (dp_size // 8, 8))
         strategy = ShardingStrategy.HYBRID_SHARD
@@ -745,7 +672,7 @@ def sft(args):
     max_memory = torch.cuda.max_memory_allocated()
     logger.info(
         "[Model] During building the FSDP model, the peak GPU memory "
-        f"is {max_memory/1024**3:.1f}GB."
+        f"is {max_memory / 1024 ** 3:.1f}GB."
     )
 
     if args.selective_recompute:
@@ -767,7 +694,7 @@ def sft(args):
         param for param in shard_llm.parameters() if param.requires_grad
     ]
     optimizer = AdamW(
-        requried_grad_params, lr=args.lr, weight_decay=args.wd, betas=(0.9, 0.95)
+        requried_grad_params, lr=args.lr, weight_decay=args.wd, betas=(0.9, 0.95), eps=1e-8
     )
 
     global_batch_size = args.global_batch_size
@@ -777,8 +704,6 @@ def sft(args):
     # `step` means once optimizer step
     # `iters_per_step` means gradient accumulative counts
     # ##########################################################################
-    total_epochs = 1
-
     total_steps = args.dset_length
     iters_per_step = global_batch_size // mirco_batch_size // dp_size
 
@@ -792,7 +717,10 @@ def sft(args):
     else:
         checkpoint_interval = int(args.checkpoint_interval)
 
-    warmup_steps = int(args.warmup_ratio * total_steps)
+    if args.warmup_ratio < 1:
+        warmup_steps = int(args.warmup_ratio * total_steps)
+    else:
+        warmup_steps = int(args.warmup_ratio)
 
     def warmup_fn(x):
         return x / warmup_steps if x < warmup_steps else 1
@@ -817,15 +745,17 @@ def sft(args):
     max_memory = torch.cuda.max_memory_allocated()
     logger.info(
         "[Train] Begin Train Loop. The current GPU memory is "
-        f"{(max_memory / 1024**3):.1f}GB"
+        f"{(max_memory / 1024 ** 3):.1f}GB"
     )
     # ############################################################################
     data_iterator = iter(train_dataloader)
+    save_hf_ckpt_names = []
+    save_pt_ckpt_names = []
+    max_keep_ckpts = 1
     #############################################################################
     for step in range(start_step, total_steps):
 
         epoch = step // steps_per_epoch
-        epoch_inner_step = step % steps_per_epoch
         # ############################################################################
         # if epoch_inner_step == 0 or step == start_step:
         #     # For the first step of each epoch, the data order needs to be
@@ -855,10 +785,10 @@ def sft(args):
             data = next(data_iterator)
             step_data_time += time.time() - _data_start_t
 
-            input_ids = data["input_ids"].cuda()
-            labels = data["labels"].cuda()
-            attention_mask = data["attention_mask"].cuda()
-            num_tokens = data["num_tokens"].cuda()
+            input_ids = data["input_ids"].cuda(non_blocking=True)
+            labels = data["labels"](non_blocking=True)
+            attention_mask = data["attention_mask"](non_blocking=True)
+            num_tokens = data["num_tokens"](non_blocking=True)
 
             packed_ctx = packed_sequence(
                 num_tokens, enable=pack_batch, sp_size=get_sp_world_size()
@@ -926,7 +856,7 @@ def sft(args):
                 f"{step + 1}/{total_steps}  "
                 f"lr: {cur_lr:.6f}  loss: {step_loss:.3f}  "
                 f"grad_norm: {grad_norm:.2f}  "
-                f"max_memory: {(max_memory / 1024**3):.1f}GB  "
+                f"max_memory: {(max_memory / 1024 ** 3):.1f}GB  "
                 f"text_tokens: {step_consumed_tokens}  "
                 f"tgs: {tgs}  data_time: {step_data_time:.2f}s  "
                 f"time: {step_time:.2f}s  "
@@ -939,32 +869,39 @@ def sft(args):
             max_memory = torch.cuda.max_memory_allocated()
             logger.info(
                 "[Checkpoint] Before saving checkpoint, the peak GPU "
-                f"memory is {max_memory/1024**3:.1f}GB."
+                f"memory is {max_memory / 1024 ** 3:.1f}GB."
             )
 
             num_digits = len(str(abs(total_steps)))
             work_dir = args.work_dir
-            ckpt_dir = os.path.join(work_dir, f"ckpt-{step+1:0{num_digits}}")
-            hf_dir = os.path.join(work_dir, f"hf-{step+1:0{num_digits}}")
+            ckpt_dir = os.path.join(work_dir, f"ckpt-{step + 1:0{num_digits}}")
+            hf_dir = os.path.join(work_dir, f"hf-{step + 1:0{num_digits}}")
             _options = StateDictOptions(cpu_offload=True, full_state_dict=True)
 
             # ##############################################################################
-            # full_model_state_dict = get_model_state_dict(shard_llm, options=_options)
-            # if rank == 0:
-            #     saved_llm = copy.deepcopy(rank0_meta_llm)
-            #     saved_llm.to(dtype)
-            #     for name, param in full_model_state_dict.items():
-            #         set_module_tensor_to_device(saved_llm, name, "cpu", param)
+            full_model_state_dict = get_model_state_dict(shard_llm, options=_options)
+            if rank == 0:
+                saved_llm = copy.deepcopy(rank0_meta_llm)
+                saved_llm.to(dtype)
+                for name, param in full_model_state_dict.items():
+                    set_module_tensor_to_device(saved_llm, name, "cpu", param)
 
-            #     if args.use_lora:
-            #         saved_llm = saved_llm.merge_and_unload()
+                if args.use_lora:
+                    saved_llm = saved_llm.merge_and_unload()
 
-            #     saved_llm.save_pretrained(hf_dir)
-            #     tokenizer.save_pretrained(hf_dir)
-            #     del saved_llm
+                saved_llm.save_pretrained(hf_dir)
+                tokenizer.save_pretrained(hf_dir)
+                del saved_llm
 
-            # dist.barrier()
-            # del full_model_state_dict
+            dist.barrier()
+            del full_model_state_dict
+
+            if rank == 0:
+                save_hf_ckpt_names.append(hf_dir)
+                if len(save_hf_ckpt_names) > max_keep_ckpts:
+                    # 移除最先加入的
+                    remove_hf_ckpt_name = save_hf_ckpt_names.pop(0)
+                    os.system(f'rm -rf {remove_hf_ckpt_name}')
             ###############################################################################
 
             if args.checkpoint_drop_optimizer:
@@ -985,7 +922,7 @@ def sft(args):
                 state_dict = {
                     "model": shard_model_state_dict,
                     # ###################################################################################
-                    # "optimizer": shard_optimizer_state_dict,
+                    "optimizer": shard_optimizer_state_dict,
                     ####################################################################################
                     "step": step,
                     "total_steps": total_steps,
@@ -997,10 +934,17 @@ def sft(args):
                 mkdir_or_exist(ckpt_dir)
                 dcp.save(state_dict, writer)
 
+                if rank == 0:
+                    save_pt_ckpt_names.append(ckpt_dir)
+                    if len(save_pt_ckpt_names) > max_keep_ckpts:
+                        # 移除最先加入的
+                        remove_pt_ckpt_name = save_pt_ckpt_names.pop(0)
+                        os.system(f'rm -rf {remove_pt_ckpt_name}')
+
             max_memory = torch.cuda.max_memory_allocated()
             logger.info(
                 "[Checkpoint] During saving checkpoint, the peak GPU "
-                f"memory is {max_memory/1024**3:.1f}GB."
+                f"memory is {max_memory / 1024 ** 3:.1f}GB."
             )
 
     train_cost_time = time.time() - start_train_t
@@ -1009,6 +953,5 @@ def sft(args):
 
 
 if __name__ == "__main__":
-
     args = parse_args()
     sft(args)

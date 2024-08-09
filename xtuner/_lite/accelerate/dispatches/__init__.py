@@ -37,12 +37,28 @@ def dispatch_rms_norm_forward(module):
     return rms_norm_forward.__name__
 
 
+def dispatch_yoco_self_varlen_attn_forward(module):
+    assert module.__class__.__name__ == 'InternLM2WindowFlashAttention2'
+    from .yoco import yoco_internlm2_self_varlen_attn_forward
+    _dispatch_forward_fn(module, yoco_internlm2_self_varlen_attn_forward)
+    return yoco_internlm2_self_varlen_attn_forward.__name__
+
+
+def dispatch_yoco_cross_varlen_attn_forward(module):
+    assert module.__class__.__name__ == 'InternLM2CrossFlashAttention2'
+    from .yoco import yoco_internlm2_cross_varlen_attn_forward
+    _dispatch_forward_fn(module, yoco_internlm2_cross_varlen_attn_forward)
+    return yoco_internlm2_cross_varlen_attn_forward.__name__
+
+
 DISPATCH_MAP = {
     'InternLM2FlashAttention2': dispatch_internlm_varlen_attn_forward,
     'CLIPAttention': dispatch_clip_attn_forward,
     'InternLM2RMSNorm': dispatch_rms_norm_forward,
     'LlamaFlashAttention2': dispatch_llama_varlen_attn_forward,
     'LlamaRMSNorm': dispatch_rms_norm_forward,
+    'InternLM2WindowFlashAttention2': dispatch_yoco_self_varlen_attn_forward,
+    'InternLM2CrossFlashAttention2': dispatch_yoco_cross_varlen_attn_forward,
 }
 
 
