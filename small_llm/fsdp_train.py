@@ -390,10 +390,9 @@ def map_meta_modules(model, meta_model):
 
 
 def build_llm_model(args, config, world_size, dtype=torch.float32):
-    with LoadWoInit():
-        llm = AutoModelForCausalLM.from_config(
-             config=config, trust_remote_code=True
-        )
+    llm = AutoModelForCausalLM.from_config(
+        config=config, trust_remote_code=True
+    )
 
     # Ensure all numerical values in the optimizer are fp32.
     # FSDP will use low precision during forward.
@@ -615,11 +614,6 @@ def sft(args):
     if rank == 0:
         with torch.device("cpu"):
             llm = build_llm_model(args, llm_cfg, world_size, dtype)
-            ######################################################################################
-            if args.reinit_model:
-                llm.init_weights()
-                print("Reinit model weights.")
-            ######################################################################################
         rank0_meta_llm = copy.deepcopy(meta_llm)
         meta_llm_map = map_meta_modules(llm, meta_llm)
     else:
@@ -642,10 +636,10 @@ def sft(args):
         fsdp_device_mesh = init_device_mesh("cuda", (world_size,))
         strategy = ShardingStrategy.FULL_SHARD
     elif args.shard_strategy == "zero2":
-        fsdp_device_mesh = init_device_mesh("cuda", (dp_size // 2, 2))
+        fsdp_device_mesh = init_device_mesh("cuda", (world_size,))
         strategy = ShardingStrategy.SHARD_GRAD_OP
     elif args.shard_strategy == "no":
-        fsdp_device_mesh = init_device_mesh("cuda", (dp_size // 2, 2))
+        fsdp_device_mesh = init_device_mesh("cuda", (world_size,))
         strategy = ShardingStrategy.NO_SHARD
     elif args.shard_strategy == "hybrid":
         fsdp_device_mesh = init_device_mesh("cuda", (dp_size // 8, 8))
@@ -756,16 +750,6 @@ def sft(args):
     for step in range(start_step, total_steps):
 
         epoch = step // steps_per_epoch
-        # ############################################################################
-        # if epoch_inner_step == 0 or step == start_step:
-        #     # For the first step of each epoch, the data order needs to be
-        #     # readjusted.
-        #     # Or after resuming, for the first step, the dataloader needs to
-        #     # be adjusted to the position before resume.
-
-        #     train_dataloader.sampler.set_epoch(epoch, epoch_inner_step)
-        #     data_iterator = iter(train_dataloader)
-        #############################################################################
         if step < warmup_steps:
             warmup_scheduler.step()
             cur_lr = warmup_scheduler.get_last_lr()[0]
@@ -844,7 +828,7 @@ def sft(args):
         max_memory = torch.cuda.max_memory_allocated()
         ####################################################################################################
         # all reduce loss
-        step_loss_pre_rank = step_loss
+        step_loss_pre_rank = copy.deepcopy(step_loss)
         step_loss = torch.tensor(step_loss, device="cuda")
         dist.all_reduce(step_loss)
         step_loss = step_loss.item() / world_size
