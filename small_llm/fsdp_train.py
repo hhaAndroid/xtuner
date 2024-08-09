@@ -591,10 +591,14 @@ def sft(args):
     ###################################################################################################
     llm_cfg = AutoConfig.from_pretrained(args.llm, trust_remote_code=True)
 
-    # 暂时写死 453M 参数
-    llm_cfg.num_hidden_layers = 24
-    llm_cfg.hidden_size = 1024
-    llm_cfg.num_self_decoder_layers = int(llm_cfg.num_hidden_layers * 0.5)
+    if 'internlm2_5-05b' in args.llm:
+        logger.info("Using internlm2_5-05b")
+    else:
+        logger.info("Using yoco")
+        # 暂时写死 453M 参数
+        llm_cfg.num_hidden_layers = 24
+        llm_cfg.hidden_size = 1024
+        llm_cfg.num_self_decoder_layers = int(llm_cfg.num_hidden_layers * 0.5)
     llm_cfg.tie_word_embeddings = True  # 小模型要开启，否则 embedding 占比太大了
     llm_cfg.attn_implementation = "flash_attention_2"
     ###################################################################################################

@@ -88,6 +88,7 @@ def model_generate(config):
 
 
 if __name__ == '__main__':
+    # model_path = '../internlm2_5-0_5b'  # 459.72 M
     model_path = '../yoco'
     config = AutoConfig.from_pretrained(model_path, trust_remote_code=True, attn_implementation="flash_attention_2")
 
