@@ -22,7 +22,7 @@ fi
 # gradient accumulation steps: 4
 # total token per batch: 32gx16bsx4accx2048len = 4m
 # step: 25000, 25000x4m = 100b token
-#
+# 总是会出现 nan
 HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 srun -p ${PARTITION} \
   --gres=gpu:${GPUS_PER_NODE} \
   --nodes=${NODES} \

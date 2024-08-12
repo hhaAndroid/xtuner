@@ -544,7 +544,7 @@ def sft(args):
     logger.info(f"Found {len(streamings)} streaming datasets.")
     weights = [1] * len(streamings)
     train_dataset = MultiStreamingDataset(streamings, weights, args.max_length, tokenize_fn,
-                                          seed=42, dp_rank=rank, dp_world_size=dp_size)
+                                          seed=args.seed, dp_rank=rank, dp_world_size=dp_size)
     train_dataloader = DataLoader(
         dataset=train_dataset,
         batch_size=args.mirco_batch_size,
