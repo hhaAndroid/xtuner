@@ -219,6 +219,11 @@ def parse_args():
         help=('the maximum length of each piece of data, any excess will be '
               'truncated.'))
     data_args.add_argument(
+        '--pack-max-length',
+        type=int,
+        default=2048,
+        help='the maximum length of each pack of data')
+    data_args.add_argument(
         '--num-workers',
         type=int,
         default=0,
@@ -394,6 +399,7 @@ def llava_pretrain(args):
     world_size = int(os.environ['WORLD_SIZE'])
     dp_size = world_size
 
+    assert args.pack_max_length % args.max_length == 0
     if args.global_batch_size < dp_size or args.global_batch_size % dp_size:
         raise ValueError(f'The `global_batch_size`({args.global_batch_size}) '
                          f'should be divisible by the world_size{world_size}.')
@@ -526,7 +532,7 @@ def llava_pretrain(args):
             # and `num_tokens`.
             tokenize_fn = LlavaTokenizeFunction(tokenizer, chat_template,
                                                 per_img_tokens, image_dir,
-                                                dset_format)
+                                                dset_format, max_length=args.max_length)
 
             if args.dset_pack_level:
                 init_fn = Dataset.from_list
@@ -563,12 +569,12 @@ def llava_pretrain(args):
     datasets = []
     if args.dset_pack_level and args.dset_pack_level == 'soft':
         pack_infos = SoftPackerForLlava.get_pack_infos(_datasets,
-                                                       args.max_length)
+                                                       args.pack_max_length)
         for i in range(num_datasets):
             _infos = pack_infos[i]
             _dset = _datasets[i]
             _packed_dset = SoftPackerForLlava(_dset, img_processor,
-                                              args.max_length, _infos)
+                                              args.pack_max_length, _infos)
             datasets.append(_packed_dset)
     else:
         for i, dset in enumerate(_datasets):

@@ -29,7 +29,7 @@ HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 srun -p ${PARTITION} --time 1-00:00
   --quotatype=${QUOTA_TYPE} \
   ${SRUN_ARGS} \
   python -u llava_pretrain.py \
-  --llm /mnt/hwfile/llmeval/opencompass/checkpoints/llm/hf_hub/models--internlm--internlm2-chat-7b/snapshots/70e6cdc9643ce7e3d9a369fb984dc5f1a1b2cec6 \
+  --llm /mnt/hwfile/xtuner/huanghaian/model/internlm2-chat-7b \
   --vit /mnt/hwfile/xtuner/linzhihao/model/models--openai--clip-vit-large-patch14-336/snapshots/ce19dc912ca5cd21c8a653c79e251e808ccabcd1 \
   --chat-template 'internlm2' \
   --freeze-llm \

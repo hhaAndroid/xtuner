@@ -21,19 +21,31 @@ class LlavaTokenizeFunction():
                  chat_template,
                  per_img_tokens,
                  image_dir=None,
-                 raw_format='llava'):
+                 raw_format='llava',
+                 max_length=2048):
 
         self.tokenizer = tokenizer
         self.chat_template = chat_template
         self.image_dir = image_dir
         self.raw_format = raw_format
         self.per_img_tokens = per_img_tokens
+        self.max_length = max_length
 
     def __call__(self, item):
 
         formatter = OPENAI_FORMAT_MAP[self.raw_format]
         msg = ChatMessages.from_dict(formatter(item))
         tokenized = msg.tokenize(self.tokenizer, self.chat_template)
+
+        input_ids = tokenized['input_ids']
+        labels = tokenized['labels']
+
+        if len(input_ids) > self.max_length:
+            input_ids = input_ids[:self.max_length]
+            labels = labels[:self.max_length]
+            tokenized['num_tokens'] = self.max_length
+            tokenized['input_ids'] = input_ids
+            tokenized['labels'] = labels
 
         if 'image_urls' in tokenized:
             image_urls = tokenized['image_urls']
