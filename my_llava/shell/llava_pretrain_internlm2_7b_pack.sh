@@ -18,7 +18,7 @@ if [ ! -d "$OUTPUT_DIR" ]; then
   mkdir -p "$OUTPUT_DIR"
 fi
 
-
+MAX_LENGHT=2048
 HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 srun -p ${PARTITION} --time 1-00:00:00 \
   --gres=gpu:${GPUS_PER_NODE} \
   --nodes=${NODES} \
@@ -35,8 +35,8 @@ HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 srun -p ${PARTITION} --time 1-00:00
   --freeze-llm \
   --freeze-vit \
   --datasets data/llava_pretrain.json \
-  --max-length 2048 \
-  --pack-max-length 2048*$((MIRCO_BATCH_SIZE)) \
+  --max-length $MAX_LENGHT \
+  --pack-max-length $((MIRCO_BATCH_SIZE * MAX_LENGHT)) \
   --num-workers 4 \
   --mirco-batch-size 1 \
   --global-batch-size $GPUS \

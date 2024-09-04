@@ -1,9 +1,6 @@
 import os
-from io import BytesIO
 
 import torch
-from datasets import load_from_disk
-from mmengine import fileio
 import numpy as np
 from PIL import Image
 from torch.nn.utils.rnn import pad_sequence
@@ -48,8 +45,6 @@ class LlavaTokenizeFunction():
             tokenized['labels'] = labels
 
         if 'image_urls' in tokenized:
-            image_urls = tokenized['image_urls']
-
             image_urls = []
             for url in tokenized['image_urls']:
 
@@ -59,7 +54,7 @@ class LlavaTokenizeFunction():
                     image_urls.append(url)
 
             num_images = len(image_urls)
-            num_img_tokens = [self.per_img_tokens for url in image_urls]
+            num_img_tokens = [self.per_img_tokens for _ in image_urls]
             tokenized['num_tokens'] += sum(num_img_tokens) - num_images
             tokenized['num_img_tokens'] = sum(num_img_tokens)
             tokenized['image_urls'] = image_urls
@@ -173,6 +168,7 @@ class SoftPackerForLlava(SoftPackerForText):
                  pack_info=None):
         super().__init__(dataset, max_length, pack_info)
         self.image_processor = image_processor
+        self._cached = False
 
     def __getitem__(self, item):
         """Returns a dict containing packed data in the given item.
@@ -201,8 +197,11 @@ class SoftPackerForLlava(SoftPackerForText):
             _num_tokens = self.dataset[i]['num_tokens']
             packed_num_tokens.append(_num_tokens)
 
-            if 'image_urls' in self.dataset[item]:
-                packed_img_urls.extend(self.dataset[item]['image_urls'])
+            # 之前将 i 写错为了 item 导致训练 loss 下降非常慢，grad norm 偏小很多
+            # 原因是：整个 batch 内部只有1 张图片是对的，所以 loss 下降特别慢
+            # 同时因为整个 batch 里面算 loss 的 text token 就一点点(每个样本几乎不超过 50 个)，所以 grad norm 偏小
+            if 'image_urls' in self.dataset[i]:
+                packed_img_urls.extend(self.dataset[i]['image_urls'])
 
             if 'num_img_tokens' in self.dataset[i]:
                 _num_img_tokens = self.dataset[i]['num_img_tokens']
@@ -220,6 +219,7 @@ class SoftPackerForLlava(SoftPackerForText):
             pixel_values = None
 
         if sum(packed_num_tokens) < self.max_length:
+            # TODO: 是否能加速，存在疑问？
             num_pad_tokens = self.max_length - sum(packed_num_tokens)
             packed_input_ids.extend([DEFAULT_PAD_TOKEN_INDEX] * num_pad_tokens)
             packed_labels.extend([IGNORE_INDEX] * num_pad_tokens)

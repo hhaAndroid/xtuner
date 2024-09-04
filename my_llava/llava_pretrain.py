@@ -56,6 +56,7 @@ from xtuner._lite.datasets.load import (LOAD_FN_MAP, load_datasets,
                                         load_from_cache)
 from xtuner._lite.modelings import register_remote_code
 from xtuner._lite.parallel import LengthGroupedSampler, ParallelSampler
+from xtuner.utils import DEFAULT_PAD_TOKEN_INDEX
 
 logger = get_logger()
 
@@ -658,7 +659,9 @@ def llava_pretrain(args):
     _text_config.use_cache = False
 
     llava_config = LlavaConfig(
-        _vision_config, _text_config, image_token_index=img_token_id)
+        _vision_config, _text_config,
+        image_token_index=img_token_id,
+        pad_token_id=DEFAULT_PAD_TOKEN_INDEX)
 
     # model parameters must be in fp32.
     # this ensures that all numerical values in the optimizer are in fp32.
