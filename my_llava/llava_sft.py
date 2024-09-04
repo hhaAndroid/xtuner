@@ -216,6 +216,11 @@ def parse_args():
         help=('the maximum length of each piece of data, any excess will be '
               'truncated.'))
     data_args.add_argument(
+        '--pack-max-length',
+        type=int,
+        default=2048,
+        help='the maximum length of each pack of data')
+    data_args.add_argument(
         '--num-workers',
         type=int,
         default=1,
