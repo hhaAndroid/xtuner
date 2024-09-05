@@ -222,6 +222,11 @@ def parse_args():
         default=2048,
         help='the maximum length of each pack of data')
     data_args.add_argument(
+        '--max-keep-ckpts',
+        type=int,
+        default=3,
+        help='the maximum number of checkpoints to keep.')
+    data_args.add_argument(
         '--num-workers',
         type=int,
         default=1,
@@ -841,6 +846,9 @@ def llava_sft(args):
     max_memory = torch.cuda.max_memory_allocated()
     logger.info('[Train] Begin Train Loop. The current GPU memory is '
                 f'{(max_memory / 1024 ** 3):.1f}GB')
+    save_hf_ckpt_names = []
+    save_pt_ckpt_names = []
+    max_keep_ckpts = args.max_keep_ckpts
     for step in range(start_step, total_steps):
 
         epoch = step // per_epoch_steps
@@ -966,6 +974,13 @@ def llava_sft(args):
             dist.barrier()
             del full_model_state_dict
 
+            if rank == 0:
+                save_hf_ckpt_names.append(hf_dir)
+                if len(save_hf_ckpt_names) > max_keep_ckpts:
+                    # 移除最先加入的
+                    remove_hf_ckpt_name = save_hf_ckpt_names.pop(0)
+                    os.system(f'rm -rf {remove_hf_ckpt_name}')
+
             if args.checkpoint_drop_optimizer:
                 logger.warning('[Checkpoint] The saved checkpoint cannot be '
                                'resumed. If you want to save a resumable '
@@ -999,10 +1014,17 @@ def llava_sft(args):
                     with open(save_file, 'w') as f:
                         f.write(ckpt_dir)  # type: ignore
 
+                    save_pt_ckpt_names.append(ckpt_dir)
+                    if len(save_pt_ckpt_names) > max_keep_ckpts:
+                        # 移除最先加入的
+                        remove_pt_ckpt_name = save_pt_ckpt_names.pop(0)
+                        os.system(f'rm -rf {remove_pt_ckpt_name}')
+
                 max_memory = torch.cuda.max_memory_allocated()
                 logger.info(
                     '[Checkpoint] During saving checkpoint, the peak GPU '
                     f'memory is {max_memory / 1024 ** 3:.1f}GB.')
+
 
     train_cost_time = time.time() - start_train_t
     logger.info(f'[Train] Cost {train_cost_time}s')
