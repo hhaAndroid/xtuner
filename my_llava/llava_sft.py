@@ -280,7 +280,9 @@ def parse_args():
     parser.add_argument(
         '--log-interval', default=1, type=int, help='log interval')
     parser.add_argument(
-        '--resume',
+        '--resume', action='store_true', help='resume from the last checkpoint')
+    parser.add_argument(
+        '--resume-from',
         type=str,
         default=None,
         help='specify checkpoint path to be resumed from.')
@@ -373,6 +375,19 @@ def llava_sft(args):
 
     world_size = int(os.environ['WORLD_SIZE'])
     dp_size = world_size
+
+    # 如果 args.resume 和 args.resume_from 同时都设置了，则以 args.resume_from 为准
+    if args.resume_from and args.resume is False:
+        args.resume = True
+    if args.resume is True and args.resume_from is None:
+        # find last checkpoint
+        save_file = os.path.join(args.work_dir, 'last_checkpoint')
+        if os.path.exists(save_file):
+            with open(save_file) as f:
+                args.resume_from = f.read().strip()
+        else:
+            logger.warning('Did not find last_checkpoint to be resumed. training from scratch.')
+            args.resume = False
 
     if args.global_batch_size < dp_size or args.global_batch_size % dp_size:
         raise ValueError(f'The `global_batch_size`({args.global_batch_size}) '
@@ -762,6 +777,32 @@ def llava_sft(args):
     start_step = 0
 
     # ----------------    Optimizer & Scheduler End   ----------------------- #
+    if args.resume:
+        logger.info(f'[Resume] Resume from {args.resume_from}')
+        _options = StateDictOptions(
+            cpu_offload=True, ignore_frozen_params=True)
+        (shard_model_state_dict,
+         shard_optimizer_state_dict) = get_state_dict(
+            shard_llava, optimizer, options=_options)
+
+        state_dict = {
+            'model': shard_model_state_dict,
+            'optimizer': shard_optimizer_state_dict,
+            'step': start_step,
+            'total_steps': total_steps,
+            'warmup_scheduler': warmup_scheduler.state_dict(),
+            'cosine_scheduler': cosine_scheduler.state_dict()
+        }
+        # inplace state_dict
+        dcp.load(
+            state_dict=state_dict,
+            checkpoint_id=args.resume_from,
+        )
+        start_step = state_dict['step']
+        warmup_scheduler.load_state_dict(state_dict['warmup_scheduler'])
+        cosine_scheduler.load_state_dict(state_dict['cosine_scheduler'])
+        optimizer.load_state_dict(state_dict['optimizer'])
+        shard_llava.load_state_dict(state_dict['model'])
 
     ###########################################################################
     #                          5. Training                                    #
@@ -925,6 +966,12 @@ def llava_sft(args):
                 writer = dcp.FileSystemWriter(ckpt_dir)
                 mkdir_or_exist(ckpt_dir)
                 dcp.save(state_dict, writer)
+
+                if rank == 0:
+                    # 只能存储到 work_dir/../last_checkpoint 这，否则不好找
+                    save_file = os.path.join(args.work_dir, '../', 'last_checkpoint')
+                    with open(save_file, 'w') as f:
+                        f.write(ckpt_dir)  # type: ignore
 
                 max_memory = torch.cuda.max_memory_allocated()
                 logger.info(
