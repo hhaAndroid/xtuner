@@ -19,6 +19,7 @@ if [ ! -d "$OUTPUT_DIR" ]; then
   mkdir -p "$OUTPUT_DIR"
 fi
 
+#   --resume \
 # python -m debugpy --connect 10.140.0.31:5688 llava_pretrain.py \
 MAX_LENGHT=2048
 HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 srun -p ${PARTITION} --time 1-00:00:00 \

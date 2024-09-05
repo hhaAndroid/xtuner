@@ -26,7 +26,7 @@ from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import \
     apply_activation_checkpointing
 from torch.distributed.checkpoint.state_dict import (StateDictOptions,
                                                      get_model_state_dict,
-                                                     get_state_dict)
+                                                     get_state_dict, set_state_dict)
 from torch.distributed.fsdp.api import ShardingStrategy
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
@@ -55,6 +55,7 @@ from xtuner._lite.datasets.load import (LOAD_FN_MAP, load_datasets,
 from xtuner._lite.modelings import register_remote_code
 from xtuner._lite.parallel import LengthGroupedSampler, ParallelSampler
 from llava_model import LlavaForConditionalGeneration
+from torch.distributed.checkpoint.stateful import Stateful
 
 logger = get_logger()
 
@@ -358,6 +359,21 @@ def build_llava_model(args, config, world_size, dtype=torch.float32):
     return llava
 
 
+class MetaStateful(Stateful):
+    def __init__(self, **kwargs):
+        super().__init__()
+        self.kwargs = kwargs
+
+    def state_dict(self):
+        return self.kwargs
+
+    def load_state_dict(self, state_dict) -> None:
+        self.kwargs = state_dict
+
+    def __getitem__(self, key):
+        return self.kwargs[key]
+
+
 # @logger.catch
 def llava_sft(args):
     ###########################################################################
@@ -388,6 +404,8 @@ def llava_sft(args):
         else:
             logger.warning('Did not find last_checkpoint to be resumed. training from scratch.')
             args.resume = False
+    if args.resume:
+        assert not args.checkpoint_drop_optimizer, '`resume` and `checkpoint_drop_optimizer` cannot be set at the same time.'
 
     if args.global_batch_size < dp_size or args.global_batch_size % dp_size:
         raise ValueError(f'The `global_batch_size`({args.global_batch_size}) '
@@ -592,6 +610,7 @@ def llava_sft(args):
             length_property = 'length'
         sampler = LengthGroupedSampler(train_dataset, dp_mesh,
                                        args.global_batch_size,
+                                       seed=args.seed,
                                        length_property=length_property)
     elif args.group_by_modality_length:
         # 当开启 soft packing 时，暂时不支持模态区分
@@ -600,10 +619,11 @@ def llava_sft(args):
         else:
             sampler = LengthGroupedSampler(train_dataset, dp_mesh,
                                            args.global_batch_size,
+                                           seed=args.seed,
                                            length_property='modality_length')
     else:
         sampler = ParallelSampler(
-            train_dataset, dp_mesh, args.global_batch_size, shuffle=True)
+            train_dataset, dp_mesh, args.global_batch_size, seed=args.seed, shuffle=True)
 
     train_dataloader = DataLoader(
         train_dataset,
@@ -784,25 +804,32 @@ def llava_sft(args):
         (shard_model_state_dict,
          shard_optimizer_state_dict) = get_state_dict(
             shard_llava, optimizer, options=_options)
-
+        meta_stateful = MetaStateful(step=start_step, total_steps=total_steps)
         state_dict = {
             'model': shard_model_state_dict,
             'optimizer': shard_optimizer_state_dict,
-            'step': start_step,
-            'total_steps': total_steps,
-            'warmup_scheduler': warmup_scheduler.state_dict(),
-            'cosine_scheduler': cosine_scheduler.state_dict()
+            'meta_stateful': meta_stateful,
+            'warmup_scheduler': warmup_scheduler,
+            'cosine_scheduler': cosine_scheduler
         }
         # inplace state_dict
         dcp.load(
             state_dict=state_dict,
             checkpoint_id=args.resume_from,
         )
-        start_step = state_dict['step']
-        warmup_scheduler.load_state_dict(state_dict['warmup_scheduler'])
-        cosine_scheduler.load_state_dict(state_dict['cosine_scheduler'])
-        optimizer.load_state_dict(state_dict['optimizer'])
-        shard_llava.load_state_dict(state_dict['model'])
+
+        _options = StateDictOptions(
+            cpu_offload=True, strict=False)
+        set_state_dict(
+            shard_llava,
+            optimizer,
+            model_state_dict=state_dict["model"],
+            optim_state_dict=state_dict["optimizer"],
+            options=_options
+        )
+
+        start_step = meta_stateful['step']
+        logger.info(f'[Resume] start_step to {start_step}')
 
     ###########################################################################
     #                          5. Training                                    #
@@ -953,19 +980,18 @@ def llava_sft(args):
                 (shard_model_state_dict,
                  shard_optimizer_state_dict) = get_state_dict(
                     shard_llava, optimizer, options=_options)
-
+                meta_stateful = MetaStateful(step=step + 1, total_steps=total_steps)
+                # warmup_scheduler/cosine_scheduler 并不是 Stateful 对象，但是是 work 的，
+                # 怀疑是这个对象有啥特殊，存储后就变成了 Stateful 对象
+                # 常数对象没有这个功能，需要自己封装
                 state_dict = {
                     'model': shard_model_state_dict,
                     'optimizer': shard_optimizer_state_dict,
-                    'step': step,
-                    'total_steps': total_steps,
+                    'meta_stateful': meta_stateful,
                     'warmup_scheduler': warmup_scheduler.state_dict(),
                     'cosine_scheduler': cosine_scheduler.state_dict()
                 }
-
-                writer = dcp.FileSystemWriter(ckpt_dir)
-                mkdir_or_exist(ckpt_dir)
-                dcp.save(state_dict, writer)
+                dcp.save(state_dict, checkpoint_id=ckpt_dir)
 
                 if rank == 0:
                     # 只能存储到 work_dir/../last_checkpoint 这，否则不好找
