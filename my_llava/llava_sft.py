@@ -511,7 +511,7 @@ def llava_sft(args):
             # and `num_tokens`.
             tokenize_fn = LlavaTokenizeFunction(tokenizer, chat_template,
                                                 per_img_tokens, image_dir,
-                                                dset_format)
+                                                dset_format, max_length=args.max_length)
 
             if args.dset_pack_level:
                 init_fn = Dataset.from_list
@@ -548,12 +548,12 @@ def llava_sft(args):
     datasets = []
     if args.dset_pack_level and args.dset_pack_level == 'soft':
         pack_infos = SoftPackerForLlava.get_pack_infos(_datasets,
-                                                       args.max_length)
+                                                       args.pack_max_length)
         for i in range(num_datasets):
             _infos = pack_infos[i]
             _dset = _datasets[i]
             _packed_dset = SoftPackerForLlava(_dset, img_processor,
-                                              args.max_length, _infos)
+                                              args.pack_max_length, _infos)
             datasets.append(_packed_dset)
     else:
         for i, dset in enumerate(_datasets):
@@ -571,13 +571,21 @@ def llava_sft(args):
     collator = LlavaCollator(pack_batch=pack_batch)
 
     if args.group_by_length:
+        if args.dset_pack_level:
+            length_property = 'max_length_per_pack'
+        else:
+            length_property = 'length'
         sampler = LengthGroupedSampler(train_dataset, dp_mesh,
                                        args.global_batch_size,
-                                       length_property='length')
+                                       length_property=length_property)
     elif args.group_by_modality_length:
-        sampler = LengthGroupedSampler(train_dataset, dp_mesh,
-                                       args.global_batch_size,
-                                       length_property='modality_length')
+        # 当开启 soft packing 时，暂时不支持模态区分
+        if args.dset_pack_level:
+            raise NotImplementedError
+        else:
+            sampler = LengthGroupedSampler(train_dataset, dp_mesh,
+                                           args.global_batch_size,
+                                           length_property='modality_length')
     else:
         sampler = ParallelSampler(
             train_dataset, dp_mesh, args.global_batch_size, shuffle=True)
@@ -699,7 +707,7 @@ def llava_sft(args):
 
     max_memory = torch.cuda.max_memory_allocated()
     logger.info('[Model] The peak GPU memory when building the FSDP model is '
-                f'{max_memory/1024**3:.1f}GB.')
+                f'{max_memory / 1024 ** 3:.1f}GB.')
 
     if args.selective_recompute:
         check_fn = partial(
@@ -764,7 +772,7 @@ def llava_sft(args):
     torch.cuda.reset_peak_memory_stats()
     max_memory = torch.cuda.max_memory_allocated()
     logger.info('[Train] Begin Train Loop. The current GPU memory is '
-                f'{(max_memory / 1024**3):.1f}GB')
+                f'{(max_memory / 1024 ** 3):.1f}GB')
     for step in range(start_step, total_steps):
 
         epoch = step // per_epoch_steps
@@ -840,10 +848,10 @@ def llava_sft(args):
         max_memory = torch.cuda.max_memory_allocated()
         if is_interval(step, total_steps, args.log_interval):
             logger.info(
-                f'[Train] (Epoch {epoch}) Step {step+1}/{total_steps}  '  # noqa: E501
+                f'[Train] (Epoch {epoch}) Step {step + 1}/{total_steps}  '  # noqa: E501
                 f'lr: {cur_lr:.6f}  loss: {step_loss:.3f}  '
                 f'grad_norm: {grad_norm:.2f}  '
-                f'max_memory: {(max_memory / 1024**3):.1f}GB  '
+                f'max_memory: {(max_memory / 1024 ** 3):.1f}GB  '
                 f'text_tokens: {step_text_tokens}  '
                 f'image_tokens: {step_img_tokens}  '
                 f'tgs: {tgs}  data_time: {step_data_time:.2f}s  '
@@ -855,7 +863,7 @@ def llava_sft(args):
             torch.cuda.reset_peak_memory_stats()
             max_memory = torch.cuda.max_memory_allocated()
             logger.info('[Checkpoint] Before saving checkpoint, the peak GPU '
-                        f'memory is {max_memory/1024**3:.1f}GB.')
+                        f'memory is {max_memory / 1024 ** 3:.1f}GB.')
 
             digits = len(str(abs(total_steps)))
             work_dir = args.work_dir
@@ -903,7 +911,7 @@ def llava_sft(args):
                     cpu_offload=True, ignore_frozen_params=True)
                 (shard_model_state_dict,
                  shard_optimizer_state_dict) = get_state_dict(
-                     shard_llava, optimizer, options=_options)
+                    shard_llava, optimizer, options=_options)
 
                 state_dict = {
                     'model': shard_model_state_dict,
@@ -921,7 +929,7 @@ def llava_sft(args):
                 max_memory = torch.cuda.max_memory_allocated()
                 logger.info(
                     '[Checkpoint] During saving checkpoint, the peak GPU '
-                    f'memory is {max_memory/1024**3:.1f}GB.')
+                    f'memory is {max_memory / 1024 ** 3:.1f}GB.')
 
     train_cost_time = time.time() - start_train_t
     logger.info(f'[Train] Cost {train_cost_time}s')

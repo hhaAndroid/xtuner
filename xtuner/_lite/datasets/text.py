@@ -168,10 +168,11 @@ class SoftPackerForText(torch.utils.data.Dataset):
         labels = []
         num_tokens = []
         for i in packed_items:
-            input_ids.extend(self.dataset[i]['input_ids'])
-            labels.extend(self.dataset[i]['labels'])
+            data = self.dataset[i]
+            input_ids.extend(data['input_ids'])
+            labels.extend(data['labels'])
 
-            _num_tokens = self.dataset[i]['num_tokens']
+            _num_tokens = data['num_tokens']
             num_tokens.append(_num_tokens)
 
         if len(input_ids) < self.max_length:

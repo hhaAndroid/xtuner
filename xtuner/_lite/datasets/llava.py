@@ -47,17 +47,18 @@ class LlavaTokenizeFunction():
         if 'image_urls' in tokenized:
             image_urls = []
             for url in tokenized['image_urls']:
-
-                if self.image_dir:
-                    image_urls.append(os.path.join(self.image_dir, url))
-                else:
-                    image_urls.append(url)
+                if url is not None:
+                    if self.image_dir:
+                        image_urls.append(os.path.join(self.image_dir, url))
+                    else:
+                        image_urls.append(url)
 
             num_images = len(image_urls)
             num_img_tokens = [self.per_img_tokens for _ in image_urls]
             tokenized['num_tokens'] += sum(num_img_tokens) - num_images
             tokenized['num_img_tokens'] = sum(num_img_tokens)
-            tokenized['image_urls'] = image_urls
+            if len(image_urls) > 0:
+                tokenized['image_urls'] = image_urls
 
         return tokenized
 
@@ -191,20 +192,24 @@ class SoftPackerForLlava(SoftPackerForText):
         packed_num_tokens = []
         packed_num_img_tokens = []
         for i in packed_items:
-            packed_input_ids.extend(self.dataset[i]['input_ids'])
-            packed_labels.extend(self.dataset[i]['labels'])
+            data = self.dataset[i]
+            packed_input_ids.extend(data['input_ids'])
+            packed_labels.extend(data['labels'])
 
-            _num_tokens = self.dataset[i]['num_tokens']
+            _num_tokens = data['num_tokens']
             packed_num_tokens.append(_num_tokens)
 
             # 之前将 i 写错为了 item 导致训练 loss 下降非常慢，grad norm 偏小很多
             # 原因是：整个 batch 内部只有1 张图片是对的，所以 loss 下降特别慢
             # 同时因为整个 batch 里面算 loss 的 text token 就一点点(每个样本几乎不超过 50 个)，所以 grad norm 偏小
-            if 'image_urls' in self.dataset[i]:
-                packed_img_urls.extend(self.dataset[i]['image_urls'])
 
-            if 'num_img_tokens' in self.dataset[i]:
-                _num_img_tokens = self.dataset[i]['num_img_tokens']
+            # image_urls 存在但是可能是 None,因为虽然我们在LlavaTokenizeFunction中处理了如果是纯文本就不会有 image_urls
+            # 但是在启动缓存时候 Dataset.from_list 依然会强行设置 image_urls key
+            if 'image_urls' in data and data['image_urls'] is not None:
+                packed_img_urls.extend(data['image_urls'])
+
+            if 'num_img_tokens' in data and data['num_img_tokens'] is not None:
+                _num_img_tokens = data['num_img_tokens']
                 packed_num_img_tokens.append(_num_img_tokens)
 
         images = []

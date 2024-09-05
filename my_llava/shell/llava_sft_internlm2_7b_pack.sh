@@ -19,6 +19,7 @@ if [ ! -d "$OUTPUT_DIR" ]; then
   mkdir -p "$OUTPUT_DIR"
 fi
 
+# python -m debugpy --connect 10.140.0.31:5688 llava_pretrain.py \
 MAX_LENGHT=2048
 HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 srun -p ${PARTITION} --time 1-00:00:00 \
   --gres=gpu:${GPUS_PER_NODE} \
@@ -30,15 +31,15 @@ HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 srun -p ${PARTITION} --time 1-00:00
   --quotatype=${QUOTA_TYPE} \
   ${SRUN_ARGS} \
   python -u llava_sft.py \
-  --llava work_dirs/llava_pretrain_internlm2_7b/20240724201849/hf-2180 \
+  --llava work_dirs/llava_pretrain_internlm2_7b_pack/20240904112552/hf-2114 \
   --tokenizer /mnt/hwfile/xtuner/huanghaian/model/internlm2-chat-7b \
   --chat-template 'internlm2' \
   --freeze-vit \
   --datasets data/llava_sft.json \
-  --group-by-modality-length \
   --max-length $MAX_LENGHT \
   --pack-max-length $((MIRCO_BATCH_SIZE * MAX_LENGHT)) \
   --num-workers 4 \
+  --group-by-length \
   --mirco-batch-size 1 \
   --global-batch-size $((GPUS*ACCUMULATIVE_COUNTS)) \
   --lr 2e-5 \
@@ -51,4 +52,7 @@ HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 srun -p ${PARTITION} --time 1-00:00
   --checkpoint-drop-optimizer \
   --shard-strategy 'zero2' \
   --dset-pack-level 'soft' \
+  --group-by-length \
+  --dset-cache-dir /mnt/petrelfs/huanghaian/code/mm/xtuner/my_llava/llava_sft_cache \
+  --dset-from-cache \
   2>&1 | tee -a "${OUTPUT_DIR}/training_log.txt"

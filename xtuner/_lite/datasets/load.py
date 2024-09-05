@@ -301,9 +301,10 @@ def load_local_datasets(paths,
             }
             rank_cached_infos[cache_id] = infos
 
+            # TODO 暂时不使用这个优化策略
             # Only keep the cache dir, do not keep the instance
-            del dset
-            dset = sub_cache_dir
+            # del dset
+            # dset = sub_cache_dir
 
         elif cache_dir and not isinstance(dset, Dataset):
             dset_cls = dset.__class__.__name__
@@ -314,7 +315,6 @@ def load_local_datasets(paths,
 
     if dist.is_available() and world_size > 1:
         logger.info('Waiting for other ranks...... ')
-        dist.barrier()
 
         timeout = timedelta(
             minutes=int(os.getenv('XTUNER_DATASET_TIMEOUT', default=30)))
