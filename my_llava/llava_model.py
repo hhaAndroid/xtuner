@@ -3,24 +3,32 @@ from transformers.models.llava.modeling_llava import LlavaCausalLMOutputWithPast
 import torch
 from typing import List, Optional, Tuple, Union
 from torch import nn
+import math
+import torch.distributed as dist
+from xtuner._lite.parallel import (LengthGroupedSampler, ParallelSampler,
+                                   get_dp_mesh, get_dp_world_size,
+                                   get_sp_group, get_sp_mesh,
+                                   get_sp_world_size,
+                                   reduce_sequence_parallel_loss,
+                                   setup_parallel)
 
 
 class LlavaForConditionalGeneration(HF_LlavaForConditionalGeneration):
     def forward(
-        self,
-        input_ids: torch.LongTensor = None,
-        pixel_values: torch.FloatTensor = None,
-        attention_mask: Optional[torch.Tensor] = None,
-        position_ids: Optional[torch.LongTensor] = None,
-        past_key_values: Optional[List[torch.FloatTensor]] = None,
-        inputs_embeds: Optional[torch.FloatTensor] = None,
-        vision_feature_layer: Optional[int] = None,
-        vision_feature_select_strategy: Optional[str] = None,
-        labels: Optional[torch.LongTensor] = None,
-        use_cache: Optional[bool] = None,
-        output_attentions: Optional[bool] = None,
-        output_hidden_states: Optional[bool] = None,
-        return_dict: Optional[bool] = None,
+            self,
+            input_ids: torch.LongTensor = None,
+            pixel_values: torch.FloatTensor = None,
+            attention_mask: Optional[torch.Tensor] = None,
+            position_ids: Optional[torch.LongTensor] = None,
+            past_key_values: Optional[List[torch.FloatTensor]] = None,
+            inputs_embeds: Optional[torch.FloatTensor] = None,
+            vision_feature_layer: Optional[int] = None,
+            vision_feature_select_strategy: Optional[str] = None,
+            labels: Optional[torch.LongTensor] = None,
+            use_cache: Optional[bool] = None,
+            output_attentions: Optional[bool] = None,
+            output_hidden_states: Optional[bool] = None,
+            return_dict: Optional[bool] = None,
     ) -> Union[Tuple, LlavaCausalLMOutputWithPast]:
 
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
@@ -39,7 +47,26 @@ class LlavaForConditionalGeneration(HF_LlavaForConditionalGeneration):
 
         if inputs_embeds is None:
             # 1. Extra the input embeddings
+            sp_size = get_sp_world_size()
+            sp_rank = get_sp_mesh().rank
+            sp_group = get_sp_group()
+            if sp_size > 1:
+                assert input_ids.shape[0] == 1, 'batch size must be 1 for sequence parallel'
+                # input_ids 均匀切分
+                if len(input_ids) % sp_size != 0:  # 确保能均匀切
+                    max_inputs_len = math.ceil(len(input_ids) / sp_size) * sp_size
+                    _temp = torch.full((1, max_inputs_len - len(input_ids)), self.config.pad_token_id,
+                                       dtype=input_ids.dtype,
+                                       device=input_ids.device)
+                    input_ids = torch.cat([input_ids, _temp], dim=-1)
+                    input_ids = torch.split(input_ids, len(input_ids) // sp_size, dim=-1)
+                    input_ids = input_ids[sp_rank].contiguous()
             inputs_embeds = self.get_input_embeddings()(input_ids)
+            if sp_size > 1:
+                # 重新合并
+                buffer = [None] * sp_size
+                dist.all_gather_object(buffer, inputs_embeds, group=sp_group)
+                inputs_embeds = torch.cat(buffer, dim=-1)
 
             # ------------- start add this ----------------
             if pixel_values is None:
@@ -69,6 +96,23 @@ class LlavaForConditionalGeneration(HF_LlavaForConditionalGeneration):
             # ------------- end add this ----------------
             # 2. Merge text and images
             elif pixel_values is not None and input_ids.shape[1] != 1:
+                # 图片均匀切分
+                if sp_size > 1:
+                    # pixel_values 均匀切分
+                    orig_img_batch = pixel_values.shape[0]
+                    if pixel_values.shape[0] % sp_size != 0:  # 确保能均匀切
+                        max_inputs_len = math.ceil(pixel_values.shape[0] / sp_size) * sp_size
+                        pad_img_batch = max_inputs_len - pixel_values.shape[0]
+                        pad_pixel_values_ = torch.zeros(pad_img_batch, 3,
+                                                        pixel_values.shape[2],
+                                                        pixel_values.shape[3],
+                                                        dtype=pixel_values.dtype,
+                                                        device=pixel_values.device)
+
+                        pixel_values = torch.cat([pixel_values, pad_pixel_values_], dim=0)
+                        pixel_values = torch.split(pixel_values, len(pixel_values) // sp_size, dim=0)
+                        pixel_values = pixel_values[sp_rank].contiguous()
+
                 image_outputs = self.vision_tower(pixel_values, output_hidden_states=True)
                 # this is not memory efficient at all (output_hidden_states=True) will save all the hidden stated.
                 selected_image_feature = image_outputs.hidden_states[vision_feature_layer]
@@ -84,6 +128,16 @@ class LlavaForConditionalGeneration(HF_LlavaForConditionalGeneration):
 
                 image_features = self.multi_modal_projector(selected_image_feature)
                 inputs_embeds = inputs_embeds.to(image_features.dtype)
+
+                # 切分后合并
+                if sp_size > 1:
+                    # 重新合并
+                    buffer = [None] * sp_size
+                    dist.all_gather_object(buffer, image_features, group=sp_group)
+                    image_features = torch.cat(buffer, dim=0)
+                    # 移除多余的pad
+                    image_features = image_features[:orig_img_batch]
+
                 inputs_embeds, attention_mask, labels, position_ids = self._merge_input_ids_with_image_features(
                     image_features, inputs_embeds, input_ids, attention_mask, labels
                 )
@@ -120,6 +174,9 @@ class LlavaForConditionalGeneration(HF_LlavaForConditionalGeneration):
 
                 attention_mask = torch.cat((extended_attention_mask, attention_mask[:, -target_length:]), dim=1)
                 position_ids = torch.sum(attention_mask, dim=1).unsqueeze(-1) - 1
+
+        # 此处开始进行切分处理
+
 
         outputs = self.language_model(
             attention_mask=attention_mask,
@@ -161,4 +218,3 @@ class LlavaForConditionalGeneration(HF_LlavaForConditionalGeneration):
             hidden_states=outputs.hidden_states,
             attentions=outputs.attentions,
         )
-

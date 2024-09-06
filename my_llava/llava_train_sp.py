@@ -51,7 +51,7 @@ from xtuner._lite.accelerate.fsdp import (RECOMPUTE_MODULES,
                                           dp_sp_lazy_init, layer_auto_wrap_policy)
 from xtuner._lite.chat import CHAT_TEMPLATE_MAP
 from xtuner._lite.datasets import (LlavaCollator, LlavaRawDataset,
-                                   LlavaTokenizeFunction, SoftPackerForLlavaForSP)
+                                   LlavaTokenizeFunction, SoftPackerForLlava)
 from xtuner._lite.datasets.load import (LOAD_FN_MAP, load_datasets,
                                         load_from_cache)
 from xtuner._lite.modelings import register_remote_code
@@ -60,7 +60,7 @@ from xtuner._lite.parallel import (LengthGroupedSampler, ParallelSampler,
                                    get_sp_group, get_sp_mesh,
                                    get_sp_world_size,
                                    reduce_sequence_parallel_loss,
-                                   setup_parallel, split_for_sequence_parallel)
+                                   setup_parallel)
 from llava_model import LlavaForConditionalGeneration
 from torch.distributed.checkpoint.stateful import Stateful
 from xtuner.utils import DEFAULT_PAD_TOKEN_INDEX
@@ -569,7 +569,8 @@ def llava_sft(args):
             delattr(llava_config.text_config, 'auto_map')
         processor = AutoProcessor.from_pretrained(
             args.llava, trust_remote_code=True)
-
+    if sp_size > 1 and args.mirco_batch_size > 1:
+        raise NotImplementedError('Not support mirco_batch_size>1 when sp_size')
     img_processor = processor.image_processor
     _crop_size = img_processor.crop_size
     patch_size = llava_config.vision_config.patch_size
@@ -648,14 +649,13 @@ def llava_sft(args):
     num_datasets = len(_datasets)
     datasets = []
     if args.dset_pack_level and args.dset_pack_level == 'soft':
-        pack_infos = SoftPackerForLlavaForSP.get_pack_infos(_datasets,
-                                                            args.pack_max_length)
+        pack_infos = SoftPackerForLlava.get_pack_infos(_datasets,
+                                                       args.pack_max_length)
         for i in range(num_datasets):
             _infos = pack_infos[i]
             _dset = _datasets[i]
-            _packed_dset = SoftPackerForLlavaForSP(_dset, img_processor,
-                                                   args.pack_max_length, _infos,
-                                                   sp_size=sp_size)
+            _packed_dset = SoftPackerForLlava(_dset, img_processor,
+                                              args.pack_max_length, _infos)
             datasets.append(_packed_dset)
     else:
         for i, dset in enumerate(_datasets):
@@ -979,11 +979,11 @@ def llava_sft(args):
                 with autocast if use_lora else nullcontext():
                     if get_sp_world_size() > 1:
                         sp_group = get_sp_group()
-                        # `dim` is 1 as the shape of tensor is (bs, seq_len, ...)
-                        input_ids = split_for_sequence_parallel(
-                            input_ids, dim=1, sp_group=sp_group)
-                        labels = split_for_sequence_parallel(
-                            labels, dim=1, sp_group=sp_group)
+                    #     # `dim` is 1 as the shape of tensor is (bs, seq_len, ...)
+                    #     input_ids = split_for_sequence_parallel(
+                    #         input_ids, dim=1, sp_group=sp_group)
+                    #     labels = split_for_sequence_parallel(
+                    #         labels, dim=1, sp_group=sp_group)
 
                     outputs = shard_llava(
                         input_ids=input_ids,

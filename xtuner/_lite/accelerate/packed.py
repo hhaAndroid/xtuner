@@ -18,26 +18,27 @@ def packed_sequence(num_tokens, enable=False, sp_size=1):
         position_ids = [torch.arange(num.item()) for num in num_tokens]
         position_ids = torch.cat(position_ids, dim=0).to(device)
         position_ids = position_ids.unsqueeze(0)
-        if sp_size > 1:
-            sp_group = get_sp_group()
-            # `dim` is 1 as the shape of tensor is (bs, seq_len)
-            position_ids = split_for_sequence_parallel(
-                position_ids, dim=1, sp_group=sp_group)
+        # if sp_size > 1:
+        #     sp_group = get_sp_group()
+        #     # `dim` is 1 as the shape of tensor is (bs, seq_len)
+        #     position_ids = split_for_sequence_parallel(
+        #         position_ids, dim=1, sp_group=sp_group)
 
         # ctx.update_info('num_tokens', num_tokens)
         ctx.update_info('position_ids', position_ids)
+        ctx.update_info('num_tokens', num_tokens)  # for sp
         ctx.update_info('cumulative_lengths', cumulative_lengths)
         ctx.update_info('max_seqlen', num_tokens.max())
 
     else:
-        # ctx.update_info('num_tokens', None)
+        ctx.update_info('num_tokens', None)
         ctx.update_info('position_ids', None)
         ctx.update_info('cumulative_lengths', None)
         ctx.update_info('max_seqlen', None)
 
     yield
 
-    # ctx.update_info('num_tokens', None)
+    ctx.update_info('num_tokens', None)
     ctx.update_info('position_ids', None)
     ctx.update_info('cumulative_lengths', None)
     ctx.update_info('max_seqlen', None)
