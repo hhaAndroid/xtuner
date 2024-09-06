@@ -4,6 +4,7 @@ import torch
 import numpy as np
 from PIL import Image
 from torch.nn.utils.rnn import pad_sequence
+import bisect
 
 from xtuner._lite.chat import ChatMessages
 from xtuner.utils import DEFAULT_PAD_TOKEN_INDEX, IGNORE_INDEX
@@ -238,6 +239,143 @@ class SoftPackerForLlava(SoftPackerForText):
             'pixel_values': pixel_values,
             'num_tokens': packed_num_tokens,
             'num_img_tokens': packed_num_img_tokens
+        }
+
+        return packed
+
+
+# naive implementation: 确保单条样本不会被切断
+class SoftPackerForLlavaForSP(SoftPackerForText):
+
+    def __init__(self,
+                 dataset,
+                 image_processor,
+                 max_length=2048,
+                 pack_info=None,
+                 sp_size=1):
+        super().__init__(dataset, max_length, pack_info)
+        self.image_processor = image_processor
+        self.sp_size = sp_size
+        self._cached = False
+
+    def __getitem__(self, item):
+        """Returns a dict containing packed data in the given item.
+
+        Args:
+            item: An index to retrieve packed data.
+
+        Returns:
+            A dict including packed input_ids, labels, and cumulative_len.
+        """
+        if self._cached:
+            self.load_cache()
+
+        packed_items = self.idx_per_pack[item]
+        assert len(packed_items) > 0
+
+        packed_input_ids = []
+        packed_labels = []
+        packed_img_urls = []
+        packed_num_tokens = []
+        packed_num_img_tokens = []
+        packed_num_images = []
+        packed_sample_end = [0]
+        for i in packed_items:
+            data = self.dataset[i]
+            packed_input_ids.extend(data['input_ids'])
+            packed_sample_end.append(len(packed_input_ids))
+            packed_labels.extend(data['labels'])
+
+            _num_tokens = data['num_tokens']
+            packed_num_tokens.append(_num_tokens)
+
+            # 之前将 i 写错为了 item 导致训练 loss 下降非常慢，grad norm 偏小很多
+            # 原因是：整个 batch 内部只有1 张图片是对的，所以 loss 下降特别慢
+            # 同时因为整个 batch 里面算 loss 的 text token 就一点点(每个样本几乎不超过 50 个)，所以 grad norm 偏小
+
+            # image_urls 存在但是可能是 None,因为虽然我们在LlavaTokenizeFunction中处理了如果是纯文本就不会有 image_urls
+            # 但是在启动缓存时候 Dataset.from_list 依然会强行设置 image_urls key
+            if 'image_urls' in data and data['image_urls'] is not None:
+                packed_img_urls.extend(data['image_urls'])
+
+            if 'num_img_tokens' in data and data['num_img_tokens'] is not None:
+                _num_img_tokens = data['num_img_tokens']
+                packed_num_img_tokens.append(_num_img_tokens)
+                packed_num_images.append(len(data['image_urls']))
+            else:
+                packed_num_img_tokens.append(0)
+                packed_num_images.append(0)
+
+        images = []
+        for url in packed_img_urls:
+            img = Image.open(url)
+            images.append(img)
+
+        if len(images):
+            outputs = self.image_processor(images, return_tensors='pt')
+            pixel_values = outputs['pixel_values']
+        else:
+            pixel_values = None
+
+        # 确保单条样本不会被切断
+        len_pre_sample = len(packed_input_ids) // self.sp_size
+
+        new_packed_input_ids = []
+        new_packed_labels = []
+        new_packed_num_tokens = []
+        new_packed_num_img_tokens = []
+        new_packed_num_images = []
+        start_idx = 0
+        for i in range(1, self.sp_size):
+            # 找到边界
+            end_idx = bisect.bisect(packed_sample_end, len_pre_sample * i)
+            # end_idx = min(end_idx, len(packed_input_ids))
+            new_packed_input_ids.append(packed_input_ids[start_idx:end_idx])
+            new_packed_labels.append(packed_labels[start_idx:end_idx])
+
+            _num_tokens = []
+            _num_img_tokens = []
+            _num_images = 0
+            for j in range(start_idx, end_idx):
+                _num_tokens.extend(packed_num_tokens[j])
+                _num_img_tokens.extend(packed_num_img_tokens[j])
+                _num_images += packed_num_images[j]
+            new_packed_num_tokens.append(_num_tokens)
+            new_packed_num_img_tokens.append(_num_img_tokens)
+            new_packed_num_images.append(_num_images)
+
+            start_idx = end_idx
+
+        # 计算每段时间会额外 padding 多少 token
+        max_inputs_len = max([len(ids) for ids in new_packed_input_ids])
+        for i in range(self.sp_size):
+            pad_len = max_inputs_len - len(new_packed_input_ids[i])
+            new_packed_num_tokens[i].append(pad_len)
+            new_packed_input_ids[i].extend([DEFAULT_PAD_TOKEN_INDEX] * pad_len)
+            new_packed_labels[i].extend([IGNORE_INDEX] * pad_len)
+
+        # 将 list 拉平
+        new_packed_input_ids = [item for sublist in new_packed_input_ids for item in sublist]
+        new_packed_labels = [item for sublist in new_packed_labels for item in sublist]
+        new_packed_num_tokens = [item for sublist in new_packed_num_tokens for item in sublist]
+        new_packed_num_img_tokens = [item for sublist in new_packed_num_img_tokens for item in sublist]
+
+        if sum(new_packed_num_tokens) < self.max_length:
+            # TODO: 是否能加速，存在疑问？
+            num_pad_tokens = self.max_length - sum(new_packed_num_tokens)
+            new_packed_input_ids.extend([DEFAULT_PAD_TOKEN_INDEX] * num_pad_tokens)
+            new_packed_labels.extend([IGNORE_INDEX] * num_pad_tokens)
+            new_packed_num_tokens.append(num_pad_tokens)
+        else:
+            new_packed_num_tokens.append(0)
+
+        packed = {
+            'input_ids': new_packed_input_ids,
+            'labels': new_packed_labels,
+            'pixel_values': pixel_values,
+            'num_tokens': new_packed_num_tokens,
+            'num_img_tokens': new_packed_num_img_tokens,
+            'num_images_for_sp': new_packed_num_images
         }
 
         return packed
