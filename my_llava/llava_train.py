@@ -36,7 +36,9 @@ from torch.distributed.fsdp.wrap import _or_policy
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import CosineAnnealingLR, LambdaLR
 from torch.utils.data import ConcatDataset, DataLoader
-from transformers import (AutoConfig, AutoProcessor)
+from transformers import (AutoConfig, AutoModelForCausalLM, AutoProcessor,
+                          CLIPVisionModel, LlavaConfig, CLIPImageProcessor,
+                          LlavaForConditionalGeneration, LlavaProcessor)
 from transformers.utils.import_utils import (is_flash_attn_2_available,
                                              is_torch_sdpa_available)
 
@@ -56,6 +58,7 @@ from xtuner._lite.modelings import register_remote_code
 from xtuner._lite.parallel import LengthGroupedSampler, ParallelSampler
 from llava_model import LlavaForConditionalGeneration
 from torch.distributed.checkpoint.stateful import Stateful
+from xtuner.utils import DEFAULT_PAD_TOKEN_INDEX
 
 logger = get_logger()
 
@@ -77,8 +80,17 @@ def parse_args():
     parser = argparse.ArgumentParser(description='Train LLM')
 
     model_args = parser.add_argument_group('model', 'Model Related Settings')
+
+    # pretrain
+    model_args.add_argument('--llm', help='repo id or local path of the model')
+    model_args.add_argument(
+        '--vit',
+        default='openai/clip-vit-large-patch14-336',
+        help='repo id or local path of the model')
+    # sft
     model_args.add_argument(
         '--llava', help='repo id or local path of the model')
+
     model_args.add_argument(
         '-t',
         '--tokenizer',
@@ -224,7 +236,7 @@ def parse_args():
     data_args.add_argument(
         '--max-keep-ckpts',
         type=int,
-        default=3,
+        default=1,
         help='the maximum number of checkpoints to keep.')
     data_args.add_argument(
         '--num-workers',
@@ -313,53 +325,76 @@ def map_meta_modules(model, meta_model):
     return meta_module_map
 
 
-def build_llava_model(args, config, world_size, dtype=torch.float32):
-    _cfg = copy.deepcopy(config)
+def build_llava_model(args, config, world_size, dtype=torch.float32,
+                      tokenizer=None, device='cpu', resize_emb=False,
+                      is_pretrain=False):
+    with torch.device(device):
+        _cfg = copy.deepcopy(config)
 
-    with LoadWoInit():
-        llava = LlavaForConditionalGeneration.from_pretrained(
-            args.llava, config=_cfg)
+        if is_pretrain:
+            llava = LlavaForConditionalGeneration(_cfg)
+            if device != 'meta':
+                del llava.language_model
+                del llava.vision_tower
+                with LoadWoInit():
+                    llm = AutoModelForCausalLM.from_pretrained(
+                        args.llm, config=_cfg.text_config)
+                    vit = CLIPVisionModel.from_pretrained(
+                        args.vit, config=_cfg.vision_config)
+                llava.language_model = llm
+                llava.vision_tower = vit
+        else:
+            with LoadWoInit():
+                llava = LlavaForConditionalGeneration.from_pretrained(
+                    args.llava, config=_cfg)
 
-    llava.to(dtype)
+        llava.to(dtype)
 
-    if args.freeze_llm or args.llm_use_lora:
-        llava.language_model.requires_grad_(False)
-        if world_size > 1:
-            llava.language_model.to(dtype)
+        if resize_emb:
+            ori_emb_shape = llava.get_input_embeddings().weight.shape
+            llava.resize_token_embeddings(len(tokenizer))
+            new_emb_shape = llava.get_input_embeddings().weight.shape
+            logger.info('Pad the parameters of `embbedings` and `output` from '
+                        f'shape {ori_emb_shape} to shape {new_emb_shape}')
 
-    if args.freeze_vit or args.vit_use_lora:
-        llava.vision_tower.requires_grad_(False)
-        if world_size > 1:
-            llava.vision_tower.to(dtype)
+        if args.freeze_llm or args.llm_use_lora:
+            llava.language_model.requires_grad_(False)
+            if world_size > 1:
+                llava.language_model.to(dtype)
 
-    if args.llm_use_lora:
-        llm = llava.language_model
-        if args.llm_lora_targets is None:
-            llm_cls = llm.__class__.__name__
-            args.llm_lora_targets = LORA_TARGET_MAP[llm_cls]
-        llm_lora_cfg = LoraConfig(
-            target_modules=args.llm_lora_targets,
-            r=args.llm_lora_r,
-            lora_alpha=args.llm_lora_alpha,
-            lora_dropout=args.llm_lora_dropout,
-            bias=args.llm_lora_bias,
-            task_type='CAUSAL_LM')
-        lora_llm = get_peft_model(llm, llm_lora_cfg)
-        llava.language_model = lora_llm
+        if args.freeze_vit or args.vit_use_lora:
+            llava.vision_tower.requires_grad_(False)
+            if world_size > 1:
+                llava.vision_tower.to(dtype)
 
-    if args.vit_use_lora:
-        vit = llava.vision_tower
-        if args.vit_lora_targets is None:
-            vit_cls = vit.__class__.__name__
-            args.vit_lora_targets = LORA_TARGET_MAP[vit_cls]
-        vit_lora_cfg = LoraConfig(
-            target_modules=args.vit_lora_targets,
-            r=args.vit_lora_r,
-            lora_alpha=args.vit_lora_alpha,
-            lora_dropout=args.vit_lora_dropout,
-            bias=args.vit_lora_bias,
-        )
-        llava.vision_tower = get_peft_model(vit, vit_lora_cfg)
+        if args.llm_use_lora:
+            llm = llava.language_model
+            if args.llm_lora_targets is None:
+                llm_cls = llm.__class__.__name__
+                args.llm_lora_targets = LORA_TARGET_MAP[llm_cls]
+            llm_lora_cfg = LoraConfig(
+                target_modules=args.llm_lora_targets,
+                r=args.llm_lora_r,
+                lora_alpha=args.llm_lora_alpha,
+                lora_dropout=args.llm_lora_dropout,
+                bias=args.llm_lora_bias,
+                task_type='CAUSAL_LM')
+            lora_llm = get_peft_model(llm, llm_lora_cfg)
+            llava.language_model = lora_llm
+
+        if args.vit_use_lora:
+            vit = llava.vision_tower
+            if args.vit_lora_targets is None:
+                vit_cls = vit.__class__.__name__
+                args.vit_lora_targets = LORA_TARGET_MAP[vit_cls]
+            vit_lora_cfg = LoraConfig(
+                target_modules=args.vit_lora_targets,
+                r=args.vit_lora_r,
+                lora_alpha=args.vit_lora_alpha,
+                lora_dropout=args.vit_lora_dropout,
+                bias=args.vit_lora_bias,
+            )
+            llava.vision_tower = get_peft_model(vit, vit_lora_cfg)
 
     return llava
 
@@ -396,6 +431,17 @@ def llava_sft(args):
 
     world_size = int(os.environ['WORLD_SIZE'])
     dp_size = world_size
+
+    assert args.pack_max_length % args.max_length == 0
+
+    if args.llm is not None:
+        is_pretrain = True
+        assert args.vit, 'Please specify the `vit` model.'
+        logger.info(f'============ Pretraining mode ============')
+    else:
+        is_pretrain = False
+        assert args.llava, 'Please specify the `llava` model.'
+        logger.info(f'============ SFT mode ============')
 
     # 如果 args.resume 和 args.resume_from 同时都设置了，则以 args.resume_from 为准
     if args.resume_from and args.resume is False:
@@ -479,17 +525,15 @@ def llava_sft(args):
 
         shutil.copy(__file__, args.work_dir)
     # -------------------    Environment  End  ------------------------------ #
-
-    ###########################################################################
-    #                     2. Dataset & Dataloader                             #
-    ###########################################################################
-
-    start_load_data_t = time.time()
-
     chat_template = CHAT_TEMPLATE_MAP[args.chat_template]
 
+    if args.tokenizer is None:
+        if is_pretrain:
+            args.tokenizer = args.llm
+        else:
+            args.tokenizer = args.llava
     tokenizer = AutoTokenizer.from_pretrained(
-        args.tokenizer if args.tokenizer else args.llava,
+        args.tokenizer,
         trust_remote_code=True,
         padding_side='right')
 
@@ -504,23 +548,36 @@ def llava_sft(args):
                 f'{len(tokenizer)}')
 
     register_remote_code()
-    llava_config = AutoConfig.from_pretrained(args.llava)
+    if is_pretrain:
+        _text_config = AutoConfig.from_pretrained(args.llm)
+        _vision_config = AutoConfig.from_pretrained(args.vit).vision_config
+        llava_config = LlavaConfig(
+            _vision_config, _text_config,
+            image_token_index=img_token_id,
+            pad_token_id=DEFAULT_PAD_TOKEN_INDEX)
+        _img_processor = CLIPImageProcessor.from_pretrained(args.vit)
+        processor = LlavaProcessor(_img_processor, tokenizer)
+    else:
+        llava_config = AutoConfig.from_pretrained(args.llava)
+        if hasattr(llava_config.text_config, 'auto_map'):
+            delattr(llava_config.text_config, 'auto_map')
+        processor = AutoProcessor.from_pretrained(
+            args.llava, trust_remote_code=True)
 
-    if hasattr(llava_config.text_config, 'auto_map'):
-        delattr(llava_config.text_config, 'auto_map')
-
-    processor = AutoProcessor.from_pretrained(
-        args.llava, trust_remote_code=True)
     img_processor = processor.image_processor
-
-    _crop_size = processor.image_processor.crop_size
+    _crop_size = img_processor.crop_size
     patch_size = llava_config.vision_config.patch_size
     img_size = (_crop_size['height'], _crop_size['width'])
     per_img_tokens = (img_size[0] // patch_size) * (img_size[1] // patch_size)
 
-    # img_token = chat_template.image_token
-    # assert len(tokenizer.convert_tokens_to_ids([img_token])) == 1
-
+    need_resize_emb = False
+    _llm_vocab_size = llava_config.text_config.vocab_size
+    if _llm_vocab_size < len(tokenizer):
+        need_resize_emb = True
+    ###########################################################################
+    #                     2. Dataset & Dataloader                             #
+    ###########################################################################
+    start_load_data_t = time.time()
     if args.dset_from_cache:
         _datasets = load_from_cache(args.dset_cache_dir)
         dist.barrier()
@@ -556,7 +613,7 @@ def llava_sft(args):
             else:
                 init_fn = partial(
                     LlavaRawDataset,
-                    image_processor=processor.image_processor,
+                    image_processor=img_processor,
                     tokenize_fn=tokenize_fn)
                 # Online tokenization is used when not using a pack dataset,
                 # saving startup time.
@@ -687,11 +744,14 @@ def llava_sft(args):
         llava_config.text_config.attn_implementation = 'sdpa'
     llava_config.text_config.use_cache = False
 
-    with torch.device('meta'):
-        # Ensure all numerical values in the optimizer are fp32.
-        # FSDP will use low precision during forward.
-        meta_llava = build_llava_model(args, llava_config, world_size,
-                                       torch.float32)
+    # Ensure all numerical values in the optimizer are fp32.
+    # FSDP will use low precision during forward.
+    meta_llava = build_llava_model(args, llava_config, world_size,
+                                   torch.float32,
+                                   tokenizer=tokenizer,
+                                   device='meta',
+                                   resize_emb=need_resize_emb,
+                                   is_pretrain=is_pretrain)
 
     if pack_batch or args.dset_pack_level:
         dispatch_modules(meta_llava)
@@ -700,8 +760,11 @@ def llava_sft(args):
     # same model into the CPU, wasting memory
     if rank == 0:
         logger.info(f'=====[Build Model]=======')
-        with torch.device('cpu'):
-            llava = build_llava_model(args, llava_config, world_size, dtype)
+        llava = build_llava_model(args, llava_config, world_size, dtype,
+                                  tokenizer=tokenizer,
+                                  device='cpu',
+                                  resize_emb=need_resize_emb,
+                                  is_pretrain=is_pretrain)
         rank0_meta_llava = copy.deepcopy(meta_llava)
         meta_llava_map = map_meta_modules(llava, meta_llava)
     else:
@@ -849,6 +912,10 @@ def llava_sft(args):
     save_hf_ckpt_names = []
     save_pt_ckpt_names = []
     max_keep_ckpts = args.max_keep_ckpts
+    if max_keep_ckpts <= 0:
+        # 全部都保存
+        max_keep_ckpts = 100000000
+
     for step in range(start_step, total_steps):
 
         epoch = step // per_epoch_steps
@@ -1024,7 +1091,6 @@ def llava_sft(args):
                 logger.info(
                     '[Checkpoint] During saving checkpoint, the peak GPU '
                     f'memory is {max_memory / 1024 ** 3:.1f}GB.')
-
 
     train_cost_time = time.time() - start_train_t
     logger.info(f'[Train] Cost {train_cost_time}s')

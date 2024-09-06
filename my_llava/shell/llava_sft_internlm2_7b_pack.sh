@@ -31,7 +31,7 @@ HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 srun -p ${PARTITION} --time 1-00:00
   --kill-on-bad-exit=1 \
   --quotatype=${QUOTA_TYPE} \
   ${SRUN_ARGS} \
-  python -u llava_sft.py \
+  python -u llava_train.py \
   --llava work_dirs/llava_pretrain_internlm2_7b_pack/20240904112552/hf-2114 \
   --tokenizer /mnt/hwfile/xtuner/huanghaian/model/internlm2-chat-7b \
   --chat-template 'internlm2' \
@@ -53,7 +53,6 @@ HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 srun -p ${PARTITION} --time 1-00:00
   --checkpoint-drop-optimizer \
   --shard-strategy 'zero2' \
   --dset-pack-level 'soft' \
-  --group-by-length \
   --dset-cache-dir /mnt/petrelfs/huanghaian/code/mm/xtuner/my_llava/llava_sft_cache \
   --dset-from-cache \
   2>&1 | tee -a "${OUTPUT_DIR}/training_log.txt"

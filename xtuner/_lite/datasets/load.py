@@ -266,7 +266,7 @@ def load_local_datasets(paths,
         file = files[ind]
         suffix = os.path.splitext(file)[-1]
         dset = LOAD_FN_MAP[suffix](file)
-        logger.debug(f'[File {ind}] Raw Sample:\n{dset[0]}')
+        logger.info(f'[File {ind}] Raw Sample:\n{dset[0]}')
 
         map_fn = file_map_fns[ind]
         if map_fn:
