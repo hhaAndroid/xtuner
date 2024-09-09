@@ -263,12 +263,11 @@ class LengthGroupedSampler(Sampler):
         """Iterate the indices."""
         generator = torch.Generator()
         generator.manual_seed(self.seed + self.epoch)
-        seed = self.seed + self.epoch
         indices = get_length_grouped_indices(
             max_lengths=self.max_lengths,
             group_batch_size=self.group_batch_size,
             dp_size=self.world_size,
-            seed=seed)
+            generator=generator)
         assert len(set(indices)) == len(indices)
         # add extra samples to make it evenly divisible
         if self.round_up:
