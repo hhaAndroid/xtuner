@@ -133,6 +133,7 @@ def varlen_flash_attn(
         max_seqlen,
         dropout_p=0.,
         causal=True,
+        softmax_scale=None,
         window_size=(-1, -1),  # -1 means infinite context window
 ):
     q_unpad, k_unpad, v_unpad = query_states.flatten(0, 1), key_states.flatten(
@@ -148,6 +149,7 @@ def varlen_flash_attn(
         dropout_p=dropout_p,
         return_attn_probs=False,
         causal=causal,
+        softmax_scale=softmax_scale,
         window_size=window_size)
     attn_output = attn_output.unsqueeze(0)
     return attn_output

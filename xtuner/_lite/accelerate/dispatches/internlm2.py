@@ -7,6 +7,7 @@ from mmengine import MessageHub
 from transformers.cache_utils import StaticCache
 
 from ._attention import SUPPORT_FLASH2, flash_attn_wo_mask, varlen_flash_attn
+import torch.nn.functional as F
 
 
 class InternLM2RotaryEmbedding(torch.nn.Module):
@@ -232,5 +233,140 @@ def internlm2_varlen_attn_forward(
            Optional[Tuple[torch.Tensor]]]:
 
     return _internlm2_varlen_attn_forward(self, hidden_states, attention_mask,
+                                          position_ids, past_key_value,
+                                          output_attentions, use_cache)
+
+
+def _internlm2_mla_varlen_attn_forward(
+    self,
+    hidden_states: torch.Tensor,
+    attention_mask: Optional[torch.Tensor] = None,
+    position_ids: Optional[torch.LongTensor] = None,
+    past_key_value: Optional[Tuple[torch.Tensor]] = None,
+    output_attentions: bool = False,
+    use_cache: bool = False,
+    cache_position: Optional[torch.LongTensor] = None,
+) -> Tuple[torch.Tensor, Optional[torch.Tensor],
+           Optional[Tuple[torch.Tensor]]]:
+    output_attentions = False
+
+    bsz, q_len, _ = hidden_states.size()
+    attn_context = MessageHub.get_instance('packed_sequence')
+
+    position_ids = attn_context.get_info('position_ids')
+    assert position_ids.size(1) == q_len, f'{position_ids.size(1)} {q_len}'
+
+    q = self.q_b_proj(self.q_a_layernorm(self.q_a_proj(hidden_states)))
+    q = q.view(bsz, q_len, self.num_heads, self.q_head_dim).transpose(1, 2)
+    q_nope, q_pe = torch.split(
+        q, [self.qk_nope_head_dim, self.qk_rope_head_dim], dim=-1
+    )
+
+    # Flash attention requires the input to have the shape
+    # batch_size x seq_length x head_dim x hidden_dim
+    # therefore we just need to keep the original shape
+    compressed_kv = self.kv_a_proj_with_mqa(hidden_states)
+    compressed_kv, k_pe = torch.split(
+        compressed_kv, [self.kv_lora_rank, self.qk_rope_head_dim], dim=-1
+    )
+    k_pe = k_pe.view(bsz, q_len, 1, self.qk_rope_head_dim).transpose(1, 2)
+    kv = (
+        self.kv_b_proj(self.kv_a_layernorm(compressed_kv))
+        .view(bsz, q_len, self.num_heads, self.qk_nope_head_dim + self.v_head_dim)
+        .transpose(1, 2)
+    )
+
+    k_nope, value_states = torch.split(
+        kv, [self.qk_nope_head_dim, self.v_head_dim], dim=-1
+    )
+
+    kv_seq_len = value_states.shape[-2]
+    if past_key_value is not None:
+        kv_seq_len += past_key_value.get_usable_length(kv_seq_len, self.layer_idx)
+
+    cos, sin = self.rotary_emb(value_states, seq_len=kv_seq_len)
+    q_pe, k_pe = apply_rotary_pos_emb(q_pe, k_pe, cos, sin, position_ids)
+
+    query_states = k_pe.new_empty(bsz, self.num_heads, q_len, self.q_head_dim)
+    query_states[:, :, :, : self.qk_nope_head_dim] = q_nope
+    query_states[:, :, :, self.qk_nope_head_dim:] = q_pe
+
+    key_states = k_pe.new_empty(bsz, self.num_heads, q_len, self.q_head_dim)
+    key_states[:, :, :, : self.qk_nope_head_dim] = k_nope
+    key_states[:, :, :, self.qk_nope_head_dim:] = k_pe
+
+    if self.q_head_dim != self.v_head_dim:
+        value_states = F.pad(value_states, [0, self.q_head_dim - self.v_head_dim])
+
+    if past_key_value is not None:
+        cache_kwargs = {"sin": sin, "cos": cos}  # Specific to RoPE models
+        key_states, value_states = past_key_value.update(
+            key_states, value_states, self.layer_idx, cache_kwargs
+        )
+
+    # TODO: These transpose are quite inefficient but Flash Attention requires the layout [batch_size, sequence_length, num_heads, head_dim]. We would need to refactor the KV cache
+    # to be able to avoid many of these transpose/reshape/view.
+    query_states = query_states.transpose(1, 2)
+    key_states = key_states.transpose(1, 2)
+    value_states = value_states.transpose(1, 2)
+
+    dropout_rate = 0.0
+
+    input_dtype = query_states.dtype
+    if input_dtype == torch.float32:
+        # Handle the case where the model is quantized
+        if hasattr(self.config, "_pre_quantization_dtype"):
+            target_dtype = self.config._pre_quantization_dtype
+        elif torch.is_autocast_enabled():
+            target_dtype = torch.get_autocast_gpu_dtype()
+        else:
+            target_dtype = self.q_a_proj.weight.dtype
+
+        query_states = query_states.to(target_dtype)
+        key_states = key_states.to(target_dtype)
+        value_states = value_states.to(target_dtype)
+
+    assert SUPPORT_FLASH2
+    cumulative_lengths = attn_context.get_info('cumulative_lengths')
+    if cumulative_lengths is not None and SUPPORT_FLASH2 and bsz == 1:
+        max_seqlen = attn_context.get_info('max_seqlen')
+        attn_output = varlen_flash_attn(query_states, key_states, value_states,
+                                        cumulative_lengths, max_seqlen, softmax_scale=self.softmax_scale)
+    else:
+        attn_output = flash_attn_wo_mask(
+            query_states,
+            key_states,
+            value_states,
+            causal=True,
+            softmax_scale=self.softmax_scale,
+            training=self.training)
+
+    if self.q_head_dim != self.v_head_dim:
+        attn_output = attn_output[:, :, :, : self.v_head_dim]
+
+    attn_output = attn_output.reshape(
+        bsz, q_len, self.num_heads * self.v_head_dim
+    ).contiguous()
+    attn_output = self.o_proj(attn_output)
+
+    if not output_attentions:
+        attn_weights = None
+
+    return attn_output, attn_weights, past_key_value
+
+
+def internlm2_mla_varlen_attn_forward(
+    self,
+    hidden_states: torch.Tensor,
+    attention_mask: Optional[torch.Tensor] = None,
+    position_ids: Optional[torch.LongTensor] = None,
+    past_key_value: Optional[Tuple[torch.Tensor]] = None,
+    output_attentions: bool = False,
+    use_cache: bool = False,
+    cache_position: Optional[torch.LongTensor] = None,
+) -> Tuple[torch.Tensor, Optional[torch.Tensor],
+           Optional[Tuple[torch.Tensor]]]:
+
+    return _internlm2_mla_varlen_attn_forward(self, hidden_states, attention_mask,
                                           position_ids, past_key_value,
                                           output_attentions, use_cache)

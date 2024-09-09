@@ -44,6 +44,13 @@ def dispatch_rms_norm_forward(module):
     return rms_norm_forward.__name__
 
 
+def dispatch_internlm_mla_varlen_attn_forward(module):
+    assert module.__class__.__name__ == 'InternLM2MLAFlashAttention2'
+    from .internlm2 import internlm2_mla_varlen_attn_forward
+    _dispatch_forward_fn(module, internlm2_mla_varlen_attn_forward)
+    return internlm2_mla_varlen_attn_forward.__name__
+
+
 DISPATCH_MAP = {
     'InternLM2FlashAttention2': dispatch_internlm_varlen_attn_forward,
     'CLIPAttention': dispatch_clip_attn_forward,
@@ -52,6 +59,7 @@ DISPATCH_MAP = {
     'LlamaRMSNorm': dispatch_rms_norm_forward,
     'Qwen2FlashAttention2': dispatch_qwen2_varlen_attn_forward,
     'Qwen2RMSNorm': dispatch_rms_norm_forward,
+    'InternLM2MLAFlashAttention2': dispatch_internlm_mla_varlen_attn_forward,
 }
 
 
