@@ -10,7 +10,9 @@ from xtuner._lite.parallel import (LengthGroupedSampler, ParallelSampler,
                                    get_sp_group, get_sp_mesh,
                                    get_sp_world_size,
                                    reduce_sequence_parallel_loss,
-                                   setup_parallel)
+                                   setup_parallel,get_sp_group, split_for_sequence_parallel)
+
+from mmengine import MessageHub
 
 
 class LlavaForConditionalGeneration(HF_LlavaForConditionalGeneration):
@@ -45,17 +47,19 @@ class LlavaForConditionalGeneration(HF_LlavaForConditionalGeneration):
             else self.config.vision_feature_select_strategy
         )
 
+        sp_size = get_sp_world_size()
+
         if inputs_embeds is None:
             # 1. Extra the input embeddings
-            sp_size = get_sp_world_size()
             sp_rank = get_sp_mesh().rank
             sp_group = get_sp_group()
             if sp_size > 1:
+                orig_len_input_ids = input_ids.shape[1]
                 assert input_ids.shape[0] == 1, 'batch size must be 1 for sequence parallel'
                 # input_ids 均匀切分
-                if len(input_ids) % sp_size != 0:  # 确保能均匀切
-                    max_inputs_len = math.ceil(len(input_ids) / sp_size) * sp_size
-                    _temp = torch.full((1, max_inputs_len - len(input_ids)), self.config.pad_token_id,
+                if orig_len_input_ids % sp_size != 0:  # 确保能均匀切
+                    max_inputs_len = math.ceil(orig_len_input_ids / sp_size) * sp_size
+                    _temp = torch.full((1, max_inputs_len - orig_len_input_ids), self.config.pad_token_id,
                                        dtype=input_ids.dtype,
                                        device=input_ids.device)
                     input_ids = torch.cat([input_ids, _temp], dim=-1)
@@ -67,6 +71,8 @@ class LlavaForConditionalGeneration(HF_LlavaForConditionalGeneration):
                 buffer = [None] * sp_size
                 dist.all_gather_object(buffer, inputs_embeds, group=sp_group)
                 inputs_embeds = torch.cat(buffer, dim=-1)
+                # 移除原始的pad
+                inputs_embeds = inputs_embeds[:, :orig_len_input_ids]
 
             # ------------- start add this ----------------
             if pixel_values is None:
@@ -100,9 +106,9 @@ class LlavaForConditionalGeneration(HF_LlavaForConditionalGeneration):
                 if sp_size > 1:
                     # pixel_values 均匀切分
                     orig_img_batch = pixel_values.shape[0]
-                    if pixel_values.shape[0] % sp_size != 0:  # 确保能均匀切
-                        max_inputs_len = math.ceil(pixel_values.shape[0] / sp_size) * sp_size
-                        pad_img_batch = max_inputs_len - pixel_values.shape[0]
+                    if orig_img_batch % sp_size != 0:  # 确保能均匀切
+                        max_inputs_len = math.ceil(orig_img_batch / sp_size) * sp_size
+                        pad_img_batch = max_inputs_len - orig_img_batch
                         pad_pixel_values_ = torch.zeros(pad_img_batch, 3,
                                                         pixel_values.shape[2],
                                                         pixel_values.shape[3],
@@ -176,7 +182,20 @@ class LlavaForConditionalGeneration(HF_LlavaForConditionalGeneration):
                 position_ids = torch.sum(attention_mask, dim=1).unsqueeze(-1) - 1
 
         # 此处开始进行切分处理
+        # 只需要处理 inputs_embeds 和 position_ids，其余用不到
+        attn_context = MessageHub.get_instance('packed_sequence')
+        position_ids = attn_context.get_info('position_ids')
+        assert position_ids.size(1) == inputs_embeds.shape[1], f'{position_ids.size(1)} {inputs_embeds.shape[1]}'
 
+        if sp_size > 1:
+            sp_group = get_sp_group()
+            # `dim` is 1 as the shape of tensor is (bs, seq_len)
+            position_ids = split_for_sequence_parallel(
+                position_ids, dim=1, sp_group=sp_group)
+            inputs_embeds = split_for_sequence_parallel(
+                inputs_embeds, dim=1, sp_group=sp_group)
+            attn_context.update_info('position_ids', position_ids)
+            attn_context.update_info('inputs_embeds', inputs_embeds)
 
         outputs = self.language_model(
             attention_mask=attention_mask,

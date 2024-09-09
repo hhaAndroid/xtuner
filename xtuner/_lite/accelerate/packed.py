@@ -26,19 +26,19 @@ def packed_sequence(num_tokens, enable=False, sp_size=1):
 
         # ctx.update_info('num_tokens', num_tokens)
         ctx.update_info('position_ids', position_ids)
-        ctx.update_info('num_tokens', num_tokens)  # for sp
+        # ctx.update_info('num_tokens', num_tokens)  # for sp
         ctx.update_info('cumulative_lengths', cumulative_lengths)
         ctx.update_info('max_seqlen', num_tokens.max())
 
     else:
-        ctx.update_info('num_tokens', None)
+        # ctx.update_info('num_tokens', None)
         ctx.update_info('position_ids', None)
         ctx.update_info('cumulative_lengths', None)
         ctx.update_info('max_seqlen', None)
 
     yield
 
-    ctx.update_info('num_tokens', None)
+    # ctx.update_info('num_tokens', None)
     ctx.update_info('position_ids', None)
     ctx.update_info('cumulative_lengths', None)
     ctx.update_info('max_seqlen', None)
