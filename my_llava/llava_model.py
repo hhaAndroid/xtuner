@@ -188,7 +188,8 @@ class LlavaForConditionalGeneration(HF_LlavaForConditionalGeneration):
         # 只需要处理 inputs_embeds 和 position_ids，其余用不到
         attn_context = MessageHub.get_instance('packed_sequence')
         position_ids = attn_context.get_info('position_ids')
-        assert position_ids.size(1) == inputs_embeds.shape[1], f'{position_ids.size(1)} {inputs_embeds.shape[1]}'
+        assert position_ids.size(1) == inputs_embeds.shape[1] == labels.shape[1], \
+            f'{position_ids.size(1)} {inputs_embeds.shape[1]} {labels.shape[1]}'
 
         if sp_size > 1:
             sp_group = get_sp_group()
