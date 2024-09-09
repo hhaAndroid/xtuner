@@ -200,6 +200,7 @@ class LlavaForConditionalGeneration(HF_LlavaForConditionalGeneration):
                 inputs_embeds, dim=1, sp_group=sp_group)
             labels = split_for_sequence_parallel(
                 labels, dim=1, sp_group=sp_group)
+            attention_mask = None  # 不需要
             attn_context.update_info('position_ids', position_ids)
         outputs = self.language_model(
             attention_mask=attention_mask,
