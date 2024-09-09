@@ -70,6 +70,34 @@ def apply_rotary_pos_emb(q, k, cos, sin, position_ids=None, unsqueeze_dim=1):
     k_embed = (k * cos) + (rotate_half(k) * sin)
     return q_embed, k_embed
 
+def apply_rotary_pos_emb_mla(q, k, cos, sin, position_ids=None, unsqueeze_dim=1):  # pylint: disable=unused-argument
+    """Applies Rotary Position Embedding to the query and key tensors.
+
+    Args:
+        q (`torch.Tensor`): The query tensor.
+        k (`torch.Tensor`): The key tensor.
+        cos (`torch.Tensor`): The cosine part of the rotary embedding.
+        sin (`torch.Tensor`): The sine part of the rotary embedding.
+        position_ids (`torch.Tensor`, *optional*):
+            Deprecated and unused.
+        unsqueeze_dim (`int`, *optional*, defaults to 1):
+            The 'unsqueeze_dim' argument specifies the dimension along which to unsqueeze cos[position_ids] and
+            sin[position_ids] so that they can be properly broadcasted to the dimensions of q and k. For example, note
+            that cos[position_ids] and sin[position_ids] have the shape [batch_size, seq_len, head_dim]. Then, if q and
+            k have the shape [batch_size, heads, seq_len, head_dim], then setting unsqueeze_dim=1 makes
+            cos[position_ids] and sin[position_ids] broadcastable to the shapes of q and k. Similarly, if q and k have
+            the shape [batch_size, seq_len, heads, head_dim], then set unsqueeze_dim=2.
+    Returns:
+        `tuple(torch.Tensor)` comprising of the query and key tensors rotated using the Rotary Position Embedding.
+    """
+    orig_dtype = k.dtype
+    cos = cos[position_ids].unsqueeze(unsqueeze_dim)  # [bs, 1, seq_len, dim]
+    sin = sin[position_ids].unsqueeze(unsqueeze_dim)  # [bs, 1, seq_len, dim]
+    q_fp32 = q.to(dtype=torch.float32, device=q.device)
+    k_fp32 = k.to(dtype=torch.float32, device=k.device)
+    q_embed = (q_fp32 * cos) + (rotate_half(q_fp32) * sin)
+    k_embed = (k_fp32 * cos) + (rotate_half(k_fp32) * sin)
+    return q_embed.to(dtype=orig_dtype), k_embed.to(dtype=orig_dtype)
 
 def repeat_kv(hidden_states: torch.Tensor, n_rep: int) -> torch.Tensor:
     """This is the equivalent of torch.repeat_interleave(x, dim=1,
@@ -285,7 +313,7 @@ def _internlm2_mla_varlen_attn_forward(
         kv_seq_len += past_key_value.get_usable_length(kv_seq_len, self.layer_idx)
 
     cos, sin = self.rotary_emb(value_states, seq_len=kv_seq_len)
-    q_pe, k_pe = apply_rotary_pos_emb(q_pe, k_pe, cos, sin, position_ids)
+    q_pe, k_pe = apply_rotary_pos_emb_mla(q_pe, k_pe, cos, sin, position_ids)
 
     query_states = k_pe.new_empty(bsz, self.num_heads, q_len, self.q_head_dim)
     query_states[:, :, :, : self.qk_nope_head_dim] = q_nope
