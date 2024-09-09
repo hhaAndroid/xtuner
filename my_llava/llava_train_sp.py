@@ -794,13 +794,13 @@ def llava_sft(args):
         policies.append(all_required_grad_wrap_policy)
 
     if args.shard_strategy == 'full':
-        fsdp_device_mesh = dp_mesh
+        fsdp_device_mesh = init_device_mesh('cuda', (world_size, ))
         strategy = ShardingStrategy.FULL_SHARD
     elif args.shard_strategy == 'no':
-        fsdp_device_mesh = dp_mesh
+        fsdp_device_mesh = init_device_mesh('cuda', (world_size, ))
         strategy = ShardingStrategy.NO_SHARD
     elif args.shard_strategy == 'zero2':
-        fsdp_device_mesh = dp_mesh
+        fsdp_device_mesh = init_device_mesh('cuda', (world_size, ))
         strategy = ShardingStrategy.SHARD_GRAD_OP
     elif args.shard_strategy == 'hybrid':
         fsdp_device_mesh = init_device_mesh('cuda', (dp_size // 8, 8))
