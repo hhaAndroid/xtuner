@@ -58,3 +58,8 @@ srun -p llm_razor --job-name=eval --time=02:00:00 --cpus-per-task=16 --nodes=1 -
 - 目前如果不开启 soft packing，那么数据是不需要缓存下来的，没有很大必要，这会导致启动时间变慢
 - 目前已经支持 resume，只需要 --resume 即可，如果想指定某个 checkpoint，可以通过 --resume-from 参数指定
 - 考虑到在保存了优化器等状态情况下，会需要非常多存储，因此默认的 --max-keep-ckpts 是 1
+
+# 序列并行
+
+暂时代码没有合并
+

@@ -15,6 +15,39 @@ from xtuner._lite.parallel import (LengthGroupedSampler, ParallelSampler,
 from mmengine import MessageHub
 
 
+class _GatherFromSeqParallelRegion(torch.autograd.Function):
+    """Gather the input from model parallel region and concatinate."""
+
+    @staticmethod
+    def forward(ctx, input_, dim):  # gather
+        ctx.dim = dim
+        sp_group = get_sp_group()
+        sp_world_size = get_sp_world_size()
+        if sp_world_size == 1:
+            return input_
+
+        tensor_list = [torch.empty_like(input_) for _ in range(sp_world_size)]
+        torch.distributed.all_gather(tensor_list, input_, group=sp_group)
+
+        # Note: torch.cat already creates a contiguous tensor.
+        output = torch.cat(tensor_list, dim=dim).contiguous()
+        return output
+
+    @staticmethod
+    def backward(ctx, grad_output):  # split
+        sp_group = get_sp_group()
+        sp_rank = dist.get_rank(sp_group)
+        sp_world_size = get_sp_world_size()
+        if sp_world_size == 1:
+            return grad_output
+
+        # Split along last dimension.
+        last_dim_size = grad_output.size()[ctx.dim] // sp_world_size
+        tensor_list = torch.split(grad_output, last_dim_size, dim=ctx.dim)
+        output = tensor_list[sp_rank].contiguous()
+        return output, None
+
+
 class LlavaForConditionalGeneration(HF_LlavaForConditionalGeneration):
     def forward(
             self,
@@ -68,15 +101,17 @@ class LlavaForConditionalGeneration(HF_LlavaForConditionalGeneration):
             inputs_embeds = self.get_input_embeddings()(input_ids)
             if sp_size > 1:
                 # 重新合并
-                tensor_list = [torch.empty_like(inputs_embeds) for _ in range(sp_size)]
-                dist.all_gather(tensor_list, inputs_embeds, group=sp_group)
-                inputs_embeds = torch.cat(tensor_list, dim=1).contiguous()
+                inputs_embeds = _GatherFromSeqParallelRegion.apply(inputs_embeds, 1)
+                # tensor_list = [torch.empty_like(inputs_embeds) for _ in range(sp_size)]
+                # dist.all_gather(tensor_list, inputs_embeds, group=sp_group)
+                # inputs_embeds = torch.cat(tensor_list, dim=1).contiguous()
                 # 移除原始的pad
                 inputs_embeds = inputs_embeds[:, :orig_len_input_ids]
 
-                tensor_list = [torch.empty_like(input_ids) for _ in range(sp_size)]
-                dist.all_gather(tensor_list, input_ids, group=sp_group)
-                input_ids = torch.cat(tensor_list, dim=1).contiguous()
+                input_ids = _GatherFromSeqParallelRegion.apply(input_ids, 1)
+                # tensor_list = [torch.empty_like(input_ids) for _ in range(sp_size)]
+                # dist.all_gather(tensor_list, input_ids, group=sp_group)
+                # input_ids = torch.cat(tensor_list, dim=1).contiguous()
                 # 移除原始的pad
                 input_ids = input_ids[:, :orig_len_input_ids].contiguous()
             # ------------- start add this ----------------
@@ -142,9 +177,10 @@ class LlavaForConditionalGeneration(HF_LlavaForConditionalGeneration):
                 # 切分后合并
                 if sp_size > 1:
                     # 重新合并
-                    tensor_list = [torch.empty_like(image_features) for _ in range(sp_size)]
-                    dist.all_gather(tensor_list, image_features, group=sp_group)
-                    image_features = torch.cat(tensor_list, dim=0).contiguous()
+                    image_features = _GatherFromSeqParallelRegion.apply(image_features, 0)
+                    # tensor_list = [torch.empty_like(image_features) for _ in range(sp_size)]
+                    # dist.all_gather(tensor_list, image_features, group=sp_group)
+                    # image_features = torch.cat(tensor_list, dim=0).contiguous()
                     # 移除多余的pad
                     image_features = image_features[:orig_img_batch]
                 inputs_embeds, attention_mask, labels, position_ids = self._merge_input_ids_with_image_features(
