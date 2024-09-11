@@ -443,7 +443,7 @@ def llava_sft(args):
     world_size = int(os.environ['WORLD_SIZE'])
     sp_size = args.sp_size
 
-    setup_parallel(sp_size=sp_size)
+    setup_parallel(sp_size=sp_size, ring_size=args.ring_size)
     dp_mesh = get_dp_mesh()
     sp_mesh = get_sp_mesh()
     dp_size = get_dp_world_size()
@@ -977,10 +977,7 @@ def llava_sft(args):
             num_tokens = data['num_tokens'].cuda(non_blocking=True)
             num_img_tokens = data['num_img_tokens'].cuda(non_blocking=True)
 
-            packed_ctx = packed_sequence(
-                num_tokens, enable=pack_batch,
-                sp_size=get_sp_world_size(),
-                ring_size=args.ring_size)
+            packed_ctx = packed_sequence(num_tokens, enable=pack_batch)
 
             with packed_ctx:
                 with autocast if use_lora else nullcontext():

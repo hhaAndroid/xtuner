@@ -56,17 +56,90 @@ def setup_dp():
     _DP_GROUP = device_mesh.get_group('dp')
 
 
-def setup_parallel(sp_size=1, tp_size=1):
+_SP_ULYESS_MESH = None
+_SP_RING_MESH = None
+_SP_ULYESS_GROUP = None
+_SP_RING_GROUP = None
+_SP_ULYESS_WORLD_SIZE = None
+_SP_RING_WORLD_SIZE = None
+
+
+def set_seq_parallel_pg(sp_ulysses_degree, sp_ring_degree):
+    """
+    sp_ulysses_degree x sp_ring_degree = seq_parallel_degree
+    (ulysses_degree, dp_degree)
+    """
+    world_size = dist.get_world_size()
+    sp_size = sp_ulysses_degree * sp_ring_degree
+    dp_size = world_size // sp_size
+    global_device_mesh = init_device_mesh(
+        'cuda', (dp_size, sp_size), mesh_dim_names=('dp', 'sp'))
+    device_mesh = init_device_mesh(
+        'cuda', (dp_size, sp_ulysses_degree, sp_ring_degree), mesh_dim_names=('dp', 'sp_ulysses', 'sp_ring'))
+    global _DP_MESH, _SP_ULYESS_MESH, _SP_RING_MESH, _SP_MESH
+    _DP_MESH = device_mesh['dp']
+    _SP_ULYESS_MESH = device_mesh['sp_ulysses']
+    _SP_RING_MESH = device_mesh['sp_ring']
+    _SP_MESH = global_device_mesh['sp']
+
+    global _DP_GROUP, _SP_ULYESS_GROUP, _SP_RING_GROUP, _SP_GROUP
+    _DP_GROUP = device_mesh.get_group('dp')
+    _SP_ULYESS_GROUP = device_mesh.get_group('sp_ulysses')
+    _SP_RING_GROUP = device_mesh.get_group('sp_ring')
+    _SP_GROUP = global_device_mesh.get_group('sp')
+
+
+def setup_parallel(sp_size=1, tp_size=1, ring_size=1):
     assert not (sp_size > 1 and tp_size > 1), \
         ('DeepSpeed Sequence Parallel can not be used with '
          'Megatron-LM Tensor Parallel')
 
     if sp_size > 1:
-        setup_sp(sp_size)
+        assert sp_size % ring_size == 0
+        sp_ulysses_size = sp_size // ring_size
+        set_seq_parallel_pg(sp_ulysses_size, ring_size)
     elif tp_size > 1:
         setup_tp(tp_size)
     else:
         setup_dp()
+
+
+def get_ulysess_mesh():
+    return _SP_ULYESS_MESH
+
+
+def get_ring_mesh():
+    return _SP_RING_MESH
+
+
+def get_ulysess_group():
+    return _SP_ULYESS_GROUP
+
+
+def get_ring_group():
+    return _SP_RING_GROUP
+
+
+def get_ulysess_world_size():
+    global _SP_ULYESS_WORLD_SIZE
+    if _SP_ULYESS_WORLD_SIZE is not None:
+        return _SP_ULYESS_WORLD_SIZE
+    if not dist.is_initialized() or (_SP_ULYESS_GROUP is None):
+        _SP_ULYESS_WORLD_SIZE = 1
+    else:
+        _SP_ULYESS_WORLD_SIZE = dist.get_world_size(_SP_ULYESS_GROUP)
+    return _SP_ULYESS_WORLD_SIZE
+
+
+def get_ring_world_size():
+    global _SP_RING_WORLD_SIZE
+    if _SP_RING_WORLD_SIZE is not None:
+        return _SP_RING_WORLD_SIZE
+    if not dist.is_initialized() or (_SP_RING_GROUP is None):
+        _SP_RING_WORLD_SIZE = 1
+    else:
+        _SP_RING_WORLD_SIZE = dist.get_world_size(_SP_RING_GROUP)
+    return _SP_RING_WORLD_SIZE
 
 
 def get_dp_mesh():
@@ -124,3 +197,4 @@ def get_tp_world_size():
     else:
         _TP_WORLD_SIZE = dist.get_world_size(_TP_GROUP)
     return _TP_WORLD_SIZE
+

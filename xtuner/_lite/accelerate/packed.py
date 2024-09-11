@@ -6,7 +6,7 @@ from xtuner._lite.parallel import get_sp_group, split_for_sequence_parallel
 
 
 @contextmanager
-def packed_sequence(num_tokens, enable=False, sp_size=1, ring_size=1):
+def packed_sequence(num_tokens, enable=False, sp_size=1):
     from mmengine import MessageHub
     ctx = MessageHub.get_instance('packed_sequence')
 
@@ -29,14 +29,12 @@ def packed_sequence(num_tokens, enable=False, sp_size=1, ring_size=1):
         # ctx.update_info('num_tokens', num_tokens)  # for sp
         ctx.update_info('cumulative_lengths', cumulative_lengths)
         ctx.update_info('max_seqlen', num_tokens.max())
-        ctx.update_info('ring_size', ring_size)
 
     else:
         # ctx.update_info('num_tokens', None)
         ctx.update_info('position_ids', None)
         ctx.update_info('cumulative_lengths', None)
         ctx.update_info('max_seqlen', None)
-        ctx.update_info('ring_size', None)
 
     yield
 
@@ -44,4 +42,4 @@ def packed_sequence(num_tokens, enable=False, sp_size=1, ring_size=1):
     ctx.update_info('position_ids', None)
     ctx.update_info('cumulative_lengths', None)
     ctx.update_info('max_seqlen', None)
-    ctx.update_info('ring_size', None)
+
