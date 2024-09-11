@@ -5,8 +5,11 @@ import torch
 from einops import rearrange
 from mmengine import MessageHub
 from transformers.cache_utils import StaticCache
+import torch.distributed as dist
 
 from ._attention import SUPPORT_FLASH2, flash_attn_wo_mask, varlen_flash_attn
+from xtuner._lite.yunchang import llama3_flash_attn_prepare_cu_seqlens, llama3_flash_attn_varlen_func
+from xtuner._lite.parallel import get_sp_group
 
 
 class InternLM2RotaryEmbedding(torch.nn.Module):
@@ -198,9 +201,41 @@ def _internlm2_varlen_attn_forward(
     assert SUPPORT_FLASH2
     cumulative_lengths = attn_context.get_info('cumulative_lengths')
     if cumulative_lengths is not None and SUPPORT_FLASH2 and bsz == 1:
-        max_seqlen = attn_context.get_info('max_seqlen')
-        attn_output = varlen_flash_attn(query_states, key_states, value_states,
-                                        cumulative_lengths, max_seqlen)
+        ring_size = attn_context.get_info('ring_size')
+        if ring_size > 1:
+            assert cumulative_lengths[-1] % ring_size == 0, f'==={cumulative_lengths[-1]}===='
+            sp_group = get_sp_group()
+            sp_rank = dist.get_rank(sp_group)
+            (
+                local_cu_seqlens_q,
+                local_cu_seqlens_k,
+                max_seqlen_q,
+                max_seqlen_k,
+                local_k_slice,
+            ) = llama3_flash_attn_prepare_cu_seqlens(
+                cumulative_lengths,
+                causal=True,
+                rank=sp_rank,
+                world_size=ring_size,
+            )
+            q_unpad, k_unpad, v_unpad = query_states.flatten(0, 1), key_states.flatten(
+                0, 1), value_states.flatten(0, 1)
+            attn_output = llama3_flash_attn_varlen_func(
+                q_unpad,
+                k_unpad,
+                v_unpad,
+                local_cu_seqlens_q,
+                local_cu_seqlens_k,
+                max_seqlen_q,
+                max_seqlen_k,
+                heads_k_stride=1,
+                local_k_slice=local_k_slice,
+                causal=True
+            )
+        else:
+            max_seqlen = attn_context.get_info('max_seqlen')
+            attn_output = varlen_flash_attn(query_states, key_states, value_states,
+                                            cumulative_lengths, max_seqlen)
     else:
         attn_output = flash_attn_wo_mask(
             query_states,

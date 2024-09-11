@@ -192,6 +192,11 @@ def parse_args():
         choices=['full', 'hybrid', 'no', 'zero2'],
         help=('The sharding strategy to be used for distributed training.'))
     model_args.add_argument('--sp-size', type=int, default=1, help='')
+    model_args.add_argument(
+        '--ring-size',
+        default=1,
+        type=int,
+        help='The ring size. if it is 1, it is the same as sp ulysses')
     data_args = parser.add_argument_group('data', 'Dataset Related Settings')
     data_args.add_argument(
         '--datasets',
@@ -973,7 +978,9 @@ def llava_sft(args):
             num_img_tokens = data['num_img_tokens'].cuda(non_blocking=True)
 
             packed_ctx = packed_sequence(
-                num_tokens, enable=pack_batch, sp_size=get_sp_world_size())
+                num_tokens, enable=pack_batch,
+                sp_size=get_sp_world_size(),
+                ring_size=args.ring_size)
 
             with packed_ctx:
                 with autocast if use_lora else nullcontext():
