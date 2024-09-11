@@ -1,4 +1,4 @@
-from yunchang.ring import (
+from ..ring import (
     ring_flash_attn_func,
     ring_flash_attn_qkvpacked_func,
     zigzag_ring_flash_attn_func,

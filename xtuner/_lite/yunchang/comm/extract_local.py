@@ -1,7 +1,7 @@
 import torch
 import torch.distributed as dist
 
-from yunchang.globals import PROCESS_GROUP
+from ..globals import PROCESS_GROUP
 
 
 def stripe_extract_local(value, rank, world_size, rd, ud, *args, **kwargs):

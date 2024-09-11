@@ -1,4 +1,4 @@
-from yunchang.comm.all_to_all import SeqAllToAll4D, SeqAllToAll5D
+from ..comm.all_to_all import SeqAllToAll4D, SeqAllToAll5D
 
 import torch
 
@@ -7,7 +7,7 @@ from torch import Tensor
 
 import torch.distributed as dist
 from .utils import RING_IMPL_DICT, RING_IMPL_QKVPACKED_DICT
-from yunchang.globals import PROCESS_GROUP
+from ..globals import PROCESS_GROUP
 
 
 class LongContextAttention(torch.nn.Module):

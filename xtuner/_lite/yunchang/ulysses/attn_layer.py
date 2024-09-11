@@ -10,7 +10,7 @@ from torch import Tensor
 
 import torch.distributed as dist
 from flash_attn import flash_attn_func
-from yunchang.comm.all_to_all import SeqAllToAll4D
+from ..comm.all_to_all import SeqAllToAll4D
 import torch.nn.functional as F
 
 def torch_attn(query,
