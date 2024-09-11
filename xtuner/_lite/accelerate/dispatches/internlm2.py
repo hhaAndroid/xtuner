@@ -230,7 +230,8 @@ def _internlm2_varlen_attn_forward(
                 max_seqlen_k,
                 heads_k_stride=1,
                 local_k_slice=local_k_slice,
-                causal=True
+                causal=True,
+                group=sp_group,
             )
         else:
             max_seqlen = attn_context.get_info('max_seqlen')
