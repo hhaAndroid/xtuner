@@ -9,6 +9,7 @@ import torch.distributed as dist
 from .utils import RING_IMPL_DICT, RING_IMPL_QKVPACKED_DICT
 from ..globals import PROCESS_GROUP
 from ..ring import llama3_flash_attn_prepare_cu_seqlens, llama3_flash_attn_varlen_func
+from xtuner._lite.parallel import all_to_all
 
 
 class LongContextAttention(torch.nn.Module):
@@ -234,20 +235,24 @@ def llama3_varlen_attention_sp_ulysses_ring(
         window_size=(-1, -1),
         deterministic=False,
 ):
-    scatter_idx = 2
-    gather_idx = 1
-    query_layer = SeqAllToAll4D.apply(
-        ulysses_pg, query[None], scatter_idx, gather_idx
-    )
-    key_layer = SeqAllToAll4D.apply(
-        ulysses_pg, key[None], scatter_idx, gather_idx
-    )
-    value_layer = SeqAllToAll4D.apply(
-        ulysses_pg, value[None], scatter_idx, gather_idx
-    )
+    scatter_idx = 1
+    gather_idx = 0
+
+    ulysses_world_size = dist.get_world_size(ulysses_pg)
+    if ulysses_world_size > 1:
+        query = all_to_all(
+            query, ulysses_pg, scatter_idx, gather_idx
+        )
+        key = all_to_all(
+            key, ulysses_pg, scatter_idx, gather_idx
+        )
+        value = all_to_all(
+            value, ulysses_pg, scatter_idx, gather_idx
+        )
+
+    ring_world_size = dist.get_world_size(ring_pg)
 
     ring_rank = dist.get_rank(ring_pg)
-    ring_world_size = dist.get_world_size(ring_pg)
     (
         local_cu_seqlens_q,
         local_cu_seqlens_k,
@@ -257,9 +262,9 @@ def llama3_varlen_attention_sp_ulysses_ring(
     ) = llama3_flash_attn_prepare_cu_seqlens(cu_seqlens, causal, ring_rank, ring_world_size)
 
     out = llama3_flash_attn_varlen_func(
-        query_layer[0],
-        key_layer[0],
-        value_layer[0],
+        query,
+        key,
+        value,
         local_cu_seqlens_q,
         local_cu_seqlens_k,
         max_seqlen_q,
@@ -280,14 +285,14 @@ def llama3_varlen_attention_sp_ulysses_ring(
     else:
         context_layer = out
 
-    # (bs, seq_len, head_cnt/N, head_size) -> (bs, seq_len/N, head_cnt, head_size)
-    # scatter 1, gather 2
-    output = SeqAllToAll4D.apply(
-        ulysses_pg, context_layer[None], gather_idx, scatter_idx
-    )
-
+    if ulysses_world_size > 1:
+        output = all_to_all(
+            context_layer, ulysses_pg, gather_idx, scatter_idx
+        )
+    else:
+        output = context_layer
     # out e.g., [s/p::h]
-    return output[0]
+    return output
 
 
 class LongContextVarLenAttentionForLlaMa3(torch.nn.Module):

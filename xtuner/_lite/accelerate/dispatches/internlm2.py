@@ -8,7 +8,7 @@ from transformers.cache_utils import StaticCache
 
 from ._attention import SUPPORT_FLASH2, flash_attn_wo_mask, varlen_flash_attn
 from xtuner._lite.yunchang import llama3_varlen_attention_sp_ulysses_ring
-from xtuner._lite.parallel import get_ring_group, get_sp_world_size, get_ulysess_group
+from xtuner._lite.parallel import get_ring_group, get_ring_world_size,get_sp_world_size, get_ulysess_group
 
 
 class InternLM2RotaryEmbedding(torch.nn.Module):
@@ -200,7 +200,8 @@ def _internlm2_varlen_attn_forward(
     assert SUPPORT_FLASH2
     cumulative_lengths = attn_context.get_info('cumulative_lengths')
     if cumulative_lengths is not None and SUPPORT_FLASH2 and bsz == 1:
-        if get_sp_world_size() > 1:
+        if get_ring_world_size() > 1:
+            # 只有开启了 ring 情况下才运行，如果只是普通 sp，则依然运行原先逻辑
             assert cumulative_lengths[-1] % get_sp_world_size() == 0, f'==={cumulative_lengths[-1]}===='
             q_unpad, k_unpad, v_unpad = query_states.flatten(0, 1), key_states.flatten(
                 0, 1), value_states.flatten(0, 1)
@@ -213,6 +214,7 @@ def _internlm2_varlen_attn_forward(
                 ring_pg=get_ring_group(),
                 causal=True,
             )
+            attn_output = attn_output.unsqueeze(0)
         else:
             max_seqlen = attn_context.get_info('max_seqlen')
             attn_output = varlen_flash_attn(query_states, key_states, value_states,
