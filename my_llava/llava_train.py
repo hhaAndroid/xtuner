@@ -758,6 +758,12 @@ def llava_sft(args):
                                    device='meta',
                                    resize_emb=need_resize_emb,
                                    is_pretrain=is_pretrain)
+
+    # ！！！ 非常重要，确保 FSDP 优化器状态和 backward 时的梯度(反向传播时候梯度是 bf16 的，
+    # 但是由于有一次同步导致会全部转换为 fp32的，方便后面优化器使用) 都是 fp32，梯度累加时候也是 fp32 的
+    # 在开启 meta_llava.no_sync() 时，由于开启混合精度，backward 后的梯度并不是 fp32 的，而是 bf16 的
+    # 所以可能不推荐在梯度累加时候开启 no_sync 上下文，虽然训练会变快，但是可能会导致梯度累加的精度问题
+    # 如果一定要开启且运行不报错，假设梯度累加是 4，那么前 3 次使用 no_sync 上下文，最后一次不使用，才能保证程序不报错
     for module in meta_llava.modules():
         for p_name, param in module.named_parameters(recurse=False):
             if param.requires_grad:
