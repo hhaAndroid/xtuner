@@ -264,6 +264,8 @@ def parse_args():
     optim_args.add_argument(
         '--lr', default=4e-5, type=float, help='learning rate.')
     optim_args.add_argument(
+        '--lr-min', default=0, type=float, help='min learning rate.')
+    optim_args.add_argument(
         '--wd', default=0.01, type=float, help='weight decay.')
     optim_args.add_argument(
         '--max-grad-norm', default=1, type=float, help='gradient clipping')
@@ -436,10 +438,12 @@ def llava_sft(args):
 
     if args.llm is not None:
         is_pretrain = True
+        pad_image_to_square = False
         assert args.vit, 'Please specify the `vit` model.'
         logger.info(f'============ Pretraining mode ============')
     else:
         is_pretrain = False
+        pad_image_to_square = True
         assert args.llava, 'Please specify the `llava` model.'
         logger.info(f'============ SFT mode ============')
 
@@ -614,6 +618,7 @@ def llava_sft(args):
                 init_fn = partial(
                     LlavaRawDataset,
                     image_processor=img_processor,
+                    pad_image_to_square=pad_image_to_square,
                     tokenize_fn=tokenize_fn)
                 # Online tokenization is used when not using a pack dataset,
                 # saving startup time.
@@ -648,7 +653,8 @@ def llava_sft(args):
             _infos = pack_infos[i]
             _dset = _datasets[i]
             _packed_dset = SoftPackerForLlava(_dset, img_processor,
-                                              args.pack_max_length, _infos)
+                                              args.pack_max_length, _infos,
+                                              pad_image_to_square=pad_image_to_square)
             datasets.append(_packed_dset)
     else:
         for i, dset in enumerate(_datasets):
@@ -747,11 +753,16 @@ def llava_sft(args):
     # Ensure all numerical values in the optimizer are fp32.
     # FSDP will use low precision during forward.
     meta_llava = build_llava_model(args, llava_config, world_size,
-                                   torch.float32,
+                                   dtype,
                                    tokenizer=tokenizer,
                                    device='meta',
                                    resize_emb=need_resize_emb,
                                    is_pretrain=is_pretrain)
+    for module in meta_llava.modules():
+        for p_name, param in module.named_parameters(recurse=False):
+            if param.requires_grad:
+                param_fp32 = torch.nn.Parameter(param.to(dtype=torch.float32))
+                setattr(module, p_name, param_fp32)
 
     if pack_batch or args.dset_pack_level:
         dispatch_modules(meta_llava)
@@ -860,7 +871,7 @@ def llava_sft(args):
     warmup_scheduler = LambdaLR(optimizer, warmup_fn)
 
     cosine_scheduler = CosineAnnealingLR(
-        optimizer, T_max=total_steps - warmup_steps, eta_min=0)
+        optimizer, T_max=total_steps - warmup_steps, eta_min=args.lr_min)
 
     start_step = 0
 

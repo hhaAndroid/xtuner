@@ -4,12 +4,25 @@ import torch
 import numpy as np
 from PIL import Image
 from torch.nn.utils.rnn import pad_sequence
-import bisect
 
 from xtuner._lite.chat import ChatMessages
 from xtuner.utils import DEFAULT_PAD_TOKEN_INDEX, IGNORE_INDEX
 from .format import OPENAI_FORMAT_MAP
 from .text import SoftPackerForText
+
+
+def expand2square(pil_img, background_color):
+    width, height = pil_img.size
+    if width == height:
+        return pil_img
+    elif width > height:
+        result = Image.new(pil_img.mode, (width, width), background_color)
+        result.paste(pil_img, (0, (width - height) // 2))
+        return result
+    else:
+        result = Image.new(pil_img.mode, (height, height), background_color)
+        result.paste(pil_img, ((height - width) // 2, 0))
+        return result
 
 
 class LlavaTokenizeFunction():
@@ -66,15 +79,21 @@ class LlavaTokenizeFunction():
 
 class LlavaTokenizedDataset(torch.utils.data.Dataset):
 
-    def __init__(self, dataset, image_processor):
+    def __init__(self, dataset, image_processor, pad_image_to_square=False):
         super().__init__()
         self.image_processor = image_processor
         self.dataset = dataset
+        self.pad_image_to_square = pad_image_to_square
 
     def process_tokenized_data(self, tokenized_data):
         images = []
         for url in tokenized_data.get('image_urls', []):
-            img = Image.open(url)
+            img = Image.open(url).convert('RGB')
+            if self.pad_image_to_square:
+                img = expand2square(
+                        img,
+                        tuple(
+                            int(x * 255) for x in self.image_processor.image_mean))
             images.append(img)
 
         if len(images):
@@ -111,9 +130,9 @@ class LlavaTokenizedDataset(torch.utils.data.Dataset):
 
 class LlavaRawDataset(LlavaTokenizedDataset):
 
-    def __init__(self, dataset, image_processor, tokenize_fn):
+    def __init__(self, dataset, image_processor, tokenize_fn, pad_image_to_square=False):
         # dataset is json raw file of items
-        super().__init__(dataset, image_processor)
+        super().__init__(dataset, image_processor, pad_image_to_square)
 
         self.tokenize_fn = tokenize_fn
         self.conv2length_text = {}  # using dict to speedup the calculation of token length
@@ -167,9 +186,11 @@ class SoftPackerForLlava(SoftPackerForText):
                  dataset,
                  image_processor,
                  max_length=2048,
-                 pack_info=None):
+                 pack_info=None,
+                 pad_image_to_square=False):
         super().__init__(dataset, max_length, pack_info)
         self.image_processor = image_processor
+        self.pad_image_to_square = pad_image_to_square
         self._cached = False
 
     def __getitem__(self, item):
@@ -215,7 +236,12 @@ class SoftPackerForLlava(SoftPackerForText):
 
         images = []
         for url in packed_img_urls:
-            img = Image.open(url)
+            img = Image.open(url).convert('RGB')
+            if self.pad_image_to_square:
+                img = expand2square(
+                        img,
+                        tuple(
+                            int(x * 255) for x in self.image_processor.image_mean))
             images.append(img)
 
         if len(images):

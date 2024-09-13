@@ -6,6 +6,22 @@ from vlmeval.dataset import DATASET_TYPE
 from xtuner._lite.modelings import register_remote_code
 from xtuner.utils import StopWordStoppingCriteria
 
+from transformers.feature_extraction_utils import BatchFeature
+
+
+def expand2square(pil_img, background_color):
+    width, height = pil_img.size
+    if width == height:
+        return pil_img
+    elif width > height:
+        result = Image.new(pil_img.mode, (width, width), background_color)
+        result.paste(pil_img, (0, (width - height) // 2))
+        return result
+    else:
+        result = Image.new(pil_img.mode, (height, height), background_color)
+        result.paste(pil_img, ((height - width) // 2, 0))
+        return result
+
 
 class LLaVAEvalModel(BaseModel):
     INSTALL_REQ = True
@@ -77,7 +93,16 @@ class LLaVAEvalModel(BaseModel):
         # prompt=prompt[len('<s>'):]
         # print(prompt)
         raw_image = Image.open(image_path).convert('RGB')
-        inputs = self.processor(prompt, raw_image, return_tensors='pt').to('cuda', torch.float16)
+        images = expand2square(
+            raw_image,
+            tuple(
+                int(x * 255) for x in self.processor.image_processor.image_mean))
+        pixel_values = self.processor.image_processor(images, return_tensors='pt')["pixel_values"]
+        text_inputs = self.processor.tokenizer(
+            prompt, return_tensors='pt', padding=False, truncation=None, max_length=None
+        )
+        inputs = BatchFeature(data={**text_inputs, "pixel_values": pixel_values}).to('cuda', torch.float16)
+        # inputs = self.processor(prompt, raw_image, return_tensors='pt').to('cuda', torch.float16)
         with torch.inference_mode():
             output = self.model.generate(**inputs, stopping_criteria=self.stop_criteria, **self.kwargs)
             output = self.processor.tokenizer.decode(output[0][len(inputs['input_ids'][0]):],
