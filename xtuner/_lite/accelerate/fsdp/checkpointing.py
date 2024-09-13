@@ -1,6 +1,7 @@
 import random
 
-RECOMPUTE_MODULES = ('InternLM2DecoderLayer', 'CLIPEncoderLayer')
+RECOMPUTE_MODULES = ('InternLM2DecoderLayer', 'CLIPEncoderLayer',
+                     'InternVisionEncoderLayer', 'Phi3DecoderLayer')
 
 
 def checkpoint_check_fn(submodule, target=RECOMPUTE_MODULES, selective=1.0):
