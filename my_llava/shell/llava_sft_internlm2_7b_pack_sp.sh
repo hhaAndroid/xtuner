@@ -45,7 +45,8 @@ HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 srun -p ${PARTITION} --time 1-00:00
   --group-by-length \
   --mirco-batch-size 1 \
   --global-batch-size $((GPUS*ACCUMULATIVE_COUNTS)) \
-  --lr 2e-5 \
+  --lr 3.5e-5 \
+  --lr-min 3.5e-6 \
   --wd 0.0 \
   --warmup-ratio 0.03 \
   --work-dir ${OUTPUT_DIR} \
