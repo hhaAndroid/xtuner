@@ -309,7 +309,7 @@ class InternVisionEncoder(nn.Module):
         # 这个代码无法使用 meta device 加载，所以只能重写
         # stochastic depth decay rule
         # torch.linspace -> np.linspace
-        dpr = np.linspace(0, config.drop_path_rate, config.num_hidden_layers)
+        dpr = np.linspace(0.0, float(config.drop_path_rate), int(config.num_hidden_layers))
 
         self.layers = nn.ModuleList([
             InternVisionEncoderLayer(config, dpr[idx]) for idx in range(config.num_hidden_layers)])
