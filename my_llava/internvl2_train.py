@@ -22,13 +22,12 @@ from PIL import Image
 import torch.distributed as dist
 import torch.distributed.checkpoint as dcp
 from accelerate.utils import set_module_tensor_to_device
-from datasets import Dataset
+from torch.utils.data import Dataset
 from mmengine import load, mkdir_or_exist
 from mmengine.dist import infer_launcher, init_dist
 from mmengine.runner import set_random_seed
 from mmengine.utils import get_git_hash
 from mmengine.utils.dl_utils import collect_env
-from peft import LoraConfig, get_peft_model
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import \
     apply_activation_checkpointing
 from torch.distributed.checkpoint.state_dict import (StateDictOptions,
@@ -46,31 +45,21 @@ from torch.utils.data import ConcatDataset, DataLoader
 from transformers import (AutoConfig, AutoModelForCausalLM, AutoModel,
                           CLIPVisionModel, LlavaConfig, CLIPImageProcessor,
                           LlavaForConditionalGeneration, LlavaProcessor)
-from transformers.utils.import_utils import (is_flash_attn_2_available,
-                                             is_torch_sdpa_available)
 
 from xtuner._lite import AutoTokenizer, get_logger
 from xtuner._lite.accelerate import (LORA_TARGET_MAP, LoadWoInit,
                                      dispatch_modules, packed_sequence)
 from xtuner._lite.accelerate.fsdp import (RECOMPUTE_MODULES,
-                                          all_required_grad_wrap_policy,
                                           checkpoint_check_fn, dp_lazy_init,
                                           layer_auto_wrap_policy)
-from xtuner._lite.chat import CHAT_TEMPLATE_MAP
-from xtuner._lite.datasets import (LlavaCollator, LlavaRawDataset,
-                                   LlavaTokenizeFunction, SoftPackerForLlava)
-from xtuner._lite.datasets.load import (LOAD_FN_MAP, load_datasets,
-                                        load_from_cache)
-from xtuner._lite.modelings import register_remote_code
 from xtuner._lite.parallel import LengthGroupedSampler, ParallelSampler
-from llava_model import LlavaForConditionalGeneration
 from torch.distributed.checkpoint.stateful import Stateful
-from xtuner.utils import DEFAULT_PAD_TOKEN_INDEX
 from xtuner._lite.internvl.constants import IMG_CONTEXT_TOKEN
 from xtuner._lite.internvl.dataset import (dynamic_preprocess, preprocess,
                                            preprocess_internlm, preprocess_mpt,
                                            preprocess_phi3, build_transform,
                                            TCSLoader, concat_pad_data_collator)
+from xtuner._lite.internvl.modeling_intern_vit import InternVisionModel
 
 try:
     from petrel_client.client import Client
@@ -136,7 +125,10 @@ def parse_args():
         help=("the dtype of the model forward. When set to 'auto', it will "
               'automatically determine whether bf16 is available, '
               'prioritizing the use of bf16.'))
-
+    model_args.add_argument(
+        '--drop-path-rate',
+        default=0.1,
+        help='dataset meta path')
     model_args.add_argument(
         '--selective-recompute',
         default=1.0,
@@ -265,30 +257,53 @@ def map_meta_modules(model, meta_model):
     return meta_module_map
 
 
-def build_model(args, config, dtype=torch.float32, device='cpu'):
+def build_model(args, config, dtype=torch.bfloat16, tokenizer=None, device='cpu'):
     with torch.device(device):
         _cfg = copy.deepcopy(config)
 
-        # 暂时不加载权重
-        model = AutoModel.from_config(config=_cfg, trust_remote_code=True)
-        if device != 'meta':
-            del model.vision_model
-            del model.language_model
+        vision_model = None
+        if args.vit is not None:
+            logger.info('Loading pretrained vision model...')
+            _cfg.vision_config.drop_path_rate = args.drop_path_rate
+            with LoadWoInit():
+                vision_model = InternVisionModel.from_pretrained(args.vit, torch_dtype=dtype, config=_cfg.vision_config)
+
+        llm = None
+        if args.llm is not None:
+            logger.info('Loading pretrained LLM model...')
+            llm_config = AutoConfig.from_pretrained(args.llm, trust_remote_code=True)
+            llm_config.use_cache = False
+            if llm_config.model_type == 'internlm2':
+                llm_config.attn_implementation = 'flash_attention_2'  # for InternLM
+            else:
+                llm_config._attn_implementation = 'flash_attention_2'
             with LoadWoInit():
                 llm = AutoModelForCausalLM.from_pretrained(
-                    args.llm, config=_cfg.llm_config, trust_remote_code=True)
-                vit = AutoModel.from_pretrained(
-                    args.vit, config=_cfg.vision_config, trust_remote_code=True)
+                    args.llm, config=llm_config, torch_dtype=dtype, trust_remote_code=True)
 
+            old_vocab_size = llm.config.vocab_size
+            if old_vocab_size != len(tokenizer):
+                logger.info('Resizing token embeddings...')
+                llm.resize_token_embeddings(len(tokenizer))
+                num_new_tokens = max(len(tokenizer) - old_vocab_size, 0)
+                if num_new_tokens > 0:
+                    output_embeddings = llm.get_output_embeddings().weight.data
+                    output_embeddings_avg = output_embeddings[:-num_new_tokens].mean(dim=0, keepdim=True)
+                    output_embeddings[-num_new_tokens:] = output_embeddings_avg
+
+        # 暂时不加载权重
+        model = AutoModel.from_config(config=_cfg,
+                                      vision_model=vision_model,
+                                      language_model=llm,
+                                      torch_dtype=dtype,
+                                      trust_remote_code=True)
+        if device != 'meta':
+            with LoadWoInit():
                 if args.projector is not None:
                     logger.info('Loading pretrained MLP projector...')
                     state_dict = torch.load(args.projector, map_location='cpu')
                     message = model.mlp1.load_state_dict(state_dict)
                     logger.info(message)
-
-            model.language_model = llm
-            model.vision_model = vit
-
         model.to(dtype)
 
         if args.freeze_llm:
@@ -459,6 +474,9 @@ class LazySupervisedDataset(Dataset):
 
         if '<image>' in data_item['conversations'][0]['value']:
             data_item['conversations'][0]['value'] = data_item['conversations'][0]['value'].replace('<image>', '')
+
+        if '<image>' not in data_item['conversations'][0]['value']:
+            data_item['conversations'][0]['value'] = '<image>\n' + data_item['conversations'][0]['value']
 
         # Merge the image path
         image_path = data_item['image']
@@ -665,6 +683,7 @@ def build_datasets(
         model,
         group_by_length=False,
         dynamic_image_size=True,
+        force_image_size=448,
         use_thumbnail=True,
         min_dynamic_patch=1,
         max_dynamic_patch=12,
@@ -673,21 +692,51 @@ def build_datasets(
     datasets = []
     lengths = []
     ds_collections = json.loads(open(args.meta_path).read())
-    for ds_idx, ds_name in enumerate(ds_collections.keys()):
-        repeat_time = ds_collections[ds_name]['repeat_time']
-        if 'max_dynamic_patch' in ds_collections[ds_name]:
-            max_num = ds_collections[ds_name]['max_dynamic_patch']
+
+    _dataset_list = []
+    _dataset_lengths = []
+    for _, ds_name in enumerate(ds_collections.keys()):
+        _data = ds_collections[ds_name]
+        _repeat_time = _data.get('repeat_time', 1)
+        _dataset_lengths.append(_repeat_time * _data['length'])
+        _dataset_list.append([ds_name, ds_collections[ds_name]])
+
+    # 按照长度对数据集进行从大到小排序
+    combined = list(zip(_dataset_lengths, _dataset_list))
+    sorted_combined = sorted(combined, key=lambda x: x[0], reverse=True)
+    _, _dataset_list = zip(*sorted_combined)
+    _dataset_list = list(_dataset_list)
+
+    if dist.is_available():
+        world_size = dist.get_world_size()
+        rank = dist.get_rank()
+    else:
+        world_size = 1
+        rank = 0
+
+    # 切分到不同卡
+    _dataset_list = _dataset_list[rank::world_size]
+    logger.info(f'[{rank}] Assigned Files: {[_dataset[0] for _dataset in _dataset_list]}')
+    timeout = timedelta(
+        minutes=int(os.getenv('XTUNER_DATASET_TIMEOUT', default=45)))
+    group = dist.new_group(backend='gloo', timeout=timeout)
+    for i, _dataset in enumerate(_dataset_list):
+        ds_name, ds_data = _dataset
+        ds_idx = i * world_size + rank
+        repeat_time = ds_data['repeat_time']
+        if 'max_dynamic_patch' in ds_data:
+            max_num = ds_data['max_dynamic_patch']
             logger.info(f'max_dynamic_patch is set to {max_num} according to the meta file')
         else:
             max_num = max_dynamic_patch
         dataset = LazySupervisedDataset(
-            args.chat_template, ds_collections[ds_name],
+            args.chat_template, ds_data,
             tokenizer,
             tcs_loader,
             ds_name=ds_name,
             num_image_token=model.num_image_token,
-            image_size=model.force_image_size,
-            is_train=ds_collections[ds_name]['data_augment'],
+            image_size=force_image_size,
+            is_train=ds_data['data_augment'],
             pad2square=False,
             group_by_length=group_by_length,
             dynamic_image_size=dynamic_image_size,
@@ -707,7 +756,14 @@ def build_datasets(
     if False and args.use_data_resampling:
         raise NotImplementedError
     else:
-        train_dataset = ConcatDataset(datasets)
+        if dist.is_available():
+            buffers = [None] * world_size
+            dist.all_gather_object(buffers, datasets, group=group)
+            # 拉平
+            datasets = [item for sublist in buffers for item in sublist]
+            train_dataset = ConcatDataset(datasets)
+        else:
+            train_dataset = ConcatDataset(datasets)
     return train_dataset
 
 
@@ -836,7 +892,7 @@ def internvl_train(args):
     else:
         raise RuntimeError('`dtype` only supports `fp16`，`bf16`, or `auto`, '
                            f'but found {args.dtype}.')
-    tokenizer = AutoTokenizer.from_pretrained(args.internvl, trust_remote_code=True)
+    tokenizer = AutoTokenizer.from_pretrained(args.internvl, use_fast=False, trust_remote_code=True)
     img_context_token_id = tokenizer.convert_tokens_to_ids(IMG_CONTEXT_TOKEN)
 
     internvl_config = AutoConfig.from_pretrained(args.internvl, trust_remote_code=True)
@@ -844,6 +900,7 @@ def internvl_train(args):
     meta_internvl = build_model(args,
                                 internvl_config,
                                 dtype,
+                                tokenizer=tokenizer,
                                 device='meta')
     meta_internvl.img_context_token_id = img_context_token_id
 
@@ -862,8 +919,10 @@ def internvl_train(args):
     ###########################################################################
     start_load_data_t = time.time()
     tcs_loader = TCSLoader('~/petreloss.conf') if has_tcs_loader else None
+
     train_dataset = build_datasets(args, tokenizer, tcs_loader, meta_internvl,
                                    args.group_by_length,
+                                   force_image_size=internvl_config.force_image_size,
                                    dynamic_image_size=internvl_config.dynamic_image_size,
                                    use_thumbnail=internvl_config.use_thumbnail,
                                    min_dynamic_patch=internvl_config.min_dynamic_patch,
@@ -917,7 +976,8 @@ def internvl_train(args):
         internvl = build_model(args,
                                internvl_config,
                                dtype,
-                               device='meta')
+                               tokenizer=tokenizer,
+                               device='cpu')
         internvl.img_context_token_id = img_context_token_id
         rank0_meta_llava = copy.deepcopy(meta_internvl)
         meta_llava_map = map_meta_modules(internvl, meta_internvl)
@@ -934,8 +994,8 @@ def internvl_train(args):
         dp_lazy_init, module_map=meta_llava_map, dp_mesh=dp_mesh)
 
     policies = [layer_auto_wrap_policy]
-    if args.llm_use_lora or args.vit_use_lora:
-        policies.append(all_required_grad_wrap_policy)
+    # if args.llm_use_lora or args.vit_use_lora:
+    #     policies.append(all_required_grad_wrap_policy)
 
     if args.shard_strategy == 'full':
         fsdp_device_mesh = dp_mesh
@@ -965,6 +1025,8 @@ def internvl_train(args):
         param_init_fn=param_init_fn,
         sync_module_states=True,
     )
+    if rank == 0:
+        logger.info(shard_llava)
 
     max_memory = torch.cuda.max_memory_allocated()
     logger.info('[Model] The peak GPU memory when building the FSDP model is '
@@ -1123,8 +1185,8 @@ def internvl_train(args):
                     avg_iter_loss.backward()
 
             step_loss += avg_iter_loss.item()
-            # step_consumed_tokens += num_tokens.sum()
-            # step_consumed_img_tokens += num_img_tokens.sum()
+            step_consumed_tokens += data['input_ids'].numel()
+            step_consumed_img_tokens += (data['image_flags'].sum().item()*meta_internvl.num_image_token)
 
         grad_norm = shard_llava.clip_grad_norm_(args.max_grad_norm)
         optimizer.step()

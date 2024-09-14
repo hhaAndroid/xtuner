@@ -1,7 +1,7 @@
 set -x
 
 PARTITION=${PARTITION:-"llm_razor"}
-GPUS=${GPUS:-48}
+GPUS=${GPUS:-64}
 GPUS_PER_NODE=${GPUS_PER_NODE:-8}
 QUOTA_TYPE=${QUOTA_TYPE:-"reserved"}
 NODES=$((GPUS / GPUS_PER_NODE))
@@ -19,10 +19,10 @@ if [ ! -d "$OUTPUT_DIR" ]; then
   mkdir -p "$OUTPUT_DIR"
 fi
 
-# number of gpus: 48
+# number of gpus: 64
 # batch size per gpu: 4
 # gradient accumulation steps: 2
-# total batch size: 384
+# total batch size: 512
 # epoch: 1
 
 HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 srun -p ${PARTITION} --time 4-00:00:00 \
@@ -41,11 +41,12 @@ HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 srun -p ${PARTITION} --time 4-00:00
   --internvl '/mnt/hwfile/xtuner/huanghaian/model/Mini-InternVL-Chat-4B-V1-5' \
   --meta-path 'aa' \
   --chat-template 'phi3-chat' \
+  --drop-path-rate 0.1 \
   --group-by-length \
   --num-workers 4 \
   --mirco-batch-size $MIRCO_BATCH_SIZE \
   --global-batch-size $((MIRCO_BATCH_SIZE*GPUS*ACCUMULATIVE_COUNTS)) \
-  --lr 1.7e-5 \
+  --lr 2.2e-5 \
   --wd 0.05 \
   --warmup-ratio 0.03 \
   --work-dir ${OUTPUT_DIR} \
