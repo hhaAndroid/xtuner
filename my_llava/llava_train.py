@@ -340,7 +340,8 @@ def build_llava_model(args, config, world_size, dtype=torch.float32,
                 del llava.vision_tower
                 with LoadWoInit():
                     llm = AutoModelForCausalLM.from_pretrained(
-                        args.llm, config=_cfg.text_config)
+                        args.llm, config=_cfg.text_config,
+                        attn_implementation=_cfg._attn_implementation)
                     vit = CLIPVisionModel.from_pretrained(
                         args.vit, config=_cfg.vision_config)
                 llava.language_model = llm
@@ -745,7 +746,11 @@ def llava_sft(args):
         scaler = None
 
     if is_flash_attn_2_available():
-        llava_config.text_config.attn_implementation = 'flash_attention_2'
+        if llava_config.text_config.model_type == 'internlm2':
+            llava_config.text_config.attn_implementation = 'flash_attention_2'  # for InternLM
+        else:
+            llava_config.text_config._attn_implementation = 'flash_attention_2'
+        llava_config._attn_implementation = 'flash_attention_2'
     elif is_torch_sdpa_available():
         llava_config.text_config.attn_implementation = 'sdpa'
     llava_config.text_config.use_cache = False
@@ -769,6 +774,9 @@ def llava_sft(args):
             if param.requires_grad:
                 param_fp32 = torch.nn.Parameter(param.to(dtype=torch.float32))
                 setattr(module, p_name, param_fp32)
+
+    if dist.get_rank() == 0:
+        logger.info(meta_llava)
 
     if pack_batch or args.dset_pack_level:
         dispatch_modules(meta_llava)
