@@ -127,6 +127,7 @@ def parse_args():
               'prioritizing the use of bf16.'))
     model_args.add_argument(
         '--drop-path-rate',
+        type=float,
         default=0.1,
         help='dataset meta path')
     model_args.add_argument(
@@ -264,7 +265,7 @@ def build_model(args, config, dtype=torch.bfloat16, tokenizer=None, device='cpu'
         vision_model = None
         if args.vit is not None:
             logger.info('Loading pretrained vision model...')
-            _cfg.vision_config.drop_path_rate = args.drop_path_rate
+            _cfg.vision_config.drop_path_rate = float(args.drop_path_rate)
             with LoadWoInit():
                 vision_model = InternVisionModel.from_pretrained(args.vit, torch_dtype=dtype, config=_cfg.vision_config)
 

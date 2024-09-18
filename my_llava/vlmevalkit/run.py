@@ -6,6 +6,7 @@ from vlmeval.dataset import build_dataset
 from vlmeval.inference import infer_data_job
 from vlmeval.inference_video import infer_data_job_video
 from vlmeval.smp import *
+from vlmeval.vlm import InternVLChat
 from vlmeval.utils.result_transfer import MMMU_result_transfer, MMTBench_result_transfer
 from llava_eval_model import LLaVAEvalModel
 from functools import partial
@@ -16,6 +17,7 @@ def parse_args():
     # ==============================================
     parser.add_argument('--model-path', type=str, required=True)
     parser.add_argument('--model-name', type=str, default='llava_hf_xtuner')
+    parser.add_argument('--model-flag', type=str, choices=['llava', 'internvl_1_5', 'internvl_2'], default='llava')
     # ==============================================
     parser.add_argument('--data', type=str, nargs='+', required=True)
     # Args that only apply to Video Dataset
@@ -49,8 +51,13 @@ def main():
     assert len(args.data), '--data should be a list of data files'
 
     # ==============================================
-    stop_words = ['<|im_end|>']  # internlm2
-    supported_VLM[args.model_name] = partial(LLaVAEvalModel, model_pth=args.model_path, stop_words=stop_words)
+    if args.model_flag == 'llava':
+        stop_words = ['<|im_end|>']  # internlm2
+        supported_VLM[args.model_name] = partial(LLaVAEvalModel, model_pth=args.model_path, stop_words=stop_words)
+    elif args.model_flag == 'internvl_1_5':
+        supported_VLM[args.model_name] = partial(InternVLChat, model_path=args.model_path, version='V1.5')
+    elif args.model_flag == 'internvl_2':
+        supported_VLM[args.model_name] = partial(InternVLChat, model_path=args.model_path, version='V2')
     args.model = [args.model_name]
     # ==============================================
 

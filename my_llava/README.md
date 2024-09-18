@@ -48,7 +48,7 @@ pip install -e .
 
 export LMUData='/mnt/hwfile/xtuner/huanghaian/LMUData/'
 export PYTHONPATH="$(pwd):$(pwd)/../"
-srun -p llm_razor --job-name=eval --time=02:00:00 --cpus-per-task=16 --nodes=1 --gres=gpu:8 --ntasks-per-node=1 --kill-on-bad-exit=1 torchrun --master_port=29501 --nproc-per-node=8 vlmevalkit/run.py --data MMBench_DEV_EN MMStar SEEDBench_IMG MMMU_DEV_VAL ScienceQA_TEST TextVQA_VAL ChartQA_TEST AI2D_TEST DocVQA_VAL InfoVQA_VAL OCRBench RealWorldQA SEEDBench2_Plus HallusionBench --model-path work_dirs/llava_sft_internlm2_7b/20240725194745/hf-5198-of-5198
+srun -p llm_razor --job-name=eval --time=02:00:00 --cpus-per-task=16 --nodes=1 --gres=gpu:8 --ntasks-per-node=1 --kill-on-bad-exit=1 torchrun --master_port=29501 --nproc-per-node=8 vlmevalkit/run.py --data MMBench_DEV_EN MMStar SEEDBench_IMG MMMU_DEV_VAL ScienceQA_TEST TextVQA_VAL ChartQA_TEST AI2D_TEST DocVQA_VAL InfoVQA_VAL OCRBench RealWorldQA SEEDBench2_Plus HallusionBench --model-path work_dirs/llava_sft_internlm2_7b/20240918105412/hf-0100-of-5198
 ```
 
 # 基本用法说明
@@ -63,3 +63,29 @@ srun -p llm_razor --job-name=eval --time=02:00:00 --cpus-per-task=16 --nodes=1 -
 
 暂时代码没有合并
 
+# InternVL
+
+## SFT 
+
+```shell
+conda activate xtuner_23
+cd my_llava
+bash shell/internvl1_5_phi3_sft.sh
+```
+
+## 评测
+
+```shell
+cd my_llava
+
+export LMUData='/mnt/hwfile/xtuner/huanghaian/LMUData/'
+export PYTHONPATH="$(pwd):$(pwd)/../"
+
+# 由于 internvl 推理代码不支持最新 transformers,因此需要额外一步
+# 覆盖保存的 modeling_phi3.py
+cp modeling_phi3.py work_dirs/internvl1_5_phi3_sft/20240914165647/hf-15780-of-15780
+srun -p llm_razor --job-name=eval --time=02:00:00 --cpus-per-task=16 --nodes=1 --gres=gpu:8 --ntasks-per-node=1 --kill-on-bad-exit=1 torchrun --master_port=29501 --nproc-per-node=8 vlmevalkit/run.py --model-flag internvl_1_5 --data MMBench_DEV_EN MMStar MME SEEDBench_IMG MMMU_DEV_VAL ScienceQA_TEST HallusionBench TextVQA_VAL ChartQA_TEST AI2D_TEST DocVQA_VAL InfoVQA_VAL OCRBench RealWorldQA SEEDBench2_Plus --model-name internvl1 --model-path work_dirs/internvl1_5_phi3_sft/20240914165647/hf-15780-of-15780
+
+# 自动解析全部数据
+srun -p llm_razor python vlmevalkit/parse_eval_csv.py internvl1
+```
