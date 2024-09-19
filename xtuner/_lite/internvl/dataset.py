@@ -790,3 +790,48 @@ def concat_pad_data_collator(features, pad_id=0):
             else:
                 batch[k] = torch.concat([f[k] for f in features])
     return batch
+
+
+def packing_collate(features, pack_batch=True):
+    input_ids = []
+    labels = []
+    pixel_values = []
+    num_tokens = []
+    num_img_tokens = []
+    image_flags = []
+
+    for data in features:
+        input_ids.append(torch.LongTensor(data['input_ids']))
+        labels.append(torch.LongTensor(data['labels']))
+        num_tokens.extend(data['num_tokens'])
+        num_img_tokens.extend(data['num_img_tokens'])
+        pixel_values.append(data['pixel_values'])
+        image_flags.append(data['image_flags'])
+
+    attention_mask = [torch.ones_like(ids) for ids in input_ids]
+    num_tokens = torch.IntTensor(num_tokens)
+    num_img_tokens = torch.IntTensor(num_img_tokens)
+
+    if len(features) > 1 and pack_batch:
+        input_ids = torch.cat(input_ids, dim=0).unsqueeze(0)
+        labels = torch.cat(labels, dim=0).unsqueeze(0)
+        attention_mask = torch.cat(attention_mask, dim=0).unsqueeze(0)
+        image_flags = torch.cat(image_flags, dim=0)
+        pixel_values = torch.cat(pixel_values, dim=0)
+    elif len(features) > 1 and not pack_batch:
+        raise NotImplementedError
+    else:
+        raise NotImplementedError
+
+    # TODO support sp
+    data_dict = {
+        'input_ids': input_ids,
+        'labels': labels,
+        'attention_mask': attention_mask.bool(),
+        'pixel_values': pixel_values,
+        'image_flags': image_flags,
+        'num_tokens': num_tokens,
+        'num_img_tokens': num_img_tokens,
+    }
+
+    return data_dict

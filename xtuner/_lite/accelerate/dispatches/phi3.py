@@ -71,8 +71,7 @@ Optional[Tuple[torch.Tensor]]]:
     attn_context = MessageHub.get_instance('packed_sequence')
 
     position_ids = attn_context.get_info('position_ids')
-    if position_ids is not None:
-        assert position_ids.size(1) == q_len, f'{position_ids.size(1)} {q_len}'
+    assert position_ids.size(1) == q_len, f'{position_ids.size(1)} {q_len}'
 
     qkv = self.qkv_proj(hidden_states)
     query_pos = self.num_heads * self.head_dim
@@ -172,18 +171,18 @@ Optional[Tuple[torch.Tensor]]]:
 
     assert SUPPORT_FLASH2
     cumulative_lengths = attn_context.get_info('cumulative_lengths')
-    if cumulative_lengths is None:
-        attn_output = self._flash_attention_forward(
+    if cumulative_lengths is not None and SUPPORT_FLASH2 and bsz == 1:
+        max_seqlen = attn_context.get_info('max_seqlen')
+        attn_output = varlen_flash_attn(query_states, key_states, value_states,
+                                        cumulative_lengths, max_seqlen, dropout_p=attn_dropout)
+    else:
+        attn_output = flash_attn_wo_mask(
             query_states,
             key_states,
             value_states,
-            attention_mask,
-            q_len,
-            dropout=attn_dropout,
-            use_sliding_windows=use_sliding_windows,
-        )
-    else:
-        raise NotImplementedError('cumulative_lengths is not None')
+            causal=True,
+            dropout_p=attn_dropout,
+            training=self.training)
 
     attn_output = attn_output.reshape(bsz, q_len, self.hidden_size).contiguous()
     attn_output = self.o_proj(attn_output)

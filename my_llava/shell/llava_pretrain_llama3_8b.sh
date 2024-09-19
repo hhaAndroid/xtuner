@@ -6,7 +6,7 @@ GPUS_PER_NODE=${GPUS_PER_NODE:-8}
 QUOTA_TYPE=${QUOTA_TYPE:-"reserved"}
 NODES=$((GPUS / GPUS_PER_NODE))
 CPUS_PER_TASK=${CPUS_PER_TASK:-16}
-MIRCO_BATCH_SIZE=${MIRCO_BATCH_SIZE:-32}
+MIRCO_BATCH_SIZE=${MIRCO_BATCH_SIZE:-16}
 SRUN_ARGS=${SRUN_ARGS:-""}
 
 export PYTHONPATH="$(pwd):$(pwd)/../"
@@ -38,7 +38,7 @@ HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 srun -p ${PARTITION} --time 1-00:00
   --max-length 2048 \
   --num-workers 4 \
   --mirco-batch-size $MIRCO_BATCH_SIZE \
-  --global-batch-size $((MIRCO_BATCH_SIZE*GPUS)) \
+  --global-batch-size $((MIRCO_BATCH_SIZE*2*GPUS)) \
   --lr 1e-3 \
   --wd 0.0 \
   --warmup-ratio 0.03 \

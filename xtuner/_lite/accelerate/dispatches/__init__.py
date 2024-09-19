@@ -48,7 +48,7 @@ DISPATCH_MAP = {
     'InternLM2FlashAttention2': dispatch_internlm_varlen_attn_forward,
     'CLIPAttention': dispatch_clip_attn_forward,
     'InternLM2RMSNorm': dispatch_rms_norm_forward,
-    # 'Phi3FlashAttention2': dispatch_phi3_varlen_attn_forward, # 暂时不开
+    'Phi3FlashAttention2': dispatch_phi3_varlen_attn_forward,  # 如果不开启 batch packing，需要注释否则会报错
     'Phi3RMSNorm': dispatch_rms_norm_forward,
     'LlamaRMSNorm': dispatch_rms_norm_forward,
     'LlamaFlashAttention2': dispatch_llama3_varlen_attn_forward,

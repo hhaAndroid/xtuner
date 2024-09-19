@@ -58,7 +58,8 @@ from xtuner._lite.internvl.constants import IMG_CONTEXT_TOKEN
 from xtuner._lite.internvl.dataset import (dynamic_preprocess, preprocess,
                                            preprocess_internlm, preprocess_mpt,
                                            preprocess_phi3, build_transform,
-                                           TCSLoader, concat_pad_data_collator)
+                                           TCSLoader, concat_pad_data_collator,
+                                           packing_collate)
 from xtuner._lite.internvl.modeling_intern_vit import InternVisionModel
 
 try:
@@ -519,7 +520,9 @@ class LazySupervisedDataset(Dataset):
             labels=ret['labels'][0],
             attention_mask=ret['attention_mask'][0],
             pixel_values=pixel_values,
-            image_flags=torch.tensor([1] * num_patches, dtype=torch.long)
+            image_flags=torch.tensor([1] * num_patches, dtype=torch.long),
+            num_tokens=len(ret['input_ids'][0]),
+            num_img_tokens=self.num_image_token * num_patches
         )
         return ret
 
@@ -652,7 +655,9 @@ class LazySupervisedDataset(Dataset):
             labels=ret['labels'][0],
             attention_mask=ret['attention_mask'][0],
             pixel_values=pixel_values,
-            image_flags=torch.tensor([0] * num_patches, dtype=torch.long)
+            image_flags=torch.tensor([0] * num_patches, dtype=torch.long),
+            num_tokens=len(ret['input_ids'][0]),
+            num_img_tokens=0
         )
         return ret
 
@@ -944,18 +949,21 @@ def internvl_train(args):
         sampler = ParallelSampler(
             train_dataset, dp_mesh, args.global_batch_size, seed=args.seed, shuffle=True)
 
+    # collate_fn = concat_pad_data_collator
+    collate_fn = packing_collate
     train_dataloader = DataLoader(
         train_dataset,
         batch_size=args.mirco_batch_size,
         num_workers=args.num_workers,
         sampler=sampler,
-        collate_fn=concat_pad_data_collator,
+        collate_fn=collate_fn,
         persistent_workers=args.num_workers > 0)
 
     if rank == 0:
         logger.info(f'[Dataloader] {len(train_dataloader)} batches.')
         _first_batch = [train_dataset[i] for i in range(args.mirco_batch_size)]
-        _first_batch = concat_pad_data_collator(_first_batch)
+        # _first_batch = concat_pad_data_collator(_first_batch)
+        _first_batch = packing_collate(_first_batch)
         _decoded = tokenizer.batch_decode(_first_batch['input_ids'])
         logger.debug(f'[Dataloader] Training Batch:\n{_first_batch}')
         logger.debug(f'[Dataloader] Training Batch(Decoded):\n{_decoded}')
@@ -1173,12 +1181,15 @@ def internvl_train(args):
             data = _prepare_input(data, device='cuda')
 
             # 暂时设置为没有 batch packing
-            packed_ctx = packed_sequence(None, enable=False)
+            # packed_ctx = packed_sequence(None, enable=False)
+
+            num_tokens = data['num_tokens']
+            num_img_tokens = data['num_img_tokens']
+            packed_ctx = packed_sequence(num_tokens, enable=True)
 
             with packed_ctx:
-                with nullcontext():
-                    outputs = shard_llava(**data)
-                    avg_iter_loss = outputs.loss / per_step_iters
+                outputs = shard_llava(**data)
+                avg_iter_loss = outputs.loss / per_step_iters
 
                 if scaler:
                     scaler.scale(avg_iter_loss).backward()
@@ -1186,8 +1197,8 @@ def internvl_train(args):
                     avg_iter_loss.backward()
 
             step_loss += avg_iter_loss.item()
-            step_consumed_tokens += data['input_ids'].numel()
-            step_consumed_img_tokens += (data['image_flags'].sum().item()*meta_internvl.num_image_token)
+            step_consumed_tokens += num_tokens.sum()
+            step_consumed_img_tokens += num_img_tokens.sum()
 
         grad_norm = shard_llava.clip_grad_norm_(args.max_grad_norm)
         optimizer.step()
