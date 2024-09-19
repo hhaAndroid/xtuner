@@ -521,8 +521,8 @@ class LazySupervisedDataset(Dataset):
             attention_mask=ret['attention_mask'][0],
             pixel_values=pixel_values,
             image_flags=torch.tensor([1] * num_patches, dtype=torch.long),
-            num_tokens=len(ret['input_ids'][0]),
-            num_img_tokens=self.num_image_token * num_patches
+            num_tokens=[len(ret['input_ids'][0])],
+            num_img_tokens=[self.num_image_token * num_patches]
         )
         return ret
 
@@ -656,8 +656,8 @@ class LazySupervisedDataset(Dataset):
             attention_mask=ret['attention_mask'][0],
             pixel_values=pixel_values,
             image_flags=torch.tensor([0] * num_patches, dtype=torch.long),
-            num_tokens=len(ret['input_ids'][0]),
-            num_img_tokens=0
+            num_tokens=[len(ret['input_ids'][0])],
+            num_img_tokens=[0]
         )
         return ret
 
@@ -773,7 +773,7 @@ def build_datasets(
     return train_dataset
 
 
-def _prepare_input(data, device=None):
+def _prepare_input(data, device='cuda'):
     """
         Prepares one `data` before feeding it to the model, be it a tensor or a nested list/dictionary of tensors.
     """
@@ -1178,13 +1178,12 @@ def internvl_train(args):
             data = next(data_iterator)
             step_data_time += time.time() - _data_start_t
 
-            data = _prepare_input(data, device='cuda')
-
+            data = _prepare_input(data)
             # 暂时设置为没有 batch packing
             # packed_ctx = packed_sequence(None, enable=False)
 
-            num_tokens = data['num_tokens']
-            num_img_tokens = data['num_img_tokens']
+            num_tokens = data.pop('num_tokens')
+            num_img_tokens = data.pop('num_img_tokens')
             packed_ctx = packed_sequence(num_tokens, enable=True)
 
             with packed_ctx:
