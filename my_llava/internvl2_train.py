@@ -6,8 +6,8 @@ import os
 import shutil
 import sys
 import time
+import warnings
 from collections import OrderedDict
-from contextlib import nullcontext
 from datetime import datetime, timedelta
 from functools import partial
 import json
@@ -16,6 +16,8 @@ import gc
 from collections.abc import Mapping
 import numpy as np
 import random
+from concurrent.futures import ThreadPoolExecutor
+from tqdm import tqdm
 from copy import deepcopy
 import torch
 from PIL import Image
@@ -42,12 +44,10 @@ from torch.distributed.fsdp.wrap import _or_policy
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import CosineAnnealingLR, LambdaLR
 from torch.utils.data import ConcatDataset, DataLoader
-from transformers import (AutoConfig, AutoModelForCausalLM, AutoModel,
-                          CLIPVisionModel, LlavaConfig, CLIPImageProcessor,
-                          LlavaForConditionalGeneration, LlavaProcessor)
-
+from transformers import (AutoConfig, AutoModelForCausalLM, AutoModel)
+from xtuner._lite.datasets.load import (load_from_cache)
 from xtuner._lite import AutoTokenizer, get_logger
-from xtuner._lite.accelerate import (LORA_TARGET_MAP, LoadWoInit,
+from xtuner._lite.accelerate import (LoadWoInit,
                                      dispatch_modules, packed_sequence)
 from xtuner._lite.accelerate.fsdp import (RECOMPUTE_MODULES,
                                           checkpoint_check_fn, dp_lazy_init,
@@ -59,8 +59,11 @@ from xtuner._lite.internvl.dataset import (dynamic_preprocess, preprocess,
                                            preprocess_internlm, preprocess_mpt,
                                            preprocess_phi3, build_transform,
                                            TCSLoader, concat_pad_data_collator,
-                                           packing_collate)
+                                           packing_collate, dynamic_num_patch)
 from xtuner._lite.internvl.modeling_intern_vit import InternVisionModel
+from datasets import Dataset as HF_Dataset
+from xtuner.utils import DEFAULT_PAD_TOKEN_INDEX, IGNORE_INDEX
+from xtuner._lite.datasets.text import SoftPackerForText
 
 try:
     from petrel_client.client import Client
@@ -157,6 +160,18 @@ def parse_args():
               'truncated, and the length of the packed data will always '
               'be `max_length`; When `soft`, it will pack multiple  data '
               'into nearly `max_length` without truncating the data.'))
+    data_args.add_argument(
+        '--dset-cache-dir',
+        help=('the cache dir of the loaded datasets. When the `datasets` is '
+              'set, the loaded datasets will be cached to this dir. If the '
+              '`datasets` are not set, the cached dataset in this dir will be '
+              'loaded.'))
+    data_args.add_argument(
+        '--dset-from-cache',
+        action='store_true',
+        help=('Load data directly from `dset-cache-dir`. This can save time '
+              'on online tokenization, but if the tokenizer changed, '
+              'recaching is needed.'))
     data_args.add_argument('--group-by-length', action='store_true')
     data_args.add_argument('--group-by-modality-length', action='store_true')
     data_args.add_argument(
@@ -773,6 +788,484 @@ def build_datasets(
     return train_dataset
 
 
+class InternVLDatasetFunForPacking:
+    """Dataset for supervised fine-tuning."""
+
+    def __init__(
+            self,
+            template_name,
+            meta,
+            tokenizer,
+            tcs_loader,
+            ds_name,
+            num_image_token,
+            image_size=224,
+            is_train=True,
+            pad2square=False,
+            group_by_length=False,
+            dynamic_image_size=False,
+            use_thumbnail=False,
+            min_dynamic_patch=1,
+            max_dynamic_patch=6,
+            min_num_frame=4,  # for video data
+            max_num_frame=12,  # for video data
+            sampling_method='rand',  # for video data
+            repeat_time=1,
+            normalize_type='imagenet',
+            random_seed=0,
+            root=None
+    ):
+        self.ds_name = ds_name
+        self.tokenizer = tokenizer
+        self.template_name = template_name
+        self.num_image_token = num_image_token
+        logger.warning(f"{dist.get_rank()} ======= Start to process dataset: {meta['annotation']}")
+        logger.info(f'[Dataset] num_image_token: {num_image_token}')
+        logger.info(f'[Dataset] dynamic_image_size: {dynamic_image_size}')
+        logger.info(f'[Dataset] use_thumbnail: {use_thumbnail}')
+        logger.info(f'[Dataset] min_dynamic_patch: {min_dynamic_patch}, max_dynamic_patch: {max_dynamic_patch}')
+
+        self.image_size = image_size
+        self.is_train = is_train
+        self.pad2square = pad2square
+        self.max_num_frame = max_num_frame
+        self.min_num_frame = min_num_frame
+        self.sampling_method = sampling_method
+        self.root = root
+        self.tcs_loader = tcs_loader
+        self.dynamic_image_size = dynamic_image_size
+        self.min_dynamic_patch = min_dynamic_patch
+        self.max_dynamic_patch = max_dynamic_patch
+        self.use_thumbnail = use_thumbnail
+
+    def get_preprocess_function(self):
+        # Select the appropriate preprocessing function based on the template name
+        if self.template_name == 'Hermes-2':
+            preprocess_function = preprocess_mpt
+        elif self.template_name == 'internlm2-chat':
+            preprocess_function = preprocess_internlm
+        elif self.template_name == 'phi3-chat':
+            preprocess_function = preprocess_phi3
+        else:
+            preprocess_function = preprocess
+        return preprocess_function
+
+    def multi_modal_get_item(self, data_item):
+        # Ensure the first conversation contains an image placeholder
+        if '<image>\n' in data_item['conversations'][0]['value']:
+            data_item['conversations'][0]['value'] = data_item['conversations'][0]['value'].replace('<image>\n', '')
+
+        if '\n<image>' in data_item['conversations'][0]['value']:
+            data_item['conversations'][0]['value'] = data_item['conversations'][0]['value'].replace('\n<image>', '')
+
+        if '<image>' in data_item['conversations'][0]['value']:
+            data_item['conversations'][0]['value'] = data_item['conversations'][0]['value'].replace('<image>', '')
+
+        if '<image>' not in data_item['conversations'][0]['value']:
+            data_item['conversations'][0]['value'] = '<image>\n' + data_item['conversations'][0]['value']
+
+        image_path = data_item['image']
+        if isinstance(image_path, list):
+            image_path = image_path[0]
+        image_path = os.path.join(self.root, image_path)
+        # Merge the image path
+        if 'image_wh' not in data_item:
+            warnings.warn(f'No image_wh in {self.ds_name}. this is not recommended')
+            try:
+                if "s3://" in image_path:
+                    image = self.tcs_loader(image_path)
+                else:
+                    image = Image.open(image_path).convert('RGB')
+                image_size = image.size
+            except Exception as e:
+                print(e, self.ds_name, flush=True)
+                # 只是为了防止报错，实际上会剔除
+                ret = dict(
+                    input_ids=torch.tensor([0], dtype=torch.long),
+                    labels=torch.tensor([0], dtype=torch.long),
+                    num_tokens=[0],
+                    image_path=image_path
+                )
+                return ret
+        else:
+            image_size = data_item['image_wh']
+            image_size = image_size[0]
+
+        if self.dynamic_image_size:  # If dynamic image size is enabled, preprocess the image dynamically
+            num_patches = dynamic_num_patch(image_size, min_num=self.min_dynamic_patch, max_num=self.max_dynamic_patch,
+                                            image_size=self.image_size, use_thumbnail=self.use_thumbnail)
+        else:  # Otherwise, use the original image as a single patch
+            num_patches = 1
+
+        if not self.dynamic_image_size:
+            assert num_patches == 1, f'The number of patches should be 1, but got {num_patches}.'
+
+        # Select the appropriate preprocessing function based on the template name
+        preprocess_function = self.get_preprocess_function()
+
+        # Preprocess the conversations and generate the return dictionary
+        ret = preprocess_function(self.template_name, [deepcopy(data_item['conversations'])],
+                                  self.tokenizer, [self.num_image_token * num_patches],
+                                  group_by_length=True, ds_name=self.ds_name)
+
+        # Create the final return dictionary
+        ret = dict(
+            input_ids=ret['input_ids'][0],
+            labels=ret['labels'][0],
+            num_tokens=[len(ret['input_ids'][0])],
+            image_path=image_path
+        )
+        return ret
+
+    def pure_text_get_item(self, data_item):
+        # Select the appropriate preprocessing function based on the template name
+        preprocess_function = self.get_preprocess_function()
+
+        # Preprocess the conversations and generate the return dictionary
+        ret = preprocess_function(self.template_name, [deepcopy(data_item['conversations'])],
+                                  self.tokenizer, [self.num_image_token * 1], text_only=True,
+                                  group_by_length=True, ds_name=self.ds_name)
+
+        # Create the final return dictionary
+        ret = dict(
+            input_ids=ret['input_ids'][0],
+            labels=ret['labels'][0],
+            num_tokens=[len(ret['input_ids'][0])],
+            image_path=None
+        )
+        return ret
+
+    def __call__(self, item):
+        data_item = json.loads(item)
+        if 'image' in data_item and data_item['image'] is not None:
+            if type(data_item['image']) == list and len(data_item['image']) > 1:
+                raise NotImplementedError
+            else:
+                ret = self.multi_modal_get_item(data_item)
+        elif 'video' in data_item and data_item['video'] is not None and data_item['video'] != '':
+            raise NotImplementedError
+        else:
+            ret = self.pure_text_get_item(data_item)
+
+        return ret
+
+
+class SoftPackerForInternVL(SoftPackerForText):
+
+    def __init__(self,
+                 dataset,
+                 max_length=2048,
+                 pack_info=None,
+                 tcs_loader=None,
+                 dynamic_image_size=False,
+                 is_train=False,
+                 image_size=448,
+                 pad2square=False,
+                 normalize_type='imagenet',
+                 min_dynamic_patch=1,
+                 max_dynamic_patch=12,
+                 use_thumbnail=True):
+        super().__init__(dataset, max_length, pack_info)
+        self._cached = False
+        self.tcs_loader = tcs_loader
+        self.dynamic_image_size = dynamic_image_size
+        self.is_train = is_train
+        self.image_size = image_size
+        self.pad2square = pad2square
+        self.normalize_type = normalize_type
+        self.min_dynamic_patch = min_dynamic_patch
+        self.max_dynamic_patch = max_dynamic_patch
+        self.use_thumbnail = use_thumbnail
+
+    def get_transform(self):
+        # Build transformation function
+        transform = build_transform(is_train=self.is_train, input_size=self.image_size,
+                                    pad2square=self.pad2square, normalize_type=self.normalize_type)
+        return transform
+
+    def __getitem__(self, item):
+        transform = self.get_transform()
+
+        packed_items = self.idx_per_pack[item]
+        assert len(packed_items) > 0
+
+        packed_input_ids = []
+        packed_labels = []
+        packed_num_tokens = []
+        packed_num_img_tokens = []
+        packed_pixel_values = []
+        packed_image_flags = []
+
+        for i in packed_items:
+            data = self.dataset[i]
+
+            # 错误数据删除
+            if data['num_tokens'] == 0:
+                continue
+
+            # 图片如果读取错误，这条数据也不要了
+            image_path = data.get('image_path', None)
+            if image_path is not None:
+                # 多模态数据
+                assert isinstance(image_path, str), f"image_path should be str, but got {data['image_path']}"
+                try:
+                    if "s3://" in image_path:
+                        image = self.tcs_loader(image_path)
+                    else:
+                        image = Image.open(image_path).convert('RGB')
+
+                    if self.dynamic_image_size:  # If dynamic image size is enabled, preprocess the image dynamically
+                        images = dynamic_preprocess(image, min_num=self.min_dynamic_patch,
+                                                    max_num=self.max_dynamic_patch,
+                                                    image_size=self.image_size, use_thumbnail=self.use_thumbnail)
+                    else:  # Otherwise, use the original image as a single patch
+                        images = [image]
+                    pixel_values = [transform(image) for image in images]
+                    pixel_values = torch.stack(pixel_values)  # n,c,h,w
+                    packed_pixel_values.append(pixel_values)
+                    num_patches = pixel_values.size(0)
+                    packed_image_flags.append(torch.tensor([1] * num_patches, dtype=torch.long))
+                except Exception as e:
+                    print(e, data, flush=True)
+                    continue
+            else:
+                # 纯文本数据
+                image = Image.new('RGB', (224, 224), (255, 255, 255))
+                if self.dynamic_image_size:
+                    # Dynamically preprocess the image to generate patches
+                    images = dynamic_preprocess(image, min_num=self.min_dynamic_patch, max_num=1,
+                                                image_size=self.image_size, use_thumbnail=self.use_thumbnail)
+                else:
+                    images = [image]
+
+                # Apply the transformation to each image patch and stack them into a tensor
+                pixel_values = [transform(image) for image in images]
+                pixel_values = torch.stack(pixel_values)
+                num_patches = pixel_values.size(0)
+                assert num_patches == 1, f'The number of patches should be 1, but got {num_patches}.'
+                packed_pixel_values.append(pixel_values)
+                packed_image_flags.append(torch.tensor([0] * num_patches, dtype=torch.long))
+
+            packed_input_ids.extend(data['input_ids'])
+            packed_labels.extend(data['labels'])
+
+            _num_tokens = data['num_tokens']
+            packed_num_tokens.append(_num_tokens)
+
+            if data['num_img_tokens'] is not None and sum(data['num_img_tokens']) > 0:
+                _num_img_tokens = data['num_img_tokens']
+                packed_num_img_tokens.append(_num_img_tokens)
+
+        pixel_values = torch.cat(packed_pixel_values, dim=0)
+        image_flags = torch.cat(packed_image_flags, dim=0)
+
+        if sum(packed_num_tokens) < self.max_length:
+            # TODO: 是否能加速，存在疑问？
+            num_pad_tokens = self.max_length - sum(packed_num_tokens)
+            packed_input_ids.extend([DEFAULT_PAD_TOKEN_INDEX] * num_pad_tokens)
+            packed_labels.extend([IGNORE_INDEX] * num_pad_tokens)
+            packed_num_tokens.append(num_pad_tokens)
+        else:
+            packed_num_tokens.append(0)
+
+        packed = {
+            'input_ids': packed_input_ids,
+            'labels': packed_labels,
+            'pixel_values': pixel_values,
+            'image_flags': image_flags,
+            'num_tokens': packed_num_tokens,
+            'num_img_tokens': packed_num_img_tokens
+        }
+
+        return packed
+
+
+def multi_thread_map(map_fns, dataset, desc, num_proc=8):
+    if not isinstance(map_fns, (tuple, list)):
+        map_fns = [map_fns]
+
+    def sequential_map(item):
+        for fn in map_fns:
+            item = fn(item)
+        return item
+
+    with ThreadPoolExecutor(max_workers=num_proc) as executor:
+        results = list(
+            tqdm(
+                executor.map(sequential_map, dataset),
+                desc=desc,
+                total=len(dataset)))
+
+    return results
+
+
+def build_packing_datasets(
+        args,
+        tokenizer,
+        tcs_loader,
+        model,
+        group_by_length=False,
+        dynamic_image_size=True,
+        force_image_size=448,
+        use_thumbnail=True,
+        min_dynamic_patch=1,
+        max_dynamic_patch=12,
+        normalize_type='imagenet',
+):
+    ds_collections = json.loads(open(args.meta_path).read())
+
+    if dist.is_available():
+        world_size = dist.get_world_size()
+        rank = dist.get_rank()
+    else:
+        world_size = 1
+        rank = 0
+
+    if args.dset_from_cache:
+        logger.info(f'[{rank}] Load datasets from cache: {args.dset_cache_dir}')
+        logger.warning('Warning: Please ensure that the cached data and the model '
+                       'correspond to each other, otherwise unexpected behavior may occur.')
+        datasets = load_from_cache(args.dset_cache_dir)
+        dist.barrier()
+    else:
+        # cache dataset
+        datasets = []
+        lengths = []
+        _dataset_list = []
+        _dataset_lengths = []
+        for _, ds_name in enumerate(ds_collections.keys()):
+            _data = ds_collections[ds_name]
+            _repeat_time = _data.get('repeat_time', 1)
+            _dataset_lengths.append(_repeat_time * _data['length'])
+            _dataset_list.append([ds_name, ds_collections[ds_name]])
+
+        _ds_names = [ds[0] for ds in _dataset_list]
+        assert len(_ds_names) == len(set(_ds_names)), f"Dataset names should be unique, but got {_ds_names}"
+
+        # 按照长度对数据集进行从大到小排序
+        combined = list(zip(_dataset_lengths, _dataset_list))
+        sorted_combined = sorted(combined, key=lambda x: x[0], reverse=True)
+        _, _dataset_list = zip(*sorted_combined)
+        _dataset_list = list(_dataset_list)
+        num_files = len(_dataset_list)
+
+        # 切分到不同卡
+        _dataset_list = _dataset_list[rank::world_size]
+        logger.info(f'[{rank}] Assigned Files: {[_dataset[0] for _dataset in _dataset_list]}')
+        timeout = timedelta(
+            minutes=int(os.getenv('XTUNER_DATASET_TIMEOUT', default=45)))
+        group = dist.new_group(backend='gloo', timeout=timeout)
+        for i, _dataset in enumerate(_dataset_list):
+            ds_name, ds_data = _dataset
+            ds_idx = i * world_size + rank
+            repeat_time = ds_data['repeat_time']
+            if 'max_dynamic_patch' in ds_data:
+                max_num = ds_data['max_dynamic_patch']
+                logger.info(f'max_dynamic_patch is set to {max_num} according to the meta file')
+            else:
+                max_num = max_dynamic_patch
+
+            with open(ds_data['annotation'], 'r') as f:
+                raw_data = f.readlines()
+                if repeat_time < 1:
+                    # If repeat_time is less than 1, select a portion of the data
+                    raw_data = raw_data[:int(len(raw_data) * repeat_time)]
+                if repeat_time > 1:
+                    assert isinstance(repeat_time, int)
+                    # Repeat the list if repeat_time is greater than 1
+                    raw_data = raw_data * repeat_time
+            map_fn = InternVLDatasetFunForPacking(
+                args.chat_template, ds_data,
+                tokenizer,
+                tcs_loader,
+                ds_name=ds_name,
+                num_image_token=model.num_image_token,
+                image_size=force_image_size,
+                is_train=ds_data['data_augment'],
+                pad2square=False,
+                group_by_length=group_by_length,
+                dynamic_image_size=dynamic_image_size,
+                use_thumbnail=use_thumbnail,
+                min_dynamic_patch=min_dynamic_patch,
+                max_dynamic_patch=max_num,
+                repeat_time=repeat_time,
+                normalize_type=normalize_type,
+                random_seed=ds_idx,
+                root=ds_data['root'],
+            )
+            desc = f'[RANK {rank}] Map local file {ds_name}'
+            dset = multi_thread_map(map_fn, raw_data, desc, 8)
+            logger.debug(f'[File {ds_name}] Mapped Sample:\n{dset[0]}')
+            dataset = HF_Dataset.from_list(dset)
+            if args.dset_cache_dir:
+                digits = len(str(abs(num_files)))
+                cache_id = (f'{ds_name}_cache-local-{ds_idx:0{digits}}-of-'
+                            f'{num_files:0{digits}}')
+                sub_cache_dir = os.path.join(args.dset_cache_dir, cache_id)
+                if os.path.exists(sub_cache_dir):
+                    shutil.rmtree(sub_cache_dir)
+                    logger.warning(f'Found {sub_cache_dir} exists. '
+                                   'Clear it and re-cache.')
+                dataset.save_to_disk(sub_cache_dir)
+            logger.info(f'Add dataset: {ds_name} with length: {len(dataset)}')
+            datasets.append([ds_name, dataset])
+            if False and args.use_data_resampling:
+                lengths.append(math.sqrt(len(dataset)))
+            else:
+                lengths.append(len(dataset))
+
+        if dist.is_available():
+            buffers = [None] * world_size
+            dist.all_gather_object(buffers, datasets, group=group)
+            # 拉平
+            datasets = [item for sublist in buffers for item in sublist]
+
+    # soft packing
+    logger.info(f'[{rank}] Start to soft pack datasets')
+    ds_names = [ds[0] for ds in datasets]
+    datasets = [ds[1] for ds in datasets]
+
+    orig_dataset_len = sum([len(d) for d in datasets])
+
+    _datasets = []
+    pack_infos = SoftPackerForInternVL.get_pack_infos(datasets, args.pack_max_length)
+    for i in range(len(datasets)):
+        _infos = pack_infos[i]
+        _dset = datasets[i]
+        _ds_name = ds_names[i]
+        ds_data = ds_collections[_ds_name]
+
+        if 'max_dynamic_patch' in ds_data:
+            max_num = ds_data['max_dynamic_patch']
+            logger.info(f'max_dynamic_patch is set to {max_num} according to the meta file')
+        else:
+            max_num = max_dynamic_patch
+
+        _packed_dset = SoftPackerForInternVL(_dset, args.pack_max_length, _infos,
+                                             tcs_loader=tcs_loader,
+                                             dynamic_image_size=dynamic_image_size,
+                                             is_train=ds_data['data_augment'],
+                                             image_size=force_image_size,
+                                             pad2square=False,
+                                             normalize_type=normalize_type,
+                                             min_dynamic_patch=min_dynamic_patch,
+                                             max_dynamic_patch=max_num,
+                                             use_thumbnail=use_thumbnail)
+
+        _datasets.append(_packed_dset)
+    logger.info(f'[{rank}] Soft packing done')
+
+    if False and args.use_data_resampling:
+        raise NotImplementedError
+    else:
+        train_dataset = ConcatDataset(_datasets)
+
+    if rank == 0:
+        logger.info(f'[Dataset] (Original) {orig_dataset_len} samples.')
+        logger.info(f'[Dataset] (Packed) {len(train_dataset)} samples.')
+    return train_dataset
+
+
 def _prepare_input(data, device='cuda'):
     """
         Prepares one `data` before feeding it to the model, be it a tensor or a nested list/dictionary of tensors.
@@ -926,19 +1419,40 @@ def internvl_train(args):
     start_load_data_t = time.time()
     tcs_loader = TCSLoader('~/petreloss.conf') if has_tcs_loader else None
 
-    train_dataset = build_datasets(args, tokenizer, tcs_loader, meta_internvl,
-                                   args.group_by_length,
-                                   force_image_size=internvl_config.force_image_size,
-                                   dynamic_image_size=internvl_config.dynamic_image_size,
-                                   use_thumbnail=internvl_config.use_thumbnail,
-                                   min_dynamic_patch=internvl_config.min_dynamic_patch,
-                                   max_dynamic_patch=internvl_config.max_dynamic_patch)
+    if args.dset_cache_dir and os.path.isdir(args.dset_cache_dir):
+        if len(os.listdir(args.dset_cache_dir)):
+            logger.warning(f'`{args.dset_cache_dir}` is not an empty '
+                           'folder, which may lead to inaccurate '
+                           'cache results.')
+    if args.dset_pack_level:
+        if args.dset_from_cache:
+            if not os.path.exists(args.dset_cache_dir):
+                logger.warning(f'`{args.dset_cache_dir}` does not exist, re-cache the dataset.')
+                args.dset_from_cache = False
+        train_dataset = build_packing_datasets(args, tokenizer, tcs_loader, meta_internvl,
+                                               args.group_by_length,
+                                               force_image_size=internvl_config.force_image_size,
+                                               dynamic_image_size=internvl_config.dynamic_image_size,
+                                               use_thumbnail=internvl_config.use_thumbnail,
+                                               min_dynamic_patch=internvl_config.min_dynamic_patch,
+                                               max_dynamic_patch=internvl_config.max_dynamic_patch)
+    else:
+        train_dataset = build_datasets(args, tokenizer, tcs_loader, meta_internvl,
+                                       args.group_by_length,
+                                       force_image_size=internvl_config.force_image_size,
+                                       dynamic_image_size=internvl_config.dynamic_image_size,
+                                       use_thumbnail=internvl_config.use_thumbnail,
+                                       min_dynamic_patch=internvl_config.min_dynamic_patch,
+                                       max_dynamic_patch=internvl_config.max_dynamic_patch)
+        if rank == 0:
+            logger.info(f'[Dataset] (Original) {len(train_dataset)} samples.')
     logger.warning(f'{dist.get_rank()} ===== End of all dataset =====')
-    if rank == 0:
-        logger.info(f'[Dataset] (Original) {len(train_dataset)} samples.')
 
     if args.group_by_length:
-        length_property = 'length'
+        if args.dset_pack_level:
+            length_property = 'max_length_per_pack'
+        else:
+            length_property = 'length'
         sampler = LengthGroupedSampler(train_dataset, dp_mesh,
                                        args.global_batch_size,
                                        seed=args.seed,

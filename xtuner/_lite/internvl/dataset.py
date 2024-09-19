@@ -738,10 +738,32 @@ def dynamic_preprocess(image, min_num=1, max_num=6, image_size=448, use_thumbnai
     return processed_images
 
 
+def dynamic_num_patch(size, min_num=1, max_num=6, image_size=448, use_thumbnail=False):
+    orig_width, orig_height = size
+    aspect_ratio = orig_width / orig_height
+
+    # calculate the existing image aspect ratio
+    target_ratios = set(
+        (i, j) for n in range(min_num, max_num + 1) for i in range(1, n + 1) for j in range(1, n + 1) if
+        i * j <= max_num and i * j >= min_num)
+    target_ratios = sorted(target_ratios, key=lambda x: x[0] * x[1])
+
+    # find the closest aspect ratio to the target
+    target_aspect_ratio = find_closest_aspect_ratio(
+        aspect_ratio, target_ratios, orig_width, orig_height, image_size)
+
+    # calculate the target width and height
+    blocks = target_aspect_ratio[0] * target_aspect_ratio[1]
+
+    if use_thumbnail:
+        blocks += 1
+    return blocks
+
+
 IGNORE_INDEX = -100
 
-def concat_pad_data_collator(features, pad_id=0):
 
+def concat_pad_data_collator(features, pad_id=0):
     first = features[0]
     batch = {}
 
@@ -813,6 +835,7 @@ def packing_collate(features, pack_batch=True):
     num_img_tokens = torch.IntTensor(num_img_tokens)
 
     if len(features) > 1 and pack_batch:
+        # batch packing
         input_ids = torch.cat(input_ids, dim=0).unsqueeze(0)
         labels = torch.cat(labels, dim=0).unsqueeze(0)
         attention_mask = torch.cat(attention_mask, dim=0).unsqueeze(0)
@@ -821,7 +844,13 @@ def packing_collate(features, pack_batch=True):
     elif len(features) > 1 and not pack_batch:
         raise NotImplementedError
     else:
-        raise NotImplementedError
+        # soft packing
+        assert len(features) == 1
+        input_ids = torch.stack(input_ids)
+        labels = torch.stack(labels)
+        attention_mask = torch.stack(attention_mask)
+        image_flags = image_flags[0]
+        pixel_values = pixel_values[0]
 
     # TODO support sp
     data_dict = {
