@@ -592,6 +592,75 @@ def preprocess_phi3(
     )
 
 
+def preprocess_phi3_fast(
+        template_name,
+        sources,
+        tokenizer: transformers.PreTrainedTokenizer,
+        num_image_token_list: list,
+        text_only: bool = False,
+        group_by_length: bool = False,
+        use_packed_ds: bool = False,
+        ds_name: str = None,
+        num_image: int = 1
+) -> Dict:
+    conv = get_conv_template(template_name)
+    roles = {'human': conv.roles[0], 'gpt': conv.roles[1]}
+
+    for i, source in enumerate(sources):
+        if roles[source[0]['from']] != conv.roles[0]:
+            # Skip the first one if it is not from human
+            source = source[1:]
+
+        conv.messages = []
+        for j, sentence in enumerate(source):
+            role = roles[sentence['from']]
+            assert role == conv.roles[j % 2], f'{i}'
+            conv.append_message(role, sentence['value'])
+
+    assert len(conv.messages) % 2 == 0
+    inputs = conv.messages[::2]
+    outputs = conv.messages[1::2]
+
+    input_ids, labels = [], []
+    # input_texts = ''
+    system_prompt = conv.system_template.format(system_message=conv.system_message)
+    input_text = system_prompt + conv.sep
+    # input_texts += input_text
+    input_encode = tokenizer.encode(input_text, add_special_tokens=True)
+    input_ids += input_encode
+    labels += [IGNORE_INDEX] * len(input_encode)
+
+    for input_, output_ in zip(inputs, outputs):
+        # output_[0] = '<|assistant|>\n'
+        # 放到 input 而不是 output 是为了和官方对齐
+        input_text = ''.join(input_) + conv.sep + output_[0]
+
+        if not text_only:
+            for i in range(num_image):
+                image_tokens = f'{IMG_START_TOKEN}{IMG_CONTEXT_TOKEN * num_image_token_list[i]}{IMG_END_TOKEN}'
+                input_text = input_text.replace('<image>', image_tokens, 1)
+        output_text = output_[1] + conv.sep
+
+        input_encode = tokenizer.encode(input_text, add_special_tokens=False)
+        output_encode = tokenizer.encode(output_text, add_special_tokens=False)
+        input_ids += input_encode
+        input_ids += output_encode
+        labels += [IGNORE_INDEX] * len(input_encode)
+        labels += output_encode
+
+    #     input_texts += input_text
+    #     input_texts += output_text
+    # print(input_texts)
+    input_ids = torch.tensor(input_ids, dtype=torch.long)[None]
+    labels = torch.tensor(labels, dtype=torch.long)[None]
+    assert input_ids.size() == labels.size()
+    return dict(
+        input_ids=input_ids,
+        labels=labels,
+        attention_mask=input_ids.ne(tokenizer.pad_token_id),
+    )
+
+
 def preprocess_internlm(
         template_name,
         sources,

@@ -57,7 +57,7 @@ from torch.distributed.checkpoint.stateful import Stateful
 from xtuner._lite.internvl.constants import IMG_CONTEXT_TOKEN
 from xtuner._lite.internvl.dataset import (dynamic_preprocess, preprocess,
                                            preprocess_internlm, preprocess_mpt,
-                                           preprocess_phi3, build_transform,
+                                           preprocess_phi3, build_transform, preprocess_phi3_fast,
                                            TCSLoader, concat_pad_data_collator,
                                            packing_collate, dynamic_num_patch)
 from xtuner._lite.internvl.modeling_intern_vit import InternVisionModel
@@ -114,6 +114,14 @@ def parse_args():
         '--chat-template',
         choices=['phi3-chat'],
         help='')
+    model_args.add_argument(
+        '--use-fast-tokenizer',
+        action='store_true',
+        help="")
+    model_args.add_argument(
+        '--use-orig',
+        action='store_true',
+        help="")
     model_args.add_argument(
         '--freeze-llm',
         action='store_true',
@@ -373,12 +381,14 @@ class LazySupervisedDataset(Dataset):
             repeat_time=1,
             normalize_type='imagenet',
             random_seed=0,
+            use_fast_tokenizer=False
     ):
         super(LazySupervisedDataset, self).__init__()
         self.ds_name = ds_name
         self.tokenizer = tokenizer
         self.template_name = template_name
         self.num_image_token = num_image_token
+        self.use_fast_tokenizer = use_fast_tokenizer
         logger.warning(f"{dist.get_rank()} ======= Start to process dataset: {meta['annotation']}")
         logger.info(f'[Dataset] num_image_token: {num_image_token}')
         logger.info(f'[Dataset] dynamic_image_size: {dynamic_image_size}')
@@ -453,7 +463,10 @@ class LazySupervisedDataset(Dataset):
         elif self.template_name == 'internlm2-chat':
             preprocess_function = preprocess_internlm
         elif self.template_name == 'phi3-chat':
-            preprocess_function = preprocess_phi3
+            if self.use_fast_tokenizer:
+                preprocess_function = preprocess_phi3_fast
+            else:
+                preprocess_function = preprocess_phi3
         else:
             preprocess_function = preprocess
         return preprocess_function
@@ -709,6 +722,7 @@ def build_datasets(
         min_dynamic_patch=1,
         max_dynamic_patch=12,
         normalize_type='imagenet',
+        use_fast_tokenizer=False
 ):
     datasets = []
     lengths = []
@@ -767,6 +781,7 @@ def build_datasets(
             repeat_time=repeat_time,
             normalize_type=normalize_type,
             random_seed=ds_idx,
+            use_fast_tokenizer=use_fast_tokenizer
         )
         logger.info(f'Add dataset: {ds_name} with length: {len(dataset)}')
         datasets.append(dataset)
@@ -813,12 +828,14 @@ class InternVLDatasetFunForPacking:
             repeat_time=1,
             normalize_type='imagenet',
             random_seed=0,
-            root=None
+            root=None,
+            use_fast_tokenizer=True,
     ):
         self.ds_name = ds_name
         self.tokenizer = tokenizer
         self.template_name = template_name
         self.num_image_token = num_image_token
+        self.use_fast_tokenizer = use_fast_tokenizer
         logger.warning(f"{dist.get_rank()} ======= Start to process dataset: {meta['annotation']}")
         logger.info(f'[Dataset] num_image_token: {num_image_token}')
         logger.info(f'[Dataset] dynamic_image_size: {dynamic_image_size}')
@@ -845,7 +862,10 @@ class InternVLDatasetFunForPacking:
         elif self.template_name == 'internlm2-chat':
             preprocess_function = preprocess_internlm
         elif self.template_name == 'phi3-chat':
-            preprocess_function = preprocess_phi3
+            if self.use_fast_tokenizer:
+                preprocess_function = preprocess_phi3_fast
+            else:
+                preprocess_function = preprocess_phi3
         else:
             preprocess_function = preprocess
         return preprocess_function
@@ -1111,6 +1131,7 @@ def build_packing_datasets(
         min_dynamic_patch=1,
         max_dynamic_patch=12,
         normalize_type='imagenet',
+        use_fast_tokenizer=True,
 ):
     ds_collections = json.loads(open(args.meta_path).read())
 
@@ -1192,6 +1213,7 @@ def build_packing_datasets(
                 normalize_type=normalize_type,
                 random_seed=ds_idx,
                 root=ds_data['root'],
+                use_fast_tokenizer=use_fast_tokenizer,
             )
             desc = f'[RANK {rank}] Map local file {ds_name}'
             dset = multi_thread_map(map_fn, raw_data, desc, 8)
@@ -1391,7 +1413,9 @@ def internvl_train(args):
     else:
         raise RuntimeError('`dtype` only supports `fp16`，`bf16`, or `auto`, '
                            f'but found {args.dtype}.')
-    tokenizer = AutoTokenizer.from_pretrained(args.internvl, use_fast=False, trust_remote_code=True)
+
+    logger.info(f'Using Fast Tokenzier: {args.use_fast_tokenizer} for training.')
+    tokenizer = AutoTokenizer.from_pretrained(args.internvl, use_fast=args.use_fast_tokenizer, trust_remote_code=True)
     img_context_token_id = tokenizer.convert_tokens_to_ids(IMG_CONTEXT_TOKEN)
 
     internvl_config = AutoConfig.from_pretrained(args.internvl, trust_remote_code=True)
@@ -1409,9 +1433,12 @@ def internvl_train(args):
                 param_fp32 = torch.nn.Parameter(param.to(dtype=torch.float32))
                 setattr(module, p_name, param_fp32)
 
-    pack_batch = True
-    if pack_batch:
-        dispatch_modules(meta_internvl)
+    exclude_cls = None
+    if args.use_orig:
+        # 保持原始逻辑不变
+        logger.info('Use original style.')
+        exclude_cls = ['Phi3FlashAttention2']
+    dispatch_modules(meta_internvl, exclude_cls)
 
     ###########################################################################
     #                     2. Dataset & Dataloader                             #
@@ -1425,6 +1452,7 @@ def internvl_train(args):
                            'folder, which may lead to inaccurate '
                            'cache results.')
     if args.dset_pack_level:
+        assert args.use_fast_tokenizer, 'Packing dataset only supports fast tokenizer.'
         if args.dset_from_cache:
             if not os.path.exists(args.dset_cache_dir):
                 logger.warning(f'`{args.dset_cache_dir}` does not exist, re-cache the dataset.')
@@ -1435,7 +1463,8 @@ def internvl_train(args):
                                                dynamic_image_size=internvl_config.dynamic_image_size,
                                                use_thumbnail=internvl_config.use_thumbnail,
                                                min_dynamic_patch=internvl_config.min_dynamic_patch,
-                                               max_dynamic_patch=internvl_config.max_dynamic_patch)
+                                               max_dynamic_patch=internvl_config.max_dynamic_patch,
+                                               use_fast_tokenizer=args.use_fast_tokenizer)
     else:
         train_dataset = build_datasets(args, tokenizer, tcs_loader, meta_internvl,
                                        args.group_by_length,
@@ -1443,7 +1472,8 @@ def internvl_train(args):
                                        dynamic_image_size=internvl_config.dynamic_image_size,
                                        use_thumbnail=internvl_config.use_thumbnail,
                                        min_dynamic_patch=internvl_config.min_dynamic_patch,
-                                       max_dynamic_patch=internvl_config.max_dynamic_patch)
+                                       max_dynamic_patch=internvl_config.max_dynamic_patch,
+                                       use_fast_tokenizer=args.use_fast_tokenizer)
         if rank == 0:
             logger.info(f'[Dataset] (Original) {len(train_dataset)} samples.')
     logger.warning(f'{dist.get_rank()} ===== End of all dataset =====')
@@ -1463,8 +1493,10 @@ def internvl_train(args):
         sampler = ParallelSampler(
             train_dataset, dp_mesh, args.global_batch_size, seed=args.seed, shuffle=True)
 
-    # collate_fn = concat_pad_data_collator
-    collate_fn = packing_collate
+    if args.use_orig:
+        collate_fn = concat_pad_data_collator
+    else:
+        collate_fn = packing_collate
     train_dataloader = DataLoader(
         train_dataset,
         batch_size=args.mirco_batch_size,
@@ -1693,12 +1725,14 @@ def internvl_train(args):
             step_data_time += time.time() - _data_start_t
 
             data = _prepare_input(data)
-            # 暂时设置为没有 batch packing
-            # packed_ctx = packed_sequence(None, enable=False)
-
             num_tokens = data.pop('num_tokens')
             num_img_tokens = data.pop('num_img_tokens')
-            packed_ctx = packed_sequence(num_tokens, enable=True)
+
+            if args.use_orig:
+                # 暂时设置为没有 batch packing
+                packed_ctx = packed_sequence(None, enable=False)
+            else:
+                packed_ctx = packed_sequence(num_tokens, enable=True)
 
             with packed_ctx:
                 outputs = shard_llava(**data)

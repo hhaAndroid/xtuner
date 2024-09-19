@@ -55,12 +55,14 @@ DISPATCH_MAP = {
 }
 
 
-def dispatch_modules(model, use_varlen_attn=False):
+def dispatch_modules(model, exclude_cls=None):
     from xtuner._lite import get_logger
     logger = get_logger()
 
     for name, module in model.named_modules():
         module_cls = module.__class__.__name__
+        if module_cls in exclude_cls:
+            continue
         if module_cls in DISPATCH_MAP:
             dispatched = DISPATCH_MAP[module_cls](module)
             if dist.is_initialized() and dist.get_rank() == 0:
