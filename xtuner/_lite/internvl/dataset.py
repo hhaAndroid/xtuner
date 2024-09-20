@@ -630,12 +630,14 @@ def preprocess_phi3_fast(
     input_ids += input_encode
     labels += [IGNORE_INDEX] * len(input_encode)
 
+    real_num_images = 0
     for input_, output_ in zip(inputs, outputs):
         # output_[0] = '<|assistant|>\n'
         # 放到 input 而不是 output 是为了和官方对齐
         input_text = ''.join(input_) + conv.sep + output_[0]
 
         if not text_only:
+            real_num_images += input_text.count('<image>')
             for i in range(num_image):
                 image_tokens = f'{IMG_START_TOKEN}{IMG_CONTEXT_TOKEN * num_image_token_list[i]}{IMG_END_TOKEN}'
                 input_text = input_text.replace('<image>', image_tokens, 1)
@@ -649,14 +651,23 @@ def preprocess_phi3_fast(
         labels += [IGNORE_INDEX] * len(input_encode)
         labels += output_encode
 
-    #     input_texts += input_text
-    #     input_texts += output_text
-    # print(input_texts)
+        # input_texts += input_text
+        # input_texts += output_text
+
+    if not text_only:
+        assert real_num_images == num_image, f'{ds_name} data error: {real_num_images} vs. {num_image}'
+        # print(input_texts)
+        # assert input_ids.count(32013) == num_image_token_list[
+        #     0], f'error1: {input_ids}, {num_image_token_list[0]}, {input_texts}'
     if len(input_ids) > tokenizer.model_max_length:
         print(f'WARNING: input_ids length {len(input_ids)} exceeds '
               f'model_max_length {tokenizer.model_max_length}. truncated!')
         input_ids = input_ids[:tokenizer.model_max_length]
         labels = labels[:tokenizer.model_max_length]
+
+        if not text_only:
+            if input_ids.count(32013) != num_image_token_list[0]:
+                print(f'WARNING: IMG_CONTEXT_TOKEN is broken. {input_ids.count(32013)} vs. {num_image_token_list[0]}')
 
     input_ids = torch.tensor(input_ids, dtype=torch.long)[None]
     labels = torch.tensor(labels, dtype=torch.long)[None]
