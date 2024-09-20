@@ -1435,7 +1435,7 @@ def internvl_train(args):
                 param_fp32 = torch.nn.Parameter(param.to(dtype=torch.float32))
                 setattr(module, p_name, param_fp32)
 
-    exclude_cls = None
+    exclude_cls = []
     if args.use_orig:
         # 保持原始逻辑不变
         logger.info('Use original style.')

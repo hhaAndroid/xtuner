@@ -55,7 +55,7 @@ DISPATCH_MAP = {
 }
 
 
-def dispatch_modules(model, exclude_cls=None):
+def dispatch_modules(model, exclude_cls=[]):
     from xtuner._lite import get_logger
     logger = get_logger()
 
