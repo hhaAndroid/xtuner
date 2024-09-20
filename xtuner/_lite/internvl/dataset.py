@@ -639,6 +639,7 @@ def preprocess_phi3_fast(
             for i in range(num_image):
                 image_tokens = f'{IMG_START_TOKEN}{IMG_CONTEXT_TOKEN * num_image_token_list[i]}{IMG_END_TOKEN}'
                 input_text = input_text.replace('<image>', image_tokens, 1)
+        assert '<image>' not in input_text, f'error: {input_text}'
         output_text = output_[1] + conv.sep
 
         input_encode = tokenizer.encode(input_text, add_special_tokens=False)
@@ -651,6 +652,12 @@ def preprocess_phi3_fast(
     #     input_texts += input_text
     #     input_texts += output_text
     # print(input_texts)
+    if len(input_ids) > tokenizer.model_max_length:
+        print(f'WARNING: input_ids length {len(input_ids)} exceeds '
+              f'model_max_length {tokenizer.model_max_length}. truncated!')
+        input_ids = input_ids[:tokenizer.model_max_length]
+        labels = labels[:tokenizer.model_max_length]
+
     input_ids = torch.tensor(input_ids, dtype=torch.long)[None]
     labels = torch.tensor(labels, dtype=torch.long)[None]
     assert input_ids.size() == labels.size()

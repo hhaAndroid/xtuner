@@ -70,6 +70,7 @@ srun -p llm_razor --job-name=eval --time=02:00:00 --cpus-per-task=16 --nodes=1 -
 ```shell
 conda activate xtuner_23
 cd my_llava
+CUDA=12.0 GCC=7.5 version_control
 bash shell/internvl1_5_phi3_sft.sh
 ```
 

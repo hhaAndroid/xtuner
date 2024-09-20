@@ -7,6 +7,9 @@ import shutil
 import sys
 import time
 import warnings
+from PIL import Image
+
+Image.MAX_IMAGE_PIXELS = None
 from collections import OrderedDict
 from datetime import datetime, timedelta
 from functools import partial
@@ -20,7 +23,6 @@ from concurrent.futures import ThreadPoolExecutor
 from tqdm import tqdm
 from copy import deepcopy
 import torch
-from PIL import Image
 import torch.distributed as dist
 import torch.distributed.checkpoint as dcp
 from accelerate.utils import set_module_tensor_to_device
