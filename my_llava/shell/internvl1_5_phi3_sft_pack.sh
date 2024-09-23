@@ -60,5 +60,6 @@ HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 srun -p ${PARTITION} --time 4-00:00
   --shard-strategy 'zero2' \
   --use-fast-tokenizer \
   --dset-pack-level 'soft' \
-  --dset-cache-dir /mnt/hwfile/xtuner/huanghaian/internvl_meta13_cache \
+  --dset-cache-dir aa \
+  --dset-from-cache \
   2>&1 | tee -a "${OUTPUT_DIR}/training_log.txt"
