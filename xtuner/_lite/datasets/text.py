@@ -214,18 +214,23 @@ class SoftPackerForText(torch.utils.data.Dataset):
         max_length_one_pack = 0
 
         for shfl_i in inds:
-            if _ori_lens[shfl_i] + sum(length_buffer) <= max_length:
+            _ori_len = _ori_lens[shfl_i]
+            if isinstance(_ori_len, list):
+                assert len(_ori_len) == 1
+                _ori_len = _ori_len[0]
+
+            if _ori_len + sum(length_buffer) <= max_length:
                 item_buffer.append(shfl_i)
-                length_buffer.append(_ori_lens[shfl_i])
+                length_buffer.append(_ori_len)
                 max_length_one_pack = max(max_length_one_pack,
-                                          _ori_lens[shfl_i])
+                                          _ori_len)
             else:
                 if len(item_buffer) > 0:
                     idx_per_pack.append(item_buffer)
                     max_length_per_pack.append(max_length_one_pack)
                 item_buffer = [shfl_i]
-                length_buffer = [_ori_lens[shfl_i]]
-                max_length_one_pack = _ori_lens[shfl_i]
+                length_buffer = [_ori_len]
+                max_length_one_pack = _ori_len
 
         assert len(max_length_per_pack) == len(idx_per_pack)
         if len(item_buffer) > 0:

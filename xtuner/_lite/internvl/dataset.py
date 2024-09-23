@@ -842,7 +842,7 @@ def dynamic_num_patch(size, min_num=1, max_num=6, image_size=448, use_thumbnail=
     # calculate the target width and height
     blocks = target_aspect_ratio[0] * target_aspect_ratio[1]
 
-    if use_thumbnail:
+    if use_thumbnail and blocks > 1:
         blocks += 1
     return blocks
 

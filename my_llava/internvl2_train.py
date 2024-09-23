@@ -1059,14 +1059,16 @@ class SoftPackerForInternVL(SoftPackerForText):
                                                     image_size=self.image_size, use_thumbnail=self.use_thumbnail)
                     else:  # Otherwise, use the original image as a single patch
                         images = [image]
-                    pixel_values = [transform(image) for image in images]
-                    pixel_values = torch.stack(pixel_values)  # n,c,h,w
-                    packed_pixel_values.append(pixel_values)
-                    num_patches = pixel_values.size(0)
-                    packed_image_flags.append(torch.tensor([1] * num_patches, dtype=torch.long))
                 except Exception as e:
                     print(e, data, flush=True)
                     continue
+
+                pixel_values = [transform(image) for image in images]
+                pixel_values = torch.stack(pixel_values)  # n,c,h,w
+                packed_pixel_values.append(pixel_values)
+                num_patches = pixel_values.size(0)
+                packed_image_flags.append(torch.tensor([1] * num_patches, dtype=torch.long))
+
             else:
                 # 纯文本数据
                 image = Image.new('RGB', (224, 224), (255, 255, 255))
@@ -1089,10 +1091,13 @@ class SoftPackerForInternVL(SoftPackerForText):
             packed_labels.extend(data['labels'])
 
             _num_tokens = data['num_tokens']
-            packed_num_tokens.append(_num_tokens)
+            packed_num_tokens.append(_num_tokens[0])
 
             num_img_tokens = num_patches * self.num_image_token
-            packed_num_img_tokens.append([num_img_tokens])
+            packed_num_img_tokens.append(num_img_tokens)
+            # if image_path is not None:
+            #     assert data['input_ids'].count(
+            #         32013) == num_img_tokens, f"data error {data['input_ids'].count(32013)}, {num_img_tokens}, {data['input_ids'][-50:]}"
 
         pixel_values = torch.cat(packed_pixel_values, dim=0)
         image_flags = torch.cat(packed_image_flags, dim=0)
@@ -1337,9 +1342,9 @@ def build_packing_datasets(
                 # 合并
                 buffers = [None] * world_size
                 dist.all_gather_object(buffers, dset, group=group)
-                dataset = HF_Dataset.from_list(dset)
                 if args.dset_cache_dir:
                     if rank == 0:
+                        dataset = HF_Dataset.from_list(dset)
                         digits = len(str(abs(num_files)))
                         cache_id = (f'{ds_name}_cache-local-only-rank-{i:0{digits}}-of-'
                                     f'{num_files:0{digits}}')
@@ -1350,12 +1355,13 @@ def build_packing_datasets(
                                            'Clear it and re-cache.')
                         dataset.save_to_disk(sub_cache_dir)
                         logger.info(f'Add dataset: {ds_name} with length: {len(dataset)}')
+                        del dataset
                 # datasets.append([ds_name, dataset])
                 # if False and args.use_data_resampling:
                 #     lengths.append(math.sqrt(len(dataset)))
                 # else:
                 #     lengths.append(len(dataset))
-                del dataset
+                del dset
 
         gc.collect()
         logger.info(f'[{rank}] END OF InternVLDatasetFunForPacking')
