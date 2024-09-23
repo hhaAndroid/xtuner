@@ -1340,11 +1340,13 @@ def build_packing_datasets(
                 dset = multi_thread_map(map_fn, raw_data, desc, 8)
 
                 # 合并
+                # TODO: 可以不合并
                 buffers = [None] * world_size
                 dist.all_gather_object(buffers, dset, group=group)
                 if args.dset_cache_dir:
                     if rank == 0:
-                        dataset = HF_Dataset.from_list(dset)
+                        datasets = [item for sublist in buffers for item in sublist]
+                        dataset = HF_Dataset.from_list(datasets)
                         digits = len(str(abs(num_files)))
                         cache_id = (f'{ds_name}_cache-local-only-rank-{i:0{digits}}-of-'
                                     f'{num_files:0{digits}}')
@@ -1362,6 +1364,7 @@ def build_packing_datasets(
                 # else:
                 #     lengths.append(len(dataset))
                 del dset
+                del buffers
 
         gc.collect()
         logger.info(f'[{rank}] END OF InternVLDatasetFunForPacking')
