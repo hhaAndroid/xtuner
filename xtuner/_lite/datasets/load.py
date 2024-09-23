@@ -125,9 +125,12 @@ def load_hf_dataset(path,
     return dataset
 
 
-def load_from_cache(cache_dir):
+def load_from_cache(cache_dir, keep_cache_path=None):
     datasets = []
     for _path in tqdm(os.listdir(cache_dir)):
+        if keep_cache_path is not None and _path not in keep_cache_path:
+            print(f'Skip {_path}')
+            continue
         path = os.path.join(cache_dir, _path)
         if os.path.isdir(path):
             dset = load_from_disk(path)

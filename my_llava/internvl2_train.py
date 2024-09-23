@@ -1168,12 +1168,23 @@ def build_packing_datasets(
         logger.info(f'[{rank}] Load datasets from cache: {args.dset_cache_dir}')
         logger.warning('Warning: Please ensure that the cached data and the model '
                        'correspond to each other, otherwise unexpected behavior may occur.')
-        datasets = load_from_cache(args.dset_cache_dir)
         # 解析出 ds_name
         all_cache = list(os.listdir(args.dset_cache_dir))
         _ds_names = []
         for c in all_cache:
             _ds_names.append(c.split('_cache-')[0])
+
+        # 如果 ds_collections 和 _ds_names 长度不匹配，可能是删掉了部分数据集，此时要以 ds_collections 为准
+        assert len(ds_collections) <= len(_ds_names), f"error len: {len(ds_collections)}, {len(_ds_names)}"
+        _new_ds_names = []
+        for _, ds_name in enumerate(ds_collections.keys()):
+            if ds_name not in _ds_names:
+                raise ValueError(f"Dataset {ds_name} not found in cache dir")
+            _new_ds_names.append([ds_name, all_cache[_ds_names.index(ds_name)]])
+
+        _ds_names = [ds[0] for ds in _new_ds_names]
+        keep_cache_path = [ds[1] for ds in _new_ds_names]
+        datasets = load_from_cache(args.dset_cache_dir, keep_cache_path=keep_cache_path)
         datasets = [[_ds_names[i], datasets[i]] for i in range(len(datasets))]
     else:
         # cache dataset
@@ -1184,6 +1195,8 @@ def build_packing_datasets(
 
         # 这个列表中的数据单独处理，在每个 rank 上均分，加快速度，适用于明显比别的数据集长的数据
         _dataset_only_one_rank = []
+        # TODO: 纯文本和多模态处理数据差距很大，即使数据条数一样的情况下，因此下面这个切分策略需要进一步优化
+        # 最优策略应该是先按照数据条数从大到小排列，然后那张卡处理完了就取下一条处理，类似动态规则
         for _, ds_name in enumerate(ds_collections.keys()):
             _data = ds_collections[ds_name]
             if 'only_rank' in _data and _data['only_rank'] is True and dist.is_available():
@@ -1336,7 +1349,7 @@ def build_packing_datasets(
                             logger.warning(f'Found {sub_cache_dir} exists. '
                                            'Clear it and re-cache.')
                         dataset.save_to_disk(sub_cache_dir)
-                logger.info(f'Add dataset: {ds_name} with length: {len(dataset)}')
+                        logger.info(f'Add dataset: {ds_name} with length: {len(dataset)}')
                 # datasets.append([ds_name, dataset])
                 # if False and args.use_data_resampling:
                 #     lengths.append(math.sqrt(len(dataset)))
@@ -1345,6 +1358,8 @@ def build_packing_datasets(
                 del dataset
 
         gc.collect()
+        logger.info(f'[{rank}] END OF InternVLDatasetFunForPacking')
+        dist.monitored_barrier(group=group, timeout=timeout)
         # 重新从磁盘加载
         datasets = load_from_cache(args.dset_cache_dir)
         # 解析出 ds_name
