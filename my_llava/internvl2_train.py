@@ -912,6 +912,16 @@ class InternVLDatasetFunForPacking:
         else:
             image_size = data_item['image_wh']
             image_size = image_size[0]
+            orig_width, orig_height = image_size
+            #  # 如果是 (0,0) 说明这条数据图片不存在或者损坏,直接写入假数据，后面再剔除
+            if orig_width == 0 or orig_height == 0:
+                ret = dict(
+                    input_ids=torch.tensor([0], dtype=torch.long),
+                    labels=torch.tensor([0], dtype=torch.long),
+                    num_tokens=[0],
+                    image_path=image_path
+                )
+                return ret
 
         if self.dynamic_image_size:  # If dynamic image size is enabled, preprocess the image dynamically
             num_patches = dynamic_num_patch(image_size, min_num=self.min_dynamic_patch, max_num=self.max_dynamic_patch,
@@ -982,6 +992,7 @@ class SoftPackerForInternVL(SoftPackerForText):
                  dynamic_image_size=False,
                  is_train=False,
                  image_size=448,
+                 num_image_token=1,
                  pad2square=False,
                  normalize_type='imagenet',
                  min_dynamic_patch=1,
@@ -998,6 +1009,7 @@ class SoftPackerForInternVL(SoftPackerForText):
         self.min_dynamic_patch = min_dynamic_patch
         self.max_dynamic_patch = max_dynamic_patch
         self.use_thumbnail = use_thumbnail
+        self.num_image_token = num_image_token
 
     def get_transform(self):
         # Build transformation function
@@ -1022,8 +1034,12 @@ class SoftPackerForInternVL(SoftPackerForText):
             data = self.dataset[i]
 
             # 错误数据删除
-            if data['num_tokens'] == 0:
-                continue
+            if isinstance(data['num_tokens'], list):
+                if data['num_tokens'][0] == 0:
+                    continue
+            else:
+                if data['num_tokens'] == 0:
+                    continue
 
             # 图片如果读取错误，这条数据也不要了
             image_path = data.get('image_path', None)
@@ -1074,9 +1090,8 @@ class SoftPackerForInternVL(SoftPackerForText):
             _num_tokens = data['num_tokens']
             packed_num_tokens.append(_num_tokens)
 
-            if data['num_img_tokens'] is not None and sum(data['num_img_tokens']) > 0:
-                _num_img_tokens = data['num_img_tokens']
-                packed_num_img_tokens.append(_num_img_tokens)
+            num_img_tokens = num_patches * self.num_image_token
+            packed_num_img_tokens.append([num_img_tokens])
 
         pixel_values = torch.cat(packed_pixel_values, dim=0)
         image_flags = torch.cat(packed_image_flags, dim=0)
@@ -1270,6 +1285,7 @@ def build_packing_datasets(
                                              dynamic_image_size=dynamic_image_size,
                                              is_train=ds_data['data_augment'],
                                              image_size=force_image_size,
+                                             num_image_token=model.num_image_token,
                                              pad2square=False,
                                              normalize_type=normalize_type,
                                              min_dynamic_patch=min_dynamic_patch,

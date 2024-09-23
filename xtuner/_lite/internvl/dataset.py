@@ -901,7 +901,7 @@ def concat_pad_data_collator(features, pad_id=0):
     return batch
 
 
-def packing_collate(features, pack_batch=True):
+def packing_collate(features, pack_batch=True, pad_id=0):
     input_ids = []
     labels = []
     pixel_values = []
@@ -917,7 +917,7 @@ def packing_collate(features, pack_batch=True):
         pixel_values.append(data['pixel_values'])
         image_flags.append(data['image_flags'])
 
-    attention_mask = [torch.ones_like(ids) for ids in input_ids]
+    attention_mask = [ids.ne(pad_id) for ids in input_ids]
     num_tokens = torch.IntTensor(num_tokens)
     num_img_tokens = torch.IntTensor(num_img_tokens)
 
