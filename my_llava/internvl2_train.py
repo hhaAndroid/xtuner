@@ -911,7 +911,8 @@ class InternVLDatasetFunForPacking:
                 return ret
         else:
             image_size = data_item['image_wh']
-            image_size = image_size[0]
+            if isinstance(image_size[0], list):
+                image_size = image_size[0]
             orig_width, orig_height = image_size
             #  # 如果是 (0,0) 说明这条数据图片不存在或者损坏,直接写入假数据，后面再剔除
             if orig_width == 0 or orig_height == 0:
@@ -1159,20 +1160,35 @@ def build_packing_datasets(
         world_size = 1
         rank = 0
 
+    timeout1 = timedelta(
+        minutes=int(os.getenv('XTUNER_DATASET_TIMEOUT', default=45)))
+    group1 = dist.new_group(backend='gloo', timeout=timeout1)
+
     if args.dset_from_cache:
         logger.info(f'[{rank}] Load datasets from cache: {args.dset_cache_dir}')
         logger.warning('Warning: Please ensure that the cached data and the model '
                        'correspond to each other, otherwise unexpected behavior may occur.')
         datasets = load_from_cache(args.dset_cache_dir)
-        dist.barrier()
+        # 解析出 ds_name
+        all_cache = list(os.listdir(args.dset_cache_dir))
+        _ds_names = []
+        for c in all_cache:
+            _ds_names.append(c.split('_cache-')[0])
+        datasets = [[_ds_names[i], datasets[i]] for i in range(len(datasets))]
     else:
         # cache dataset
-        datasets = []
-        lengths = []
+        # datasets = []
+        # lengths = []
         _dataset_list = []
         _dataset_lengths = []
+
+        # 这个列表中的数据单独处理，在每个 rank 上均分，加快速度，适用于明显比别的数据集长的数据
+        _dataset_only_one_rank = []
         for _, ds_name in enumerate(ds_collections.keys()):
             _data = ds_collections[ds_name]
+            if 'only_rank' in _data and _data['only_rank'] is True and dist.is_available():
+                _dataset_only_one_rank.append([ds_name, _data])
+                continue
             _repeat_time = _data.get('repeat_time', 1)
             _dataset_lengths.append(_repeat_time * _data['length'])
             _dataset_list.append([ds_name, ds_collections[ds_name]])
@@ -1236,6 +1252,7 @@ def build_packing_datasets(
             dset = multi_thread_map(map_fn, raw_data, desc, 8)
             logger.debug(f'[File {ds_name}] Mapped Sample:\n{dset[0]}')
             dataset = HF_Dataset.from_list(dset)
+            assert args.dset_cache_dir is not None, "dset_cache_dir should not be None"
             if args.dset_cache_dir:
                 digits = len(str(abs(num_files)))
                 cache_id = (f'{ds_name}_cache-local-{ds_idx:0{digits}}-of-'
@@ -1247,20 +1264,104 @@ def build_packing_datasets(
                                    'Clear it and re-cache.')
                 dataset.save_to_disk(sub_cache_dir)
             logger.info(f'Add dataset: {ds_name} with length: {len(dataset)}')
-            datasets.append([ds_name, dataset])
-            if False and args.use_data_resampling:
-                lengths.append(math.sqrt(len(dataset)))
-            else:
-                lengths.append(len(dataset))
+            # datasets.append([ds_name, dataset])
+            # if False and args.use_data_resampling:
+            #     lengths.append(math.sqrt(len(dataset)))
+            # else:
+            #     lengths.append(len(dataset))
+            del dataset
 
-        if dist.is_available():
-            buffers = [None] * world_size
-            dist.all_gather_object(buffers, datasets, group=group)
-            # 拉平
-            datasets = [item for sublist in buffers for item in sublist]
+        # 同步之前的所有数据,需要太多 cpu，暂时不同步
+        # if dist.is_available():
+        #     buffers = [None] * world_size
+        #     dist.all_gather_object(buffers, datasets, group=group)
+        #     # 拉平
+        #     datasets = [item for sublist in buffers for item in sublist]
+
+        # 对 _dataset_only_one_rank 进行处理
+        if len(_dataset_only_one_rank) > 0:
+            logger.info(f'[{rank}] Start to process _dataset_only_one_rank: {_dataset_only_one_rank}')
+            dist.monitored_barrier(group=group, timeout=timeout)
+            for i, _data in enumerate(_dataset_only_one_rank):
+                ds_name, ds_data = _data
+                with open(ds_data['annotation'], 'r') as f:
+                    raw_data = f.readlines()
+                    repeat_time = ds_data.get('repeat_time', 1)
+                    if repeat_time < 1:
+                        # If repeat_time is less than 1, select a portion of the data
+                        raw_data = raw_data[:int(len(raw_data) * repeat_time)]
+                    if repeat_time > 1:
+                        assert isinstance(repeat_time, int)
+                        # Repeat the list if repeat_time is greater than 1
+                        raw_data = raw_data * repeat_time
+
+                # 对 raw_data 进行切片
+                raw_data = raw_data[rank::world_size]
+
+                map_fn = InternVLDatasetFunForPacking(
+                    args.chat_template, ds_data,
+                    tokenizer,
+                    tcs_loader,
+                    ds_name=ds_name,
+                    num_image_token=model.num_image_token,
+                    image_size=force_image_size,
+                    is_train=ds_data['data_augment'],
+                    pad2square=False,
+                    group_by_length=group_by_length,
+                    dynamic_image_size=dynamic_image_size,
+                    use_thumbnail=use_thumbnail,
+                    min_dynamic_patch=min_dynamic_patch,
+                    max_dynamic_patch=max_dynamic_patch,
+                    repeat_time=repeat_time,
+                    normalize_type=normalize_type,
+                    random_seed=i,
+                    root=ds_data['root'],
+                    use_fast_tokenizer=use_fast_tokenizer,
+                )
+                desc = f'[RANK {rank}] Map local file {ds_name}'
+                dset = multi_thread_map(map_fn, raw_data, desc, 8)
+
+                # 合并
+                buffers = [None] * world_size
+                dist.all_gather_object(buffers, dset, group=group)
+                dataset = HF_Dataset.from_list(dset)
+                if args.dset_cache_dir:
+                    if rank == 0:
+                        digits = len(str(abs(num_files)))
+                        cache_id = (f'{ds_name}_cache-local-only-rank-{i:0{digits}}-of-'
+                                    f'{num_files:0{digits}}')
+                        sub_cache_dir = os.path.join(args.dset_cache_dir, cache_id)
+                        if os.path.exists(sub_cache_dir):
+                            shutil.rmtree(sub_cache_dir)
+                            logger.warning(f'Found {sub_cache_dir} exists. '
+                                           'Clear it and re-cache.')
+                        dataset.save_to_disk(sub_cache_dir)
+                logger.info(f'Add dataset: {ds_name} with length: {len(dataset)}')
+                # datasets.append([ds_name, dataset])
+                # if False and args.use_data_resampling:
+                #     lengths.append(math.sqrt(len(dataset)))
+                # else:
+                #     lengths.append(len(dataset))
+                del dataset
+
+        gc.collect()
+        # 重新从磁盘加载
+        datasets = load_from_cache(args.dset_cache_dir)
+        # 解析出 ds_name
+        all_cache = list(os.listdir(args.dset_cache_dir))
+        _ds_names = []
+        for c in all_cache:
+            _ds_names.append(c.split('_cache-')[0])
+        datasets = [[_ds_names[i], datasets[i]] for i in range(len(datasets))]
+
+    # 打乱且确保每个 rank 数据顺序一致
+    datasets = sorted(datasets, key=lambda x: x[0])
+    set_random_seed(args.seed)
+    random.shuffle(datasets)
 
     # soft packing
     logger.info(f'[{rank}] Start to soft pack datasets')
+    dist.monitored_barrier(group=group1, timeout=timeout1)
     ds_names = [ds[0] for ds in datasets]
     datasets = [ds[1] for ds in datasets]
 

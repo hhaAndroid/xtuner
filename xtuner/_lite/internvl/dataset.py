@@ -617,7 +617,7 @@ def preprocess_phi3_fast(
             assert role == conv.roles[j % 2], f'{i}'
             conv.append_message(role, sentence['value'])
 
-    assert len(conv.messages) % 2 == 0
+    assert len(conv.messages) % 2 == 0, f'{ds_name}, {len(conv.messages)}, {conv.messages}'
     inputs = conv.messages[::2]
     outputs = conv.messages[1::2]
 
@@ -641,7 +641,7 @@ def preprocess_phi3_fast(
             for i in range(num_image):
                 image_tokens = f'{IMG_START_TOKEN}{IMG_CONTEXT_TOKEN * num_image_token_list[i]}{IMG_END_TOKEN}'
                 input_text = input_text.replace('<image>', image_tokens, 1)
-        assert '<image>' not in input_text, f'error: {input_text}'
+        assert '<image>' not in input_text, f'error: {ds_name}, {input_text}'
         output_text = output_[1] + conv.sep
 
         input_encode = tokenizer.encode(input_text, add_special_tokens=False)
