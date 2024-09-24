@@ -1588,8 +1588,8 @@ def internvl_train(args):
         exclude_cls = ['Phi3FlashAttention2']
     dispatch_modules(meta_internvl, exclude_cls)
 
-    use_custom_loss = os.environ.get('USE_CUSTOM_LOSS', False)
-    if use_custom_loss is True:
+    use_custom_loss = os.environ.get('USE_CUSTOM_LOSS')
+    if use_custom_loss:
         logger.info(f'======= Using custom loss function. =========')
     if not args.use_orig:
         if args.dset_pack_level == 'soft':
