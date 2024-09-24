@@ -326,10 +326,10 @@ def build_model(args, config, dtype=torch.bfloat16, tokenizer=None, device='cpu'
         #                               language_model=llm,
         #                               torch_dtype=dtype,
         #                               trust_remote_code=True)
-        model = InternVLChatModel.from_config(config=_cfg,
-                                              vision_model=vision_model,
-                                              language_model=llm,
-                                              torch_dtype=dtype)
+        model = InternVLChatModel._from_config(config=_cfg,
+                                               vision_model=vision_model,
+                                               language_model=llm,
+                                               torch_dtype=dtype)
         if device != 'meta':
             with LoadWoInit():
                 if args.projector is not None:

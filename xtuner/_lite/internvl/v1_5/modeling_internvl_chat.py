@@ -84,6 +84,7 @@ class InternVLChatModel(PreTrainedModel):
         self.img_context_token_id = None
         self.conv_template = get_conv_template(self.template)
         self.system_message = self.conv_template.system_message
+        self._count = 0
 
     def forward(
             self,
@@ -111,8 +112,10 @@ class InternVLChatModel(PreTrainedModel):
         B, N, C = input_embeds.shape
         input_embeds = input_embeds.reshape(B * N, C)
 
-        if torch.distributed.get_rank() == 0:
-            print(f'dynamic ViT batch size: {vit_batch_size}, images per sample: {vit_batch_size / B}, dynamic token length: {N}')
+        if torch.distributed.get_rank() == 0 and self._count % 10 == 0:
+            print(
+                f'dynamic ViT batch size: {vit_batch_size}, images per sample: {vit_batch_size / B}, dynamic token length: {N}')
+        self._count += 1
 
         input_ids = input_ids.reshape(B * N)
         selected = (input_ids == self.img_context_token_id)
@@ -163,8 +166,9 @@ class InternVLChatModel(PreTrainedModel):
                     # packing 模式
                     num_tokens = cumulative_lengths[1:] - cumulative_lengths[:-1]
                     num_tokens = num_tokens.squeeze(dim=0).cpu().tolist()
-                    if num_tokens[-1] == 0:
+                    if num_tokens[-1] == 0:  # 可能有 pading
                         num_tokens = num_tokens[:-1]
+                    num_tokens[-1] -= 1  # shift label
                     loss_fc = nn.CrossEntropyLoss(reduction='none')
                     all_loss = loss_fc(shift_logits, shift_labels)
                     loss_list = all_loss.split(num_tokens)
@@ -176,7 +180,8 @@ class InternVLChatModel(PreTrainedModel):
                     # 非 packing 模式
                     loss_fct = CrossEntropyLoss(reduction='none')
                     loss = loss_fct(shift_logits, shift_labels)
-                    loss = loss.reshape(batch_size, -1).sum(dim=1) / (shift_labels != -100).sum(dim=1).float()
+                    loss = loss.reshape(batch_size, -1).sum(dim=1) / (
+                                (labels[..., 1:] != -100).sum(dim=1).float() + 1e-12)
                     loss = loss.mean()
 
         if not return_dict:
