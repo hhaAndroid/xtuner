@@ -25,6 +25,7 @@ fi
 # total batch size: 512
 # epoch: 1
 
+# export USE_CUSTOM_LOSS=1
 HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 srun -p ${PARTITION} --time 4-00:00:00 \
   --gres=gpu:${GPUS_PER_NODE} \
   --nodes=${NODES} \

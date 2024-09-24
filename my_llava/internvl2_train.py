@@ -66,6 +66,7 @@ from xtuner._lite.internvl.modeling_intern_vit import InternVisionModel
 from datasets import Dataset as HF_Dataset
 from xtuner.utils import DEFAULT_PAD_TOKEN_INDEX, IGNORE_INDEX
 from xtuner._lite.datasets.text import SoftPackerForText
+from xtuner._lite.internvl.phi3_modeling.modeling_phi3 import Phi3ForCausalLM
 
 try:
     from petrel_client.client import Client
@@ -305,8 +306,13 @@ def build_model(args, config, dtype=torch.bfloat16, tokenizer=None, device='cpu'
             else:
                 llm_config._attn_implementation = 'flash_attention_2'
             with LoadWoInit():
-                llm = AutoModelForCausalLM.from_pretrained(
-                    args.llm, config=llm_config, torch_dtype=dtype, trust_remote_code=True)
+                if llm_config.model_type == 'phi3':
+                    logger.info('Loading custom Phi3 model...')
+                    llm = Phi3ForCausalLM.from_pretrained(
+                        args.llm, config=llm_config, torch_dtype=dtype)
+                else:
+                    llm = AutoModelForCausalLM.from_pretrained(
+                        args.llm, config=llm_config, torch_dtype=dtype, trust_remote_code=True)
 
             old_vocab_size = llm.config.vocab_size
             if old_vocab_size != len(tokenizer):
@@ -1581,6 +1587,15 @@ def internvl_train(args):
         logger.info('Use original style.')
         exclude_cls = ['Phi3FlashAttention2']
     dispatch_modules(meta_internvl, exclude_cls)
+
+    use_custom_loss = os.environ.get('USE_CUSTOM_LOSS', False)
+    if use_custom_loss is True:
+        logger.info(f'======= Using custom loss function. =========')
+    if not args.use_orig:
+        if args.dset_pack_level == 'soft':
+            logger.info(f'======= Using soft packing style. =========')
+        else:
+            logger.info(f'======= Using packing style. =========')
 
     ###########################################################################
     #                     2. Dataset & Dataloader                             #

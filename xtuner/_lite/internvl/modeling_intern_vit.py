@@ -306,7 +306,7 @@ class InternVisionEncoder(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.config = config
-        # 这个代码无法使用 meta device 加载，所以只能重写
+        # TODO HHA: 这个代码无法使用 meta device 加载，所以只能重写
         # stochastic depth decay rule
         # torch.linspace -> np.linspace
         dpr = np.linspace(0.0, float(config.drop_path_rate), int(config.num_hidden_layers))
