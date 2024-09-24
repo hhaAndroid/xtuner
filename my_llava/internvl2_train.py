@@ -62,11 +62,11 @@ from xtuner._lite.internvl.dataset import (dynamic_preprocess, preprocess,
                                            preprocess_phi3, build_transform, preprocess_phi3_fast,
                                            TCSLoader, concat_pad_data_collator,
                                            packing_collate, dynamic_num_patch)
-from xtuner._lite.internvl.modeling_intern_vit import InternVisionModel
+from xtuner._lite.internvl.v1_5.modeling_intern_vit import InternVisionModel
 from datasets import Dataset as HF_Dataset
 from xtuner.utils import DEFAULT_PAD_TOKEN_INDEX, IGNORE_INDEX
 from xtuner._lite.datasets.text import SoftPackerForText
-from xtuner._lite.internvl.phi3_modeling.modeling_phi3 import Phi3ForCausalLM
+from xtuner._lite.internvl.v1_5.modeling_internvl_chat import InternVLChatModel
 
 try:
     from petrel_client.client import Client
@@ -306,13 +306,8 @@ def build_model(args, config, dtype=torch.bfloat16, tokenizer=None, device='cpu'
             else:
                 llm_config._attn_implementation = 'flash_attention_2'
             with LoadWoInit():
-                if llm_config.model_type == 'phi3':
-                    logger.info('Loading custom Phi3 model...')
-                    llm = Phi3ForCausalLM.from_pretrained(
-                        args.llm, config=llm_config, torch_dtype=dtype)
-                else:
-                    llm = AutoModelForCausalLM.from_pretrained(
-                        args.llm, config=llm_config, torch_dtype=dtype, trust_remote_code=True)
+                llm = AutoModelForCausalLM.from_pretrained(
+                    args.llm, config=llm_config, torch_dtype=dtype, trust_remote_code=True)
 
             old_vocab_size = llm.config.vocab_size
             if old_vocab_size != len(tokenizer):
@@ -325,11 +320,16 @@ def build_model(args, config, dtype=torch.bfloat16, tokenizer=None, device='cpu'
                     output_embeddings[-num_new_tokens:] = output_embeddings_avg
 
         # 暂时不加载权重
-        model = AutoModel.from_config(config=_cfg,
-                                      vision_model=vision_model,
-                                      language_model=llm,
-                                      torch_dtype=dtype,
-                                      trust_remote_code=True)
+        # TODO 暂时使用 v1.5 进行测试
+        # model = AutoModel.from_config(config=_cfg,
+        #                               vision_model=vision_model,
+        #                               language_model=llm,
+        #                               torch_dtype=dtype,
+        #                               trust_remote_code=True)
+        model = InternVLChatModel.from_config(config=_cfg,
+                                              vision_model=vision_model,
+                                              language_model=llm,
+                                              torch_dtype=dtype)
         if device != 'meta':
             with LoadWoInit():
                 if args.projector is not None:
