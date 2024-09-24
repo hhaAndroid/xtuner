@@ -14,7 +14,7 @@ export PYTHONPATH="$(pwd):$(pwd)/../"
 export MASTER_PORT=34229
 export TF_CPP_MIN_LOG_LEVEL=3
 
-OUTPUT_DIR='work_dirs/internvl1_5_phi3_sft'
+OUTPUT_DIR='work_dirs/internvl1_5_phi3_sft_soft_packing'
 if [ ! -d "$OUTPUT_DIR" ]; then
   mkdir -p "$OUTPUT_DIR"
 fi

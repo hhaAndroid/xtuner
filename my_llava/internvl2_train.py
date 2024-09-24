@@ -1211,83 +1211,82 @@ def build_packing_datasets(
             _dataset_lengths.append(_repeat_time * _data['length'])
             _dataset_list.append([ds_name, ds_collections[ds_name]])
 
-        _ds_names = [ds[0] for ds in _dataset_list]
-        assert len(_ds_names) == len(set(_ds_names)), f"Dataset names should be unique, but got {_ds_names}"
+        num_files = len(ds_collections)
+        if len(_dataset_list) > 0:
 
-        # 按照长度对数据集进行从大到小排序
-        combined = list(zip(_dataset_lengths, _dataset_list))
-        sorted_combined = sorted(combined, key=lambda x: x[0], reverse=True)
-        _, _dataset_list = zip(*sorted_combined)
-        _dataset_list = list(_dataset_list)
-        num_files = len(_dataset_list)
+            _ds_names = [ds[0] for ds in _dataset_list]
+            assert len(_ds_names) == len(set(_ds_names)), f"Dataset names should be unique, but got {_ds_names}"
 
-        # 切分到不同卡
-        _dataset_list = _dataset_list[rank::world_size]
-        logger.info(f'[{rank}] Assigned Files: {[_dataset[0] for _dataset in _dataset_list]}')
-        timeout = timedelta(
-            minutes=int(os.getenv('XTUNER_DATASET_TIMEOUT', default=45)))
-        group = dist.new_group(backend='gloo', timeout=timeout)
-        for i, _dataset in enumerate(_dataset_list):
-            ds_name, ds_data = _dataset
-            ds_idx = i * world_size + rank
-            repeat_time = ds_data['repeat_time']
-            if 'max_dynamic_patch' in ds_data:
-                max_num = ds_data['max_dynamic_patch']
-                logger.info(f'max_dynamic_patch is set to {max_num} according to the meta file')
-            else:
-                max_num = max_dynamic_patch
+            # 按照长度对数据集进行从大到小排序
+            combined = list(zip(_dataset_lengths, _dataset_list))
+            sorted_combined = sorted(combined, key=lambda x: x[0], reverse=True)
+            _, _dataset_list = zip(*sorted_combined)
+            _dataset_list = list(_dataset_list)
 
-            with open(ds_data['annotation'], 'r') as f:
-                raw_data = f.readlines()
-                if repeat_time < 1:
-                    # If repeat_time is less than 1, select a portion of the data
-                    raw_data = raw_data[:int(len(raw_data) * repeat_time)]
-                if repeat_time > 1:
-                    assert isinstance(repeat_time, int)
-                    # Repeat the list if repeat_time is greater than 1
-                    raw_data = raw_data * repeat_time
-            map_fn = InternVLDatasetFunForPacking(
-                args.chat_template, ds_data,
-                tokenizer,
-                tcs_loader,
-                ds_name=ds_name,
-                num_image_token=model.num_image_token,
-                image_size=force_image_size,
-                is_train=ds_data['data_augment'],
-                pad2square=False,
-                group_by_length=group_by_length,
-                dynamic_image_size=dynamic_image_size,
-                use_thumbnail=use_thumbnail,
-                min_dynamic_patch=min_dynamic_patch,
-                max_dynamic_patch=max_num,
-                repeat_time=repeat_time,
-                normalize_type=normalize_type,
-                random_seed=ds_idx,
-                root=ds_data['root'],
-                use_fast_tokenizer=use_fast_tokenizer,
-            )
-            desc = f'[RANK {rank}] Map local file {ds_name}'
-            dset = multi_thread_map(map_fn, raw_data, desc, 8)
-            logger.debug(f'[File {ds_name}] Mapped Sample:\n{dset[0]}')
-            dataset = HF_Dataset.from_list(dset)
-            assert args.dset_cache_dir is not None, "dset_cache_dir should not be None"
-            if args.dset_cache_dir:
-                digits = len(str(abs(num_files)))
-                cache_id = (f'{ds_name}_cache-local-{ds_idx:0{digits}}-of-'
-                            f'{num_files:0{digits}}')
-                sub_cache_dir = os.path.join(args.dset_cache_dir, cache_id)
-                if os.path.exists(sub_cache_dir):
-                    shutil.rmtree(sub_cache_dir)
-                    logger.warning(f'Found {sub_cache_dir} exists. '
-                                   'Clear it and re-cache.')
-                dataset.save_to_disk(sub_cache_dir)
-            logger.info(f'Add dataset: {ds_name} with length: {len(dataset)}')
-            # datasets.append([ds_name, dataset])
-            # if False and args.use_data_resampling:
-            #     lengths.append(math.sqrt(len(dataset)))
-            # else:
-            #     lengths.append(len(dataset))
-            del dataset
+            # 切分到不同卡
+            _dataset_list = _dataset_list[rank::world_size]
+            logger.info(f'[{rank}] Assigned Files: {[_dataset[0] for _dataset in _dataset_list]}')
+            for i, _dataset in enumerate(_dataset_list):
+                ds_name, ds_data = _dataset
+                ds_idx = i * world_size + rank
+                repeat_time = ds_data['repeat_time']
+                if 'max_dynamic_patch' in ds_data:
+                    max_num = ds_data['max_dynamic_patch']
+                    logger.info(f'max_dynamic_patch is set to {max_num} according to the meta file')
+                else:
+                    max_num = max_dynamic_patch
+
+                with open(ds_data['annotation'], 'r') as f:
+                    raw_data = f.readlines()
+                    if repeat_time < 1:
+                        # If repeat_time is less than 1, select a portion of the data
+                        raw_data = raw_data[:int(len(raw_data) * repeat_time)]
+                    if repeat_time > 1:
+                        assert isinstance(repeat_time, int)
+                        # Repeat the list if repeat_time is greater than 1
+                        raw_data = raw_data * repeat_time
+                map_fn = InternVLDatasetFunForPacking(
+                    args.chat_template, ds_data,
+                    tokenizer,
+                    tcs_loader,
+                    ds_name=ds_name,
+                    num_image_token=model.num_image_token,
+                    image_size=force_image_size,
+                    is_train=ds_data['data_augment'],
+                    pad2square=False,
+                    group_by_length=group_by_length,
+                    dynamic_image_size=dynamic_image_size,
+                    use_thumbnail=use_thumbnail,
+                    min_dynamic_patch=min_dynamic_patch,
+                    max_dynamic_patch=max_num,
+                    repeat_time=repeat_time,
+                    normalize_type=normalize_type,
+                    random_seed=ds_idx,
+                    root=ds_data['root'],
+                    use_fast_tokenizer=use_fast_tokenizer,
+                )
+                desc = f'[RANK {rank}] Map local file {ds_name}'
+                dset = multi_thread_map(map_fn, raw_data, desc, 8)
+                logger.debug(f'[File {ds_name}] Mapped Sample:\n{dset[0]}')
+                dataset = HF_Dataset.from_list(dset)
+                assert args.dset_cache_dir is not None, "dset_cache_dir should not be None"
+                if args.dset_cache_dir:
+                    digits = len(str(abs(num_files)))
+                    cache_id = (f'{ds_name}_cache-local-{ds_idx:0{digits}}-of-'
+                                f'{num_files:0{digits}}')
+                    sub_cache_dir = os.path.join(args.dset_cache_dir, cache_id)
+                    if os.path.exists(sub_cache_dir):
+                        shutil.rmtree(sub_cache_dir)
+                        logger.warning(f'Found {sub_cache_dir} exists. '
+                                       'Clear it and re-cache.')
+                    dataset.save_to_disk(sub_cache_dir)
+                logger.info(f'Add dataset: {ds_name} with length: {len(dataset)}')
+                # datasets.append([ds_name, dataset])
+                # if False and args.use_data_resampling:
+                #     lengths.append(math.sqrt(len(dataset)))
+                # else:
+                #     lengths.append(len(dataset))
+                del dataset
 
         # 同步之前的所有数据,需要太多 cpu，暂时不同步
         # if dist.is_available():
@@ -1299,7 +1298,7 @@ def build_packing_datasets(
         # 对 _dataset_only_one_rank 进行处理
         if len(_dataset_only_one_rank) > 0:
             logger.info(f'[{rank}] Start to process _dataset_only_one_rank: {_dataset_only_one_rank}')
-            dist.monitored_barrier(group=group, timeout=timeout)
+            dist.monitored_barrier(group=group1, timeout=timeout1)
             for i, _data in enumerate(_dataset_only_one_rank):
                 ds_name, ds_data = _data
                 with open(ds_data['annotation'], 'r') as f:
@@ -1342,7 +1341,7 @@ def build_packing_datasets(
                 # 合并
                 # TODO: 可以不合并
                 buffers = [None] * world_size
-                dist.all_gather_object(buffers, dset, group=group)
+                dist.all_gather_object(buffers, dset, group=group1)
                 if args.dset_cache_dir:
                     if rank == 0:
                         datasets = [item for sublist in buffers for item in sublist]
@@ -1368,7 +1367,7 @@ def build_packing_datasets(
 
         gc.collect()
         logger.info(f'[{rank}] END OF InternVLDatasetFunForPacking')
-        dist.monitored_barrier(group=group, timeout=timeout)
+        dist.monitored_barrier(group=group1, timeout=timeout1)
         # 重新从磁盘加载
         datasets = load_from_cache(args.dset_cache_dir)
         # 解析出 ds_name
@@ -1996,7 +1995,10 @@ def internvl_train(args):
                     f'memory is {max_memory / 1024 ** 3:.1f}GB.')
 
     train_cost_time = time.time() - start_train_t
-    logger.info(f'[Train] Cost {train_cost_time}s')
+    m, s = divmod(train_cost_time, 60)
+    h, m = divmod(m, 60)
+    d, h = divmod(h, 24)
+    logger.info("[Train] Cost: %d day, %d:%d:%d" % (d, h, m, s))
     # ------------------------    Training  End  ---------------------------- #
 
 
