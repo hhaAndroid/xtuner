@@ -1313,7 +1313,7 @@ class Phi3ForCausalLM(Phi3PreTrainedModel):
             shift_logits = shift_logits.view(-1, self.config.vocab_size)
             shift_labels = shift_labels.view(-1)
             use_custom_loss = os.environ.get('USE_CUSTOM_LOSS')
-            if use_custom_loss:
+            if not use_custom_loss:
                 # Flatten the tokens
                 loss_fct = CrossEntropyLoss()
                 # Enable model parallelism
