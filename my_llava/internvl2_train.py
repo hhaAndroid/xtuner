@@ -1793,6 +1793,7 @@ def internvl_train(args):
     # `step` means once optimizer step
     # `per_step_iters` means gradient accumulative counts
     per_step_iters = global_batch_size // mirco_batch_size // dp_size
+    logger.info(f'[Optimizer] Global batch size: {global_batch_size}, Gradient accumulative counts: {per_step_iters}')
     per_epoch_iters = len(train_dataloader)
     per_epoch_steps = math.ceil(per_epoch_iters / per_step_iters)
 

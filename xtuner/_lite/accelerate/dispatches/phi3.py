@@ -186,8 +186,8 @@ Optional[Tuple[torch.Tensor]]]:
                 ring_pg=get_ring_group(),
                 causal=True,
                 dropout_p=attn_dropout,
-                # 如果想更省显存，可以设置为 1
-                heads_k_stride=k_unpad.shape[1]
+                # 如果想更省显存，可以设置为 1。-1 表示不切分
+                heads_k_stride=-1
             )
             attn_output = attn_output.unsqueeze(0)
         else:

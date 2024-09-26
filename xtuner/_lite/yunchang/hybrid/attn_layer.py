@@ -270,7 +270,7 @@ def llama3_varlen_attention_sp_ulysses_ring(
         local_cu_seqlens_k,
         max_seqlen_q,
         max_seqlen_k,
-        heads_k_stride=heads_k_stride,
+        heads_k_stride=key.shape[1] if heads_k_stride == -1 else heads_k_stride,
         local_k_slice=local_k_slice,
         dropout_p=dropout_p,
         causal=causal,
