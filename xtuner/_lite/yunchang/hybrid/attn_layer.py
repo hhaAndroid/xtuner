@@ -234,6 +234,7 @@ def llama3_varlen_attention_sp_ulysses_ring(
         causal=False,
         window_size=(-1, -1),
         deterministic=False,
+        heads_k_stride=1,
 ):
     scatter_idx = 1
     gather_idx = 0
@@ -269,7 +270,7 @@ def llama3_varlen_attention_sp_ulysses_ring(
         local_cu_seqlens_k,
         max_seqlen_q,
         max_seqlen_k,
-        heads_k_stride=1,
+        heads_k_stride=heads_k_stride,
         local_k_slice=local_k_slice,
         dropout_p=dropout_p,
         causal=causal,

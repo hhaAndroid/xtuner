@@ -10,6 +10,7 @@ import torch.utils.checkpoint
 import transformers
 from torch import nn
 import math
+import time
 from torch.nn import CrossEntropyLoss
 from transformers import (AutoModel, GenerationConfig, LlamaForCausalLM,
                           LlamaTokenizer)
@@ -30,6 +31,7 @@ from xtuner._lite.parallel import (LengthGroupedSampler, ParallelSampler,
 import torch.distributed as dist
 from torch.distributed.nn.functional import all_gather
 from mmengine.logging import MessageHub
+import copy
 
 logger = logging.get_logger(__name__)
 
@@ -146,6 +148,7 @@ class InternVLChatModel(PreTrainedModel):
             if split_input_ids:
                 pad_id = 0
                 orig_len_input_ids = input_ids.shape[1]
+                image_flags = image_flags.squeeze(-1)
                 assert input_ids.shape[0] == 1, 'batch size must be 1 for sequence parallel'
                 # input_ids 均匀切分
                 if orig_len_input_ids % sp_size != 0:  # 确保能均匀切
@@ -157,7 +160,13 @@ class InternVLChatModel(PreTrainedModel):
                 input_ids_list = torch.split(input_ids_new, input_ids_new.shape[1] // sp_size, dim=-1)
                 input_ids_rank_pre = input_ids_list[sp_rank].contiguous()
                 input_embeds_rank_pre = self.language_model.get_input_embeddings()(input_ids_rank_pre).clone()
+
+                # torch.cuda.synchronize()
+                # start_time = time.perf_counter()
                 input_embeds = all_gather(input_embeds_rank_pre, group=sp_group)
+                # torch.cuda.synchronize()
+                # elapsed = time.perf_counter() - start_time
+                # print(elapsed,'xxxx',flush=True)
                 input_embeds = torch.cat(input_embeds, dim=1)
                 input_embeds = input_embeds[:, :orig_len_input_ids]
             else:
@@ -165,34 +174,33 @@ class InternVLChatModel(PreTrainedModel):
 
             no_split_pixel_values = os.environ.get('NO_SPLIT_PIXEL_VALUES')
             split_pixel_values = not no_split_pixel_values
+            # print(split_input_ids, split_pixel_values, os.environ.get('USE_CUSTOM_LOSS'), flush=True)
             if split_pixel_values:
                 # pixel_values 均匀切分
                 orig_img_batch = pixel_values.shape[0]
-                image_flags = image_flags.squeeze(-1)
-                assert orig_img_batch == len(image_flags), 'image_flags must have the same length as pixel_values'
                 if orig_img_batch % sp_size != 0:  # 确保能均匀切
                     max_inputs_len = math.ceil(orig_img_batch / sp_size) * sp_size
                     pad_img_batch = max_inputs_len - orig_img_batch
                     pad_pixel_values_ = pixel_values.new_zeros(pad_img_batch, 3,
-                                                    pixel_values.shape[2],
-                                                    pixel_values.shape[3])
+                                                               pixel_values.shape[2],
+                                                               pixel_values.shape[3])
                     pixel_values = torch.cat([pixel_values, pad_pixel_values_], dim=0)
-                    image_flags = torch.cat([image_flags, image_flags.new_zeros(pad_img_batch)], dim=0)
                 pixel_values = torch.split(pixel_values, len(pixel_values) // sp_size, dim=0)
                 pixel_values = pixel_values[sp_rank].contiguous()
 
-                image_flags = torch.split(image_flags, len(image_flags) // sp_size, dim=0)
-                image_flags = image_flags[sp_rank].contiguous()
-
                 vit_embeds = self.extract_feature(pixel_values)
-                vit_embeds = vit_embeds[image_flags == 1]
 
+                # torch.cuda.synchronize()
+                # start_time = time.perf_counter()
                 vit_embeds = all_gather(vit_embeds, group=sp_group)
-                vit_embeds = torch.cat(vit_embeds, dim=0)
-                vit_embeds = vit_embeds[:orig_img_batch]
+                # torch.cuda.synchronize()
+                # elapsed = time.perf_counter() - start_time
+                # print(elapsed,'qqqqqxx',flush=True)
+
+                vit_embeds = torch.cat(vit_embeds, dim=0)[:orig_img_batch]
             else:
                 vit_embeds = self.extract_feature(pixel_values)
-                vit_embeds = vit_embeds[image_flags == 1]
+            vit_embeds = vit_embeds[image_flags == 1]
         else:
             image_flags = image_flags.squeeze(-1)
             input_embeds = self.language_model.get_input_embeddings()(input_ids).clone()
@@ -228,15 +236,15 @@ class InternVLChatModel(PreTrainedModel):
             # 只需要处理 inputs_embeds 和 position_ids，其余用不到
             attn_context = MessageHub.get_instance('packed_sequence')
             position_ids = attn_context.get_info('position_ids')
-            assert position_ids.size(1) == inputs_embeds.shape[1] == labels.shape[1], \
-                f'{position_ids.size(1)} {inputs_embeds.shape[1]} {labels.shape[1]}'
+            assert position_ids.size(1) == input_embeds.shape[1] == labels.shape[1], \
+                f'{position_ids.size(1)} {input_embeds.shape[1]} {labels.shape[1]}'
 
             sp_group = get_sp_group()
             # `dim` is 1 as the shape of tensor is (bs, seq_len)
             position_ids = split_for_sequence_parallel(
                 position_ids, dim=1, sp_group=sp_group)
-            inputs_embeds = split_for_sequence_parallel(
-                inputs_embeds, dim=1, sp_group=sp_group)
+            input_embeds = split_for_sequence_parallel(
+                input_embeds, dim=1, sp_group=sp_group)
 
             use_custom_loss = os.environ.get('USE_CUSTOM_LOSS')
             if not use_custom_loss:

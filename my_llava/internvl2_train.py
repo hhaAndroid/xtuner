@@ -1933,7 +1933,7 @@ def internvl_train(args):
             else:
                 # TODO 如果是均匀切，那确实如此，但是...
                 step_consumed_tokens += num_tokens.sum() / get_sp_world_size()
-                step_consumed_img_tokens += num_img_tokens.sum() / get_sp_world_size()
+            step_consumed_img_tokens += num_img_tokens.sum() / get_sp_world_size()
 
         grad_norm = shard_llava.clip_grad_norm_(args.max_grad_norm)
         optimizer.step()
