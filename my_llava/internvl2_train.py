@@ -53,8 +53,7 @@ from xtuner._lite.accelerate import (LoadWoInit,
                                      dispatch_modules, packed_sequence)
 from xtuner._lite.accelerate.fsdp import (RECOMPUTE_MODULES,
                                           checkpoint_check_fn, dp_lazy_init,
-                                          layer_auto_wrap_policy)
-from xtuner._lite.parallel import LengthGroupedSampler, ParallelSampler
+                                          dp_sp_lazy_init, layer_auto_wrap_policy)
 from torch.distributed.checkpoint.stateful import Stateful
 from xtuner._lite.internvl.constants import IMG_CONTEXT_TOKEN
 from xtuner._lite.internvl.dataset import (dynamic_preprocess, preprocess,
@@ -67,6 +66,11 @@ from datasets import Dataset as HF_Dataset
 from xtuner.utils import DEFAULT_PAD_TOKEN_INDEX, IGNORE_INDEX
 from xtuner._lite.datasets.text import SoftPackerForText
 from xtuner._lite.internvl.v1_5.modeling_internvl_chat import InternVLChatModel
+from xtuner._lite.parallel import (LengthGroupedSampler, ParallelSampler,
+                                   get_dp_mesh, get_dp_world_size,
+                                   get_sp_mesh,
+                                   get_sp_world_size,
+                                   setup_parallel)
 
 try:
     from petrel_client.client import Client
@@ -125,6 +129,12 @@ def parse_args():
         '--use-orig',
         action='store_true',
         help="")
+    model_args.add_argument('--sp-size', type=int, default=1, help='')
+    model_args.add_argument(
+        '--ring-size',
+        default=1,
+        type=int,
+        help='The ring size. if it is 1, it is the same as sp ulysses')
     model_args.add_argument(
         '--freeze-llm',
         action='store_true',
@@ -1460,7 +1470,12 @@ def internvl_train(args):
     set_random_seed(args.seed)
 
     world_size = int(os.environ['WORLD_SIZE'])
-    dp_size = world_size
+    sp_size = args.sp_size
+
+    setup_parallel(sp_size=sp_size, ring_size=args.ring_size)
+    dp_mesh = get_dp_mesh()
+    sp_mesh = get_sp_mesh()
+    dp_size = get_dp_world_size()
 
     assert args.pack_max_length % args.max_length == 0
 
@@ -1499,12 +1514,7 @@ def internvl_train(args):
         print('if you set both `group_by_length` and `group_by_modality_length`,'
               ' the `group_by_modality_length` will be used.')
 
-    device_mesh = init_device_mesh(
-        'cuda', (dp_size,), mesh_dim_names=('dp',))
-
-    dp_mesh = device_mesh['dp']
-
-    rank = dp_mesh.get_local_rank()
+    rank = dist.get_rank()
     timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
 
     objects = [timestamp]
@@ -1596,7 +1606,9 @@ def internvl_train(args):
             logger.info(f'======= Using soft packing style. =========')
         else:
             logger.info(f'======= Using packing style. =========')
-
+    if args.sp_size > 1:
+        assert args.dset_pack_level == 'soft', 'Only support soft packing with sp_size > 1.'
+        logger.info(f'======= Using SP mode. sp_ulysess:{args.sp_size//args.ring_size}, sp_ring:{args.ring_size}======')
     ###########################################################################
     #                     2. Dataset & Dataloader                             #
     ###########################################################################
@@ -1683,6 +1695,9 @@ def internvl_train(args):
 
     # Only load parameters on rank 0 to avoid each rank repeatedly loading the
     # same model into the CPU, wasting memory
+    timeout = timedelta(
+        minutes=int(os.getenv('XTUNER_DATASET_TIMEOUT', default=45)))
+    group = dist.new_group(backend='gloo', timeout=timeout)
     if rank == 0:
         logger.info(f'=====[Build Model]=======')
         internvl = build_model(args,
@@ -1700,23 +1715,30 @@ def internvl_train(args):
     else:
         meta_llava_map = None
 
-    dist.barrier()
+    dist.monitored_barrier(group=group, timeout=timeout)
 
-    param_init_fn = partial(
-        dp_lazy_init, module_map=meta_llava_map, dp_mesh=dp_mesh)
+    if get_sp_world_size() > 1:
+        param_init_fn = partial(
+            dp_sp_lazy_init,
+            module_map=meta_llava_map,
+            dp_mesh=dp_mesh,
+            sp_mesh=sp_mesh)
+    else:
+        param_init_fn = partial(
+            dp_lazy_init, module_map=meta_llava_map, dp_mesh=dp_mesh)
 
     policies = [layer_auto_wrap_policy]
     # if args.llm_use_lora or args.vit_use_lora:
     #     policies.append(all_required_grad_wrap_policy)
 
     if args.shard_strategy == 'full':
-        fsdp_device_mesh = dp_mesh
+        fsdp_device_mesh = init_device_mesh('cuda', (world_size,))
         strategy = ShardingStrategy.FULL_SHARD
     elif args.shard_strategy == 'no':
-        fsdp_device_mesh = dp_mesh
+        fsdp_device_mesh = init_device_mesh('cuda', (world_size,))
         strategy = ShardingStrategy.NO_SHARD
     elif args.shard_strategy == 'zero2':
-        fsdp_device_mesh = dp_mesh
+        fsdp_device_mesh = init_device_mesh('cuda', (world_size,))
         strategy = ShardingStrategy.SHARD_GRAD_OP
     elif args.shard_strategy == 'hybrid':
         fsdp_device_mesh = init_device_mesh('cuda', (dp_size // 8, 8))
@@ -1901,8 +1923,17 @@ def internvl_train(args):
                     avg_iter_loss.backward()
 
             step_loss += avg_iter_loss.item()
-            step_consumed_tokens += num_tokens.sum()
-            step_consumed_img_tokens += num_img_tokens.sum()
+            if args.dset_pack_level == 'soft':
+                # During a soft pack process, the data with a length that is
+                # still smaller than the max length after packing, will be
+                # padded to the max length. The last element of num tokens
+                # represents the count of pad tokens.
+                step_consumed_tokens += num_tokens[:-1].sum(
+                ) / get_sp_world_size()
+            else:
+                # TODO 如果是均匀切，那确实如此，但是...
+                step_consumed_tokens += num_tokens.sum() / get_sp_world_size()
+                step_consumed_img_tokens += num_img_tokens.sum() / get_sp_world_size()
 
         grad_norm = shard_llava.clip_grad_norm_(args.max_grad_norm)
         optimizer.step()

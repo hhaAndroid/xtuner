@@ -783,6 +783,9 @@ def llava_sft(args):
 
     # Only load parameters on rank 0 to avoid each rank repeatedly loading the
     # same model into the CPU, wasting memory
+    timeout = timedelta(
+        minutes=int(os.getenv('XTUNER_DATASET_TIMEOUT', default=45)))
+    group = dist.new_group(backend='gloo', timeout=timeout)
     if rank == 0:
         logger.info(f'=====[Build Model]=======')
         llava = build_llava_model(args, llava_config, world_size, dtype,
@@ -794,8 +797,7 @@ def llava_sft(args):
         meta_llava_map = map_meta_modules(llava, meta_llava)
     else:
         meta_llava_map = None
-
-    dist.barrier()
+    dist.monitored_barrier(group=group, timeout=timeout)
 
     param_init_fn = partial(
         dp_lazy_init, module_map=meta_llava_map, dp_mesh=dp_mesh)
