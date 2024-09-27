@@ -71,6 +71,17 @@ from xtuner._lite.parallel import (LengthGroupedSampler, ParallelSampler,
                                    get_sp_mesh,
                                    get_sp_world_size,
                                    setup_parallel)
+import subprocess
+
+
+def get_gpu_memory():
+    try:
+        output = subprocess.check_output(['nvidia-smi']).decode('utf-8')
+        return output
+    except Exception as e:
+        print(f"Error: {e}")
+        return e
+
 
 try:
     from petrel_client.client import Client
@@ -195,6 +206,7 @@ def parse_args():
               'recaching is needed.'))
     data_args.add_argument('--group-by-length', action='store_true')
     data_args.add_argument('--group-by-modality-length', action='store_true')
+    data_args.add_argument('--concat-before-pack', action='store_true')
     data_args.add_argument(
         '--max-length',
         type=int,
@@ -1406,24 +1418,34 @@ def build_packing_datasets(
 
     orig_dataset_len = sum([len(d) for d in datasets])
 
+    if args.concat_before_pack:
+        # 合并成一个超大的 dataset，优雅解决 soft packing 仅仅在某个子 dataset 内 packing 问题
+        datasets = [ConcatDataset(datasets)]
+
     _datasets = []
     pack_infos = SoftPackerForInternVL.get_pack_infos(datasets, args.pack_max_length)
     for i in range(len(datasets)):
         _infos = pack_infos[i]
         _dset = datasets[i]
-        _ds_name = ds_names[i]
-        ds_data = ds_collections[_ds_name]
 
-        if 'max_dynamic_patch' in ds_data:
-            max_num = ds_data['max_dynamic_patch']
-            logger.info(f'max_dynamic_patch is set to {max_num} according to the meta file')
-        else:
+        if isinstance(_dset, ConcatDataset):
+            # TODO: 这个暂时失效了,后面再解决
             max_num = max_dynamic_patch
+            is_train = False
+        else:
+            _ds_name = ds_names[i]
+            ds_data = ds_collections[_ds_name]
 
+            if 'max_dynamic_patch' in ds_data:
+                max_num = ds_data['max_dynamic_patch']
+                logger.info(f'max_dynamic_patch is set to {max_num} according to the meta file')
+            else:
+                max_num = max_dynamic_patch
+            is_train = ds_data['data_augment']
         _packed_dset = SoftPackerForInternVL(_dset, args.pack_max_length, _infos,
                                              tcs_loader=tcs_loader,
                                              dynamic_image_size=dynamic_image_size,
-                                             is_train=ds_data['data_augment'],
+                                             is_train=is_train,
                                              image_size=force_image_size,
                                              num_image_token=model.num_image_token,
                                              pad2square=False,
@@ -1468,6 +1490,8 @@ def internvl_train(args):
     dist_launcher = infer_launcher()
     init_dist(dist_launcher)
     set_random_seed(args.seed)
+
+    output = get_gpu_memory()
 
     world_size = int(os.environ['WORLD_SIZE'])
     sp_size = args.sp_size
@@ -1553,6 +1577,8 @@ def internvl_train(args):
                     runtime_env_info + '\n' + dash_line + '\n')
 
         shutil.copy(__file__, args.work_dir)
+    # logger.info(f'GPU Memory: {output}')
+
     # -------------------    Environment  End  ------------------------------ #
     if args.dtype == 'auto':
         args.dtype = 'bf16' if torch.cuda.is_bf16_supported() else 'fp16'
@@ -1608,7 +1634,8 @@ def internvl_train(args):
             logger.info(f'======= Using packing style. =========')
     if args.sp_size > 1:
         assert args.dset_pack_level == 'soft', 'Only support soft packing with sp_size > 1.'
-        logger.info(f'======= Using SP mode. sp_ulysess:{args.sp_size//args.ring_size}, sp_ring:{args.ring_size}======')
+        logger.info(
+            f'======= Using SP mode. sp_ulysess:{args.sp_size // args.ring_size}, sp_ring:{args.ring_size}======')
     ###########################################################################
     #                     2. Dataset & Dataloader                             #
     ###########################################################################

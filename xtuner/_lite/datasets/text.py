@@ -15,6 +15,7 @@ from xtuner._lite import get_logger
 from xtuner._lite.chat import ChatMessages
 from xtuner.utils import DEFAULT_PAD_TOKEN_INDEX, IGNORE_INDEX
 from .format import OPENAI_FORMAT_MAP
+from torch.utils.data import ConcatDataset
 
 logger = get_logger()
 
@@ -202,8 +203,14 @@ class SoftPackerForText(torch.utils.data.Dataset):
 
     @classmethod
     def get_pack_info(cls, dataset, max_length):
+        if isinstance(dataset, ConcatDataset):
+            num_tokens = []
+            for d in dataset.datasets:
+                num_tokens.extend(d['num_tokens'])
+        else:
+            num_tokens = dataset['num_tokens']
 
-        _ori_lens = dataset['num_tokens']
+        _ori_lens = num_tokens
         inds = [i for i in range(len(dataset))]
         random.shuffle(inds)
 
