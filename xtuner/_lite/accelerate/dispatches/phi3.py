@@ -6,7 +6,9 @@ from mmengine.logging import MessageHub
 
 from ._attention import SUPPORT_FLASH2, flash_attn_wo_mask, varlen_flash_attn
 from xtuner._lite.yunchang import llama3_varlen_attention_sp_ulysses_ring
-from xtuner._lite.parallel import get_ring_group, get_ring_world_size, get_sp_world_size, get_ulysess_group
+from xtuner._lite.parallel import get_ring_group, get_ring_world_size, get_sp_world_size, get_ulysess_group, \
+    split_for_sequence_parallel, get_sp_group
+from torch.distributed.nn.functional import all_gather
 
 
 def rotate_half(x):
@@ -95,8 +97,18 @@ Optional[Tuple[torch.Tensor]]]:
         kv_seq_len += past_key_value.get_usable_length(kv_seq_len, self.layer_idx)
 
     # Because the input can be padded, the absolute sequence length depends on the max position id.
-    rotary_seq_len = max(kv_seq_len, position_ids[:, -1].max().item()) + 1
-    cos, sin = self.rotary_emb(value_states, position_ids, seq_len=rotary_seq_len)
+    if get_sp_world_size() > 0:
+        sp_group = get_sp_group()
+        global_position_ids = attn_context.get_info('global_position_ids')
+        if global_position_ids is None:
+            global_position_ids = all_gather(position_ids)
+            global_position_ids = torch.cat(global_position_ids, dim=1)
+            # TODO HHA： 比较特殊，否则 SP 情况下计算结果和不开 SP 不一致
+        cos, sin = self.rotary_emb(value_states, global_position_ids)
+        cos = split_for_sequence_parallel(cos, dim=1, sp_group=sp_group)
+        sin = split_for_sequence_parallel(sin, dim=1, sp_group=sp_group)
+    else:
+        cos, sin = self.rotary_emb(value_states, position_ids)
 
     query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin, position_ids)
 

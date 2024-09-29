@@ -236,6 +236,9 @@ class InternVLChatModel(PreTrainedModel):
             # 只需要处理 inputs_embeds 和 position_ids，其余用不到
             attn_context = MessageHub.get_instance('packed_sequence')
             position_ids = attn_context.get_info('position_ids')
+            # phi3 attention 计算时候有特殊用途
+            attn_context.update_info('global_position_ids', position_ids)
+
             assert position_ids.size(1) == input_embeds.shape[1] == labels.shape[1], \
                 f'{position_ids.size(1)} {input_embeds.shape[1]} {labels.shape[1]}'
 
@@ -296,10 +299,9 @@ class InternVLChatModel(PreTrainedModel):
                     num_tokens = num_tokens.squeeze(dim=0).cpu().tolist()
                     if num_tokens[-1] == 0:  # 可能有 pading
                         num_tokens = num_tokens[:-1]
-                    num_tokens[-1] -= 1  # shift label
                     if sp_size > 1:
                         # 序列维度切分,有点特殊，只对 labels 进行偏移,然后再切分
-                        logits_rank_pre = logits.contiguous()
+                        logits_rank_pre = logits.view(-1, self.language_model.config.vocab_size).contiguous()
 
                         labels = labels.view(-1).contiguous()
                         shift_labels = labels[1:]  # 关键: shift 然后在补 -100，解决完整序列被切断带来的影响
@@ -316,22 +318,35 @@ class InternVLChatModel(PreTrainedModel):
                         labels_list = shift_labels.split(num_tokens)
                         loss_list = [loss.sum() / ((label != -100).sum().float() + 1e-12) for loss, label in
                                      zip(loss_list, labels_list)]
-                        loss = torch.stack(loss_list).mean()
+                        non_zero_loss_len = sum(1 for x in loss_list if x != 0)
+                        if non_zero_loss_len == 0:
+                            loss = torch.stack(loss_list).sum()
+                        else:
+                            loss = torch.stack(loss_list).sum() / non_zero_loss_len
                     else:
+                        num_tokens[-1] -= 1  # shift label
                         loss_fc = nn.CrossEntropyLoss(reduction='none')
                         all_loss = loss_fc(shift_logits, shift_labels)
                         loss_list = all_loss.split(num_tokens)
                         labels_list = shift_labels.split(num_tokens)
                         loss_list = [loss.sum() / ((label != -100).sum().float() + 1e-12) for loss, label in
                                      zip(loss_list, labels_list)]
-                        loss = torch.stack(loss_list).mean()
+                        non_zero_loss_len = sum(1 for x in loss_list if x != 0)
+                        if non_zero_loss_len == 0:
+                            loss = torch.stack(loss_list).sum()
+                        else:
+                            loss = torch.stack(loss_list).sum() / non_zero_loss_len
                 else:
                     # 非 packing 模式
                     loss_fct = CrossEntropyLoss(reduction='none')
                     loss = loss_fct(shift_logits, shift_labels)
                     loss = loss.reshape(batch_size, -1).sum(dim=1) / (
                             (labels[..., 1:] != -100).sum(dim=1).float() + 1e-12)
-                    loss = loss.mean()
+                    non_zero_loss_len = sum(1 for x in loss if x != 0)
+                    if non_zero_loss_len == 0:
+                        loss = loss.mean()
+                    else:
+                        loss = loss.sum() / non_zero_loss_len
 
         if not return_dict:
             output = (logits,) + outputs[1:]

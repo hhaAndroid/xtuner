@@ -1929,6 +1929,44 @@ def internvl_train(args):
 
             _data_start_t = time.time()
             data = next(data_iterator)
+
+            is_debug = False
+            if is_debug:
+                save_data = False
+                if save_data:
+                    torch.save(data, f'aa_{step}.pth')
+                else:
+                    data = torch.load(f'aa_{step}.pth')
+
+                debug_style = 'soft packing'  # 可以是 sp=1 sp=2, 支持 soft packing： batch packing: orig
+                # drop 等随机性关掉
+                if debug_style == 'soft packing':
+                    pass
+                else:
+                    num_tokens = data['num_tokens']
+                    input_ids = data['input_ids'][0].split(num_tokens.tolist())
+                    labels = data['labels'][0].split(num_tokens.tolist())
+                    attention_masks = data['attention_mask'][0].split(num_tokens.tolist())
+                    features = []
+                    for input_id, label, attention_mask in zip(input_ids[:-1], labels[:-1], attention_masks[:-1]):
+                        features.append(dict(input_ids=input_id, labels=label, attention_mask=attention_mask))
+
+                    if debug_style == 'batch packing':
+                        # 修改简单修改下内部代码，否则会UI报错
+                        new_data = packing_collate(features)
+                        args.use_orig = False
+                    else:
+                        # 需要把前面的 args.use_orig 也修改，否则报错
+                        new_data = concat_pad_data_collator(features)
+                        args.use_orig = True
+                    new_data['pixel_values'] = data['pixel_values']
+                    new_data['image_flags'] = data['image_flags']
+                    new_data['num_tokens'] = data['num_tokens'][:-1]
+                    new_data['num_img_tokens'] = data['num_img_tokens']
+
+                    data = new_data
+                    args.dset_pack_level = 'none'
+
             step_data_time += time.time() - _data_start_t
 
             data = _prepare_input(data)
