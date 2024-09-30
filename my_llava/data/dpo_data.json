@@ -1,0 +1,8 @@
+{
+    "rlhf_v": {
+        "root": "/mnt/hwfile/xtuner/huanghaian/data/dpo/rlaif-v_formatted/images",
+        "annotation": "/mnt/hwfile/xtuner/huanghaian/data/dpo/rlaif-v_formatted/train.jsonl",
+        "data_augment": false,
+        "repeat_time": 1
+    }
+}
