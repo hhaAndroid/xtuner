@@ -311,7 +311,7 @@ class InternVLChatModel(PreTrainedModel):
                         loss_fc = nn.CrossEntropyLoss(reduction='none')
                         loss_rank_pre = loss_fc(logits_rank_pre, shift_labels_rank_pre)
 
-                        loss = all_gather(loss_rank_pre)
+                        loss = all_gather(loss_rank_pre, group=sp_group)
                         loss = torch.cat(loss)
 
                         loss_list = loss.split(num_tokens)

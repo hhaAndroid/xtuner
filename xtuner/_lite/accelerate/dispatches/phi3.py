@@ -101,7 +101,7 @@ Optional[Tuple[torch.Tensor]]]:
         sp_group = get_sp_group()
         global_position_ids = attn_context.get_info('global_position_ids')
         if global_position_ids is None:
-            global_position_ids = all_gather(position_ids)
+            global_position_ids = all_gather(position_ids, group=sp_group)
             global_position_ids = torch.cat(global_position_ids, dim=1)
             # TODO HHA： 比较特殊，否则 SP 情况下计算结果和不开 SP 不一致
         cos, sin = self.rotary_emb(value_states, global_position_ids)
