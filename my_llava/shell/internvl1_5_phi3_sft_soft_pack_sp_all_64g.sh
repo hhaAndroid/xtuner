@@ -50,8 +50,8 @@ HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 srun -p ${PARTITION} --time 4-00:00
   --pack-max-length $((MIRCO_BATCH_SIZE * MAX_LENGHT)) \
   --num-workers 4 \
   --mirco-batch-size 1 \
-  --global-batch-size 16 \
-  --lr 2e-5 \
+  --global-batch-size 32 \
+  --lr 3e-5 \
   --wd 0.05 \
   --warmup-ratio 0.03 \
   --work-dir ${OUTPUT_DIR} \
