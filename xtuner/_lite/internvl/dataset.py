@@ -939,7 +939,6 @@ def packing_collate(features, pack_batch=True, pad_id=0):
         image_flags = image_flags[0]
         pixel_values = pixel_values[0]
 
-    # TODO support sp
     data_dict = {
         'input_ids': input_ids,
         'labels': labels,
@@ -951,3 +950,30 @@ def packing_collate(features, pack_batch=True, pad_id=0):
     }
 
     return data_dict
+
+
+def concat_pad_data_collator_dpo(features, pad_id=0):
+    # # split chosen and rejected into two instances
+    double_features = []
+    for feat in features:
+        pixel_values = feat['pixel_values']
+        image_flags = feat['image_flags']
+        num_img_tokens = feat['num_img_tokens']
+        double_features.append({
+            'input_ids': feat['chosen_ids'],
+            'labels': feat['chosen_labels'],
+            'pixel_values': pixel_values,
+            'image_flags': image_flags,
+            'num_tokens': [feat['num_tokens'][0]],
+            'num_img_tokens': num_img_tokens,
+        })
+        double_features.append({
+            'input_ids': feat['rejected_ids'],
+            'labels': feat['rejected_labels'],
+            'pixel_values': pixel_values,
+            'image_flags': image_flags,
+            'num_tokens': [feat['num_tokens'][1]],
+            'num_img_tokens': num_img_tokens,
+        })
+    batch = concat_pad_data_collator(double_features, pad_id=pad_id)
+    return batch
