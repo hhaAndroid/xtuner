@@ -1,7 +1,7 @@
 set -x
 
 PARTITION=${PARTITION:-"llm_razor"}
-GPUS=${GPUS:-64}
+GPUS=${GPUS:-32}
 GPUS_PER_NODE=${GPUS_PER_NODE:-8}
 QUOTA_TYPE=${QUOTA_TYPE:-"reserved"}
 NODES=$((GPUS / GPUS_PER_NODE))
@@ -19,10 +19,10 @@ if [ ! -d "$OUTPUT_DIR" ]; then
   mkdir -p "$OUTPUT_DIR"
 fi
 
-# number of gpus: 64
+# number of gpus: 32
 # batch size per gpu: 4
 # gradient accumulation steps: 2
-# total batch size: 512
+# total batch size: 256
 # epoch: 1
 MAX_LENGHT=8192
 # --concat-before-pack \
@@ -49,8 +49,7 @@ HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 srun -p ${PARTITION} --time 4-00:00
   --num-workers 4 \
   --mirco-batch-size 1 \
   --global-batch-size $((GPUS*ACCUMULATIVE_COUNTS)) \
-  --lr 3.5e-5 \
-  --lr-min 3.5e-6 \
+  --lr 2e-5 \
   --wd 0.05 \
   --warmup-ratio 0.03 \
   --work-dir ${OUTPUT_DIR} \

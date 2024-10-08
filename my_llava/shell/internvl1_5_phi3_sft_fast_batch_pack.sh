@@ -14,7 +14,7 @@ export PYTHONPATH="$(pwd):$(pwd)/../"
 export MASTER_PORT=34229
 export TF_CPP_MIN_LOG_LEVEL=3
 
-OUTPUT_DIR='work_dirs/internvl1_5_phi3_sft'
+OUTPUT_DIR='work_dirs/internvl1_5_phi3_sft_fast_batch_pack'
 if [ ! -d "$OUTPUT_DIR" ]; then
   mkdir -p "$OUTPUT_DIR"
 fi
@@ -24,8 +24,8 @@ fi
 # gradient accumulation steps: 2
 # total batch size: 256
 # epoch: 1
-
 # export USE_CUSTOM_LOSS=1
+
 HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 srun -p ${PARTITION} --time 4-00:00:00 \
   --gres=gpu:${GPUS_PER_NODE} \
   --nodes=${NODES} \
@@ -56,5 +56,5 @@ HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 srun -p ${PARTITION} --time 4-00:00
   --checkpoint-interval 2000 \
   --checkpoint-drop-optimizer \
   --shard-strategy 'zero2' \
-  --use-orig \
+  --use-fast-tokenizer \
   2>&1 | tee -a "${OUTPUT_DIR}/training_log.txt"
