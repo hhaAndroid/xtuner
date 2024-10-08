@@ -1,7 +1,7 @@
 set -x
 
 PARTITION=${PARTITION:-"llm_razor"}
-GPUS=${GPUS:-16}
+GPUS=${GPUS:-8}
 GPUS_PER_NODE=${GPUS_PER_NODE:-8}
 QUOTA_TYPE=${QUOTA_TYPE:-"reserved"}
 NODES=$((GPUS / GPUS_PER_NODE))
@@ -20,7 +20,8 @@ if [ ! -d "$OUTPUT_DIR" ]; then
 fi
 
 SCRIPT_NAME=$(basename "$0")
-cp $0 "${OUTPUT_DIR}/${SCRIPT_NAME}"
+cp "$0" "${OUTPUT_DIR}/${SCRIPT_NAME}"
+# -m debugpy --connect 10.140.0.31:15689
 
 HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 srun -p ${PARTITION} --time 2-00:00:00 \
   --gres=gpu:${GPUS_PER_NODE} \
@@ -31,18 +32,18 @@ HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 srun -p ${PARTITION} --time 2-00:00
   --kill-on-bad-exit=1 \
   --quotatype=${QUOTA_TYPE} \
   ${SRUN_ARGS} \
-  python -u internvl2_dpo_train.py \
+  python internvl2_dpo_train.py \
   --internvl '/mnt/hwfile/xtuner/huanghaian/model/Mini-InternVL-Chat-4B-V1-5' \
   --meta-path 'data/dpo_data.json' \
-  --drop-path-rate 0.0 \
   --num-workers 4 \
   --mirco-batch-size $MIRCO_BATCH_SIZE \
   --global-batch-size $((MIRCO_BATCH_SIZE*GPUS*ACCUMULATIVE_COUNTS)) \
   --lr 5e-7 \
+  --chat-template 'phi3-chat' \
   --wd 0.05 \
   --warmup-ratio 0.03 \
   --work-dir ${OUTPUT_DIR} \
-  --log-interval 10 \
+  --log-interval 1 \
   --seed 42 \
   --checkpoint-interval 2000 \
   --checkpoint-drop-optimizer \

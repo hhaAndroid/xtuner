@@ -53,16 +53,13 @@ from xtuner._lite.accelerate.fsdp import (RECOMPUTE_MODULES,
                                           checkpoint_check_fn, dp_lazy_init,
                                           dp_sp_lazy_init, layer_auto_wrap_policy)
 from torch.distributed.checkpoint.stateful import Stateful
-from xtuner._lite.internvl.constants import IMG_CONTEXT_TOKEN
+from xtuner._lite.internvl.v1_5.modeling_internvl_chat import InternVLChatModel
+from xtuner._lite.internvl.v1_5.modeling_internvl_chat import get_conv_template
 from xtuner._lite.internvl.dataset import (dynamic_preprocess, preprocess,
                                            preprocess_internlm, preprocess_mpt,
                                            preprocess_phi3, build_transform, preprocess_phi3_fast,
                                            TCSLoader, concat_pad_data_collator_dpo,
                                            packing_collate, dynamic_num_patch)
-from xtuner._lite.internvl.v1_5.modeling_intern_vit import InternVisionModel
-from datasets import Dataset as HF_Dataset
-from xtuner.utils import DEFAULT_PAD_TOKEN_INDEX, IGNORE_INDEX
-from xtuner._lite.datasets.text import SoftPackerForText
 from xtuner._lite.internvl.constants import (IMG_CONTEXT_TOKEN, IMG_END_TOKEN, IMG_START_TOKEN)
 from xtuner._lite.parallel import (LengthGroupedSampler, ParallelSampler,
                                    get_dp_mesh, get_dp_world_size,
@@ -129,6 +126,10 @@ def parse_args():
         default=0.0,
         type=float,
         help='')
+    model_args.add_argument(
+        '--chat-template',
+        choices=['phi3-chat'],
+        help='')
     model_args.add_argument('--sp-size', type=int, default=1, help='')
     model_args.add_argument(
         '--ring-size',
@@ -150,6 +151,10 @@ def parse_args():
         help=("the dtype of the model forward. When set to 'auto', it will "
               'automatically determine whether bf16 is available, '
               'prioritizing the use of bf16.'))
+    model_args.add_argument(
+        '--use-orig',
+        action='store_true',
+        help="")
     model_args.add_argument(
         '--selective-recompute',
         default=1.0,
@@ -293,17 +298,10 @@ def build_model(args, config, dtype=torch.bfloat16, device='cpu'):
         _cfg = copy.deepcopy(config)
 
         with LoadWoInit():
-            if device != 'meta':
-                model = AutoModel.from_pretrained(
-                    args.internvl,
-                    torch_dtype=torch.bfloat16,
-                    config=config,
-                    trust_remote_code=True)
-            else:
-                # 不需要加载权重，只要有结构进行
-                model = AutoModel.from_config(config=_cfg,
-                                              torch_dtype=dtype,
-                                              trust_remote_code=True)
+            model = InternVLChatModel.from_pretrained(
+                args.internvl,
+                torch_dtype=dtype,
+                config=_cfg)
 
         model.to(dtype)
 
@@ -332,27 +330,30 @@ class MetaStateful(Stateful):
         return self.kwargs[key]
 
 
-def tokenization_fn(tokenizer, prompt, chosen, rejected, num_image_token, text_only):
+def tokenization_fn(chat_template, tokenizer, prompt, chosen, rejected, num_image_token, text_only):
     if not text_only:
         image_tokens = f'{IMG_START_TOKEN}{IMG_CONTEXT_TOKEN * num_image_token}{IMG_END_TOKEN}'
         prompt = prompt.replace('<image>', image_tokens, 1)
     else:
         assert '<image>' not in prompt, 'text_only is True, but <image> is in prompt'
 
-    prompt = tokenizer.apply_chat_template(
-        prompt, tokenize=False, add_generation_prompt=True)
-    chosen = tokenizer.apply_chat_template(
-        prompt + chosen,
-        tokenize=False,
-        add_generation_prompt=False)
-    rejected = tokenizer.apply_chat_template(
-        prompt + rejected,
-        tokenize=False,
-        add_generation_prompt=False)
+    template = get_conv_template(chat_template)
+    template.append_message(template.roles[0], prompt)
+    template.append_message(template.roles[1], None)
+    prompt = template.get_prompt()
+    prompt_ids = tokenizer(prompt)['input_ids']
 
-    prompt_ids = tokenizer.encode(prompt, add_special_tokens=False)
-    chosen_ids = tokenizer.encode(chosen, add_special_tokens=False)
-    rejected_ids = tokenizer.encode(rejected, add_special_tokens=False)
+    template = get_conv_template(chat_template)
+    template.append_message(template.roles[0], prompt)
+    template.append_message(template.roles[1], chosen)
+    chosen = template.get_prompt()
+    chosen_ids = tokenizer(chosen)['input_ids']
+
+    template = get_conv_template(chat_template)
+    template.append_message(template.roles[0], prompt)
+    template.append_message(template.roles[1], rejected)
+    rejected = template.get_prompt()
+    rejected_ids = tokenizer(rejected)['input_ids']
 
     if len(prompt_ids) > tokenizer.model_max_length:
         warnings.warn(f'Prompt is too long: {len(prompt_ids)} > {tokenizer.model_max_length}')
@@ -395,7 +396,8 @@ class LazyDPODataset(Dataset):
             repeat_time=1,
             normalize_type='imagenet',
             random_seed=0,
-            use_fast_tokenizer=False
+            use_fast_tokenizer=False,
+            chat_template='phi3-chat',
     ):
         super(LazyDPODataset, self).__init__()
         self.ds_name = ds_name
@@ -408,6 +410,7 @@ class LazyDPODataset(Dataset):
         logger.info(f'[Dataset] use_thumbnail: {use_thumbnail}')
         logger.info(f'[Dataset] min_dynamic_patch: {min_dynamic_patch}, max_dynamic_patch: {max_dynamic_patch}')
 
+        self.chat_template = chat_template
         self.image_size = image_size
         self.is_train = is_train
         self.pad2square = pad2square
@@ -512,15 +515,15 @@ class LazyDPODataset(Dataset):
         if not self.dynamic_image_size:
             assert num_patches == 1, f'The number of patches should be 1, but got {num_patches}.'
 
-        ret = tokenization_fn(self.tokenizer, prompt, chosen, rejected,
+        ret = tokenization_fn(self.chat_template, self.tokenizer, prompt, chosen, rejected,
                               self.num_image_token * num_patches,
                               text_only=False)
         chosen_ids, chosen_labels, rejected_ids, rejected_labels = ret
         ret = dict(
-            chosen_ids=chosen_ids,
-            chosen_labels=chosen_labels,
-            rejected_ids=rejected_ids,
-            rejected_labels=rejected_labels,
+            chosen_ids=torch.tensor(chosen_ids, dtype=torch.long),
+            chosen_labels=torch.tensor(chosen_labels, dtype=torch.long),
+            rejected_ids=torch.tensor(rejected_ids, dtype=torch.long),
+            rejected_labels=torch.tensor(rejected_labels, dtype=torch.long),
             pixel_values=pixel_values,
             image_flags=torch.tensor([1] * num_patches, dtype=torch.long),
             num_tokens=[len(chosen_ids), len(rejected_ids)],
@@ -551,15 +554,15 @@ class LazyDPODataset(Dataset):
         chosen = data_item['chosen']
         rejected = data_item['rejected']
 
-        ret = tokenization_fn(self.tokenizer, prompt, chosen, rejected,
+        ret = tokenization_fn(self.chat_template, self.tokenizer, prompt, chosen, rejected,
                               self.num_image_token * num_patches,
                               text_only=True)
         chosen_ids, chosen_labels, rejected_ids, rejected_labels = ret
         ret = dict(
-            chosen_ids=chosen_ids,
-            chosen_labels=chosen_labels,
-            rejected_ids=rejected_ids,
-            rejected_labels=rejected_labels,
+            chosen_ids=torch.tensor(chosen_ids, dtype=torch.long),
+            chosen_labels=torch.tensor(chosen_labels, dtype=torch.long),
+            rejected_ids=torch.tensor(rejected_ids, dtype=torch.long),
+            rejected_labels=torch.tensor(rejected_labels, dtype=torch.long),
             pixel_values=pixel_values,
             image_flags=torch.tensor([0] * num_patches, dtype=torch.long),
             num_tokens=[len(chosen_ids), len(rejected_ids)],
@@ -625,7 +628,8 @@ def build_datasets(
             repeat_time=1,
             normalize_type=normalize_type,
             random_seed=i,
-            use_fast_tokenizer=False
+            use_fast_tokenizer=False,
+            chat_template=args.chat_template
         )
         logger.info(f'Add dataset: {ds_name} with length: {len(dataset)}')
         datasets.append(dataset)
@@ -779,7 +783,7 @@ class DPOWrapper:
         reward_acc = (chosen_rewards > rejected_rewards).float().mean()
 
         loss_dict = {
-            'loss': loss,
+            'loss': loss.mean(),
             'chosen_rewards': chosen_rewards.mean(),
             'rejected_rewards': rejected_rewards.mean(),
             'reward_acc': reward_acc,
@@ -903,18 +907,20 @@ def internvl_train(args):
                                 device='meta')
     meta_internvl.img_context_token_id = img_context_token_id
 
-    for module in meta_internvl.modules():
-        for p_name, param in module.named_parameters(recurse=False):
-            if param.requires_grad:
-                param_fp32 = torch.nn.Parameter(param.to(dtype=torch.float32))
-                setattr(module, p_name, param_fp32)
-
     exclude_cls = []
     if args.use_orig:
         # 保持原始逻辑不变
         logger.info('Use original style.')
         exclude_cls = ['Phi3FlashAttention2']
     dispatch_modules(meta_internvl, exclude_cls)
+
+    meta_internvl_ref = copy.deepcopy(meta_internvl)
+
+    for module in meta_internvl.modules():
+        for p_name, param in module.named_parameters(recurse=False):
+            if param.requires_grad:
+                param_fp32 = torch.nn.Parameter(param.to(dtype=torch.float32))
+                setattr(module, p_name, param_fp32)
 
     if not args.use_orig:
         if args.dset_pack_level == 'soft':
@@ -995,7 +1001,7 @@ def internvl_train(args):
         internvl.img_context_token_id = img_context_token_id
         rank0_meta_llava = copy.deepcopy(meta_internvl)
         meta_llava_map = map_meta_modules(internvl, meta_internvl)
-        logger.info(f'=====trainable parametere=======')
+        logger.info(f'=====trainable parameter=======')
         for name, param in internvl.named_parameters():
             if param.requires_grad:
                 logger.info(name)
@@ -1046,7 +1052,6 @@ def internvl_train(args):
         logger.info(shard_llava)
 
     # ================================= ref model ====================================================
-    meta_internvl_ref = copy.deepcopy(meta_internvl)
     meta_internvl_ref.eval()
     meta_internvl_ref.requires_grad_(False)
 
