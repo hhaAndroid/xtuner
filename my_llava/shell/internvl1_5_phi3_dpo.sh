@@ -38,7 +38,7 @@ HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 srun -p ${PARTITION} --time 2-00:00
   --num-workers 4 \
   --mirco-batch-size $MIRCO_BATCH_SIZE \
   --global-batch-size $((MIRCO_BATCH_SIZE*GPUS*ACCUMULATIVE_COUNTS)) \
-  --lr 5e-7 \
+  --lr 5e-6 \
   --chat-template 'phi3-chat' \
   --wd 0.05 \
   --warmup-ratio 0.03 \
@@ -49,4 +49,5 @@ HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 srun -p ${PARTITION} --time 2-00:00
   --checkpoint-drop-optimizer \
   --shard-strategy 'zero2' \
   --use-orig \
+  --freeze-vit \
   2>&1 | tee -a "${OUTPUT_DIR}/training_log.txt"

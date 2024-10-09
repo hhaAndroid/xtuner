@@ -84,13 +84,24 @@ cd my_llava
 export LMUData='/mnt/hwfile/xtuner/huanghaian/LMUData/'
 export PYTHONPATH="$(pwd):$(pwd)/../"
 
-# 由于 internvl 推理代码不支持最新 transformers,因此需要额外一步
-# 覆盖保存的 modeling_phi3.py
-# 修改 shell/copy.sh 里面的路径后执行
-bash shell/copy.sh
+# 由于 internvl 推理代码不支持最新 transformers,因此需要额外一步,内部部分路径要自己替换
+bash shell/copy.sh 模型权重路径
 # 如果想多机，可以考虑把多个评测数据集分开，每个节点跑一部分评测集
 srun -p llm_razor --job-name=eval --time=02:00:00 --cpus-per-task=16 --nodes=1 --gres=gpu:8 --ntasks-per-node=1 --kill-on-bad-exit=1 torchrun --master_port=29501 --nproc-per-node=8 vlmevalkit/run.py --model-flag internvl_1_5 --data MMBench_DEV_EN MMStar MME SEEDBench_IMG MMMU_DEV_VAL ScienceQA_TEST HallusionBench TextVQA_VAL ChartQA_TEST AI2D_TEST DocVQA_VAL InfoVQA_VAL OCRBench RealWorldQA SEEDBench2_Plus --model-name internvl1 --model-path work_dirs/internvl1_5_phi3_sft/20240914165647/hf-15780-of-15780
 
 # 自动解析全部数据
 srun -p llm_razor python vlmevalkit/parse_eval_csv.py internvl1
+```
+
+## DPO
+
+```shell
+cd my_llava
+export LMUData='/mnt/hwfile/xtuner/huanghaian/LMUData/'
+export PYTHONPATH="$(pwd):$(pwd)/../"
+# 由于 internvl 推理代码不支持最新 transformers,因此需要额外一步,内部部分路径要自己替换
+bash shell/copy.sh 模型权重路径
+
+bash shell/internvl1_5_phi3_dpo.sh
+srun -p llm_razor --job-name=eval --time=02:00:00 --cpus-per-task=16 --nodes=1 --gres=gpu:8 --ntasks-per-node=1 --kill-on-bad-exit=1 torchrun --master_port=29501 --nproc-per-node=8 vlmevalkit/run.py --model-flag internvl_1_5 --data HallusionBench POPE --model-name internvl_dpo --model-path work_dirs/internvl1_5_phi3_sft/20240914165647/hf-15780-of-15780
 ```
