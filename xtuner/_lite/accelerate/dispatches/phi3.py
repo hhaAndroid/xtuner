@@ -97,7 +97,7 @@ Optional[Tuple[torch.Tensor]]]:
         kv_seq_len += past_key_value.get_usable_length(kv_seq_len, self.layer_idx)
 
     # Because the input can be padded, the absolute sequence length depends on the max position id.
-    if get_sp_world_size() > 0:
+    if get_sp_world_size() > 1:
         sp_group = get_sp_group()
         global_position_ids = attn_context.get_info('global_position_ids')
         if global_position_ids is None:
