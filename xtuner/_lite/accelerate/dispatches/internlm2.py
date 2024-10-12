@@ -1,6 +1,7 @@
 # Copyright (c) OpenMMLab. All rights reserved.
 from typing import Optional, Tuple
 
+import os
 import torch
 from einops import rearrange
 from mmengine import MessageHub
@@ -200,7 +201,9 @@ def _internlm2_varlen_attn_forward(
     assert SUPPORT_FLASH2
     cumulative_lengths = attn_context.get_info('cumulative_lengths')
     if cumulative_lengths is not None and SUPPORT_FLASH2 and bsz == 1:
-        if get_ring_world_size() > 1:
+        # 仅仅用于测试该分支下 sp ulyess 是否正确
+        force_to_new_sp = os.environ.get('FORCE_TO_NEW_SP')
+        if get_ring_world_size() > 1 or force_to_new_sp:
             # 只有开启了 ring 情况下才运行，如果只是普通 sp，则依然运行原先逻辑
             assert cumulative_lengths[-1] % get_sp_world_size() == 0, f'==={cumulative_lengths[-1]}===='
             q_unpad, k_unpad, v_unpad = query_states.flatten(0, 1), key_states.flatten(
@@ -213,6 +216,8 @@ def _internlm2_varlen_attn_forward(
                 ulysses_pg=get_ulysess_group(),
                 ring_pg=get_ring_group(),
                 causal=True,
+                # 如果想更省显存，可以设置为 1。-1 表示不切分
+                heads_k_stride=-1
             )
             attn_output = attn_output.unsqueeze(0)
         else:
