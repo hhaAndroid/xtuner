@@ -13,6 +13,7 @@ from functools import partial
 
 import torch
 import torch.nn.functional as F
+import torch.nn as nn
 import torch.distributed as dist
 import torch.distributed.checkpoint as dcp
 from accelerate.utils import set_module_tensor_to_device
@@ -47,6 +48,7 @@ from torch.distributed.tensor.parallel import (ColwiseParallel,
                                                RowwiseParallel,
                                                parallelize_module)
 from torch.distributed._tensor import Replicate
+from torch.distributed.tensor.parallel import loss_parallel
 
 from xtuner._lite import AutoTokenizer, get_logger
 from xtuner._lite.accelerate import (LORA_TARGET_MAP, LoadWoInit,
@@ -68,7 +70,6 @@ from xtuner._lite.parallel import (LengthGroupedSampler, ParallelSampler,
 from llava_model import LlavaForConditionalGeneration
 from torch.distributed.checkpoint.stateful import Stateful
 from xtuner.utils import DEFAULT_PAD_TOKEN_INDEX
-
 
 logger = get_logger()
 
@@ -125,6 +126,14 @@ def parse_args():
               'Defaults to the same as `model`'))
     model_args.add_argument(
         '--tp-size', type=int, default=1, help='Tensor Parallel Size')
+    model_args.add_argument(
+        '--tp-vit',
+        action='store_true',
+        help="to apply tensor parallel to vit's parameters")
+    model_args.add_argument(
+        '--loss-parallel',
+        action='store_true',
+        help="to apply loss parallel")
     model_args.add_argument(
         '--freeze-llm',
         action='store_true',
@@ -385,14 +394,14 @@ def build_llava_model(args, config, world_size, dtype=torch.float32,
                         f'shape {ori_emb_shape} to shape {new_emb_shape}')
 
         if args.freeze_llm or args.llm_use_lora:
+            llava.language_model.eval()
             llava.language_model.requires_grad_(False)
-            if world_size > 1:
-                llava.language_model.to(dtype)
+            llava.language_model.to(dtype)
 
         if args.freeze_vit or args.vit_use_lora:
+            llava.vision_tower.eval()
             llava.vision_tower.requires_grad_(False)
-            if world_size > 1:
-                llava.vision_tower.to(dtype)
+            llava.vision_tower.to(dtype)
 
         if args.llm_use_lora:
             llm = llava.language_model
@@ -799,9 +808,6 @@ def llava_sft(args):
                 param_fp32 = torch.nn.Parameter(param.to(dtype=torch.float32))
                 setattr(module, p_name, param_fp32)
 
-    if dist.get_rank() == 0:
-        logger.info(meta_llava)
-
     if pack_batch or args.dset_pack_level:
         dispatch_modules(meta_llava)
 
@@ -816,6 +822,7 @@ def llava_sft(args):
     timeout = timedelta(
         minutes=int(os.getenv('XTUNER_DATASET_TIMEOUT', default=45)))
     group = dist.new_group(backend='gloo', timeout=timeout)
+
     if rank == 0:
         logger.info(f'=====[Build Model]=======')
         llava = build_llava_model(args, llava_config, world_size, dtype,
@@ -823,34 +830,39 @@ def llava_sft(args):
                                   device='cpu',
                                   resize_emb=need_resize_emb,
                                   is_pretrain=is_pretrain)
-        rank0_meta_llava = copy.deepcopy(meta_llava)
-        meta_llava_map = map_meta_modules(llava, meta_llava)
-    else:
-        meta_llava_map = None
+        for module in llava.modules():
+            for p_name, param in module.named_parameters(recurse=False):
+                if param.requires_grad:
+                    param_fp32 = torch.nn.Parameter(param.to(dtype=torch.float32))
+                    setattr(module, p_name, param_fp32)
+
     dist.monitored_barrier(group=group, timeout=timeout)
 
     # tp model
     if args.tp_size > 1:
-        # vit
-        layer_tp_plan = {
-            'self_attn.k_proj': ColwiseParallel(),
-            'self_attn.q_proj': ColwiseParallel(),
-            'self_attn.v_proj': ColwiseParallel(),
-            'self_attn.out_proj': RowwiseParallel(),
-            'mlp.fc1': ColwiseParallel(),
-            'mlp.fc2': RowwiseParallel(),
-        }
+        if args.tp_vit:
+            # vit
+            logger.info(f'[Model] Apply tensor parallel to ViT.')
+            layer_tp_plan = {
+                'self_attn.k_proj': ColwiseParallel(),
+                'self_attn.q_proj': ColwiseParallel(),
+                'self_attn.v_proj': ColwiseParallel(),
+                'self_attn.out_proj': RowwiseParallel(),
+                'mlp.fc1': ColwiseParallel(),
+                'mlp.fc2': RowwiseParallel(),
+            }
 
-        for layer in meta_llava.vision_tower.vision_model.encoder.layers:
-            attention = layer.self_attn
-            attention.num_heads = attention.num_heads // tp_mesh.size()
-            parallelize_module(
-                module=layer,
-                device_mesh=tp_mesh,
-                parallelize_plan=layer_tp_plan,
-            )
+            for layer in meta_llava.vision_tower.vision_model.encoder.layers:
+                attention = layer.self_attn
+                attention.num_heads = attention.num_heads // tp_mesh.size()
+                parallelize_module(
+                    module=layer,
+                    device_mesh=tp_mesh,
+                    parallelize_plan=layer_tp_plan,
+                )
 
         # llm
+        logger.info(f'[Model] Apply tensor parallel to LLM.')
         layer_tp_plan = {
             'attention.wqkv': ColwiseParallel(),
             'attention.wo': RowwiseParallel(),
@@ -869,14 +881,46 @@ def llava_sft(args):
                 parallelize_plan=layer_tp_plan,
             )
 
-        meta_llava = parallelize_module(
-            module=meta_llava,
-            device_mesh=tp_mesh,
-            parallelize_plan={
-                'language_model.model.tok_embeddings':
-                RowwiseParallel(input_layouts=Replicate(), ),
-                'language_model.output': ColwiseParallel(output_layouts=Replicate(), ),
-            })
+        if args.loss_parallel:
+            logger.info(f'[Model] Apply loss parallel to LLM.')
+            meta_llava = parallelize_module(
+                module=meta_llava,
+                device_mesh=tp_mesh,
+                parallelize_plan={
+                    'language_model.model.tok_embeddings':
+                        RowwiseParallel(input_layouts=Replicate(), ),
+                    'language_model.output': ColwiseParallel(use_local_output=False),
+                })
+        else:
+            meta_llava = parallelize_module(
+                module=meta_llava,
+                device_mesh=tp_mesh,
+                parallelize_plan={
+                    'language_model.model.tok_embeddings':
+                        RowwiseParallel(input_layouts=Replicate(), ),
+                    'language_model.output': ColwiseParallel(output_layouts=Replicate(), ),
+                })
+
+        # tp 会重置所有包装的模块参数为 requires_grad=true，需要再次设置，但是也没有用，FSDP 包装后依然是 requires_grad=true
+        # 应该是 FSDP1 对于这种情况没有支持
+        if args.freeze_vit:
+            meta_llava.vision_tower.eval()
+            meta_llava.vision_tower.requires_grad_(False)
+        if args.freeze_llm:
+            meta_llava.language_model.eval()
+            meta_llava.language_model.requires_grad_(False)
+
+    # requried_grad_params1 = [
+    #     (name, param) for name, param in meta_llava.named_parameters() if param.requires_grad
+    # ]
+    # if rank == 0:
+    #     print('xxxx', requried_grad_params1)
+
+    if rank == 0:
+        rank0_meta_llava = copy.deepcopy(meta_llava)
+        meta_llava_map = map_meta_modules(llava, meta_llava)
+    else:
+        meta_llava_map = None
 
     if args.tp_size > 1:
         param_init_fn = partial(
@@ -920,6 +964,15 @@ def llava_sft(args):
         param_init_fn=param_init_fn,
         sync_module_states=True,
     )
+    # TODO HHA: 不管咋弄，被 TP 包装后的 DTensor 依然是 requires_grad=True, 这是不对的
+    # 暂时只能强制再设置一遍
+    # 如果不设置会导致 freeze 的模块依然是 requires_grad=True，这不符合预期，而且程序会报错，因为有 fp32 和 bf16 参数混合一起
+    if args.freeze_vit:
+        shard_llava.vision_tower.eval()
+        shard_llava.vision_tower.requires_grad_(False)
+    if args.freeze_llm:
+        shard_llava.language_model.eval()
+        shard_llava.language_model.requires_grad_(False)
 
     max_memory = torch.cuda.max_memory_allocated()
     logger.info('[Model] The peak GPU memory when building the FSDP model is '
@@ -942,6 +995,11 @@ def llava_sft(args):
     requried_grad_params = [
         param for param in shard_llava.parameters() if param.requires_grad
     ]
+    # requried_grad_params1 = [
+    #     (name, param) for name, param in shard_llava.named_parameters() if param.requires_grad
+    # ]
+    # if rank == 0:
+    #     print(requried_grad_params1, requried_grad_params1[0][1].dtype)
     optimizer = AdamW(
         requried_grad_params, lr=args.lr, weight_decay=args.wd, fused=True)
 
@@ -1074,18 +1132,43 @@ def llava_sft(args):
             packed_ctx = packed_sequence(num_tokens, enable=pack_batch)
 
             with packed_ctx:
-                with autocast if use_lora else nullcontext():
-                    outputs = shard_llava(
-                        input_ids=input_ids,
-                        labels=labels,
-                        pixel_values=pixel_values,
-                        attention_mask=attention_mask)
-                    avg_iter_loss = outputs.loss / per_step_iters
+                if args.loss_parallel:
+                    with autocast if use_lora else nullcontext():
+                        outputs = shard_llava(
+                            input_ids=input_ids,
+                            labels=None,
+                            pixel_values=pixel_values,
+                            attention_mask=attention_mask)
 
-                if scaler and use_lora:
-                    scaler.scale(avg_iter_loss).backward()
+                        shift_attention_mask = attention_mask[..., 1:]
+                        shift_logits = outputs.logits[..., :-1, :][shift_attention_mask.to(outputs.logits.device) != 0].contiguous()
+                        shift_labels = labels[..., 1:][shift_attention_mask.to(labels.device) != 0].contiguous()
+
+                        with loss_parallel():
+                            loss_fct = nn.CrossEntropyLoss()
+                            loss = loss_fct(
+                                shift_logits.view(-1, shift_logits.size(-1)),
+                                shift_labels.view(-1).to(shift_logits.device)
+                            )
+                            avg_iter_loss = loss / per_step_iters
+
+                            if scaler and use_lora:
+                                scaler.scale(avg_iter_loss).backward()
+                            else:
+                                avg_iter_loss.backward()
                 else:
-                    avg_iter_loss.backward()
+                    with autocast if use_lora else nullcontext():
+                        outputs = shard_llava(
+                            input_ids=input_ids,
+                            labels=labels,
+                            pixel_values=pixel_values,
+                            attention_mask=attention_mask)
+                        avg_iter_loss = outputs.loss / per_step_iters
+
+                    if scaler and use_lora:
+                        scaler.scale(avg_iter_loss).backward()
+                    else:
+                        avg_iter_loss.backward()
 
             step_loss += avg_iter_loss.item()
             step_consumed_tokens += num_tokens.sum()
