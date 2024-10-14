@@ -91,7 +91,7 @@ def clip_flash_attn_forward(
         key_states,
         value_states,
         self.dropout if self.training else 0,
-        causal=causal_attention_mask is not None).view(bsz, tgt_len, embed_dim)
+        causal=causal_attention_mask is not None).view(bsz, tgt_len, -1)
 
     attn_output = self.out_proj(attn_output)
 
