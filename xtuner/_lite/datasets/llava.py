@@ -334,3 +334,216 @@ class LlavaCollator():
         }
 
         return data_dict
+
+
+##################### 新 dataset ###################################################################
+from .load import load_json, load_jsonl
+
+
+class LlavaDatasetForNonPack(torch.utils.data.Dataset):
+
+    def __init__(self,
+                 path,
+                 sample_ratio=1.0,
+                 tokenize_fn=None,
+                 cache_dir=None,
+                 pad_image_to_square=False):
+        super().__init__()
+
+        if path.endswith('.json'):
+            dataset = load_json(path)
+        else:
+            dataset = load_jsonl(path)
+
+        self.tokenize_fn = tokenize_fn
+        self.conv2length_text = {}  # using dict to speedup the calculation of token length
+        self.group_length = []
+        print('Calculating the length of text data...')
+        for data_item in dataset:
+            conversations = '\n'.join(
+                [temp['value'] for temp in data_item['conversations']])
+            str_length = len(conversations)
+            if str_length not in self.conv2length_text:
+                token_length = self.tokenize_fn.tokenizer(
+                    conversations,
+                    return_tensors='pt',
+                    padding=False,
+                    truncation=False,
+                ).input_ids.size(1)
+                self.conv2length_text[str_length] = token_length
+            else:
+                token_length = self.conv2length_text[str_length]
+            if 'image' in data_item and data_item['image'] is not None:
+                token_length += self.tokenize_fn.per_img_tokens
+            else:
+                token_length = -token_length
+            self.group_length.append(token_length)
+        print('Finished calculating the length of text data...')
+
+        del self.conv2length_text
+
+    @property
+    def modality_length(self):
+        return self.group_length
+
+    @property
+    def length(self):
+        group_length = np.array(self.group_length)
+        group_length = np.abs(group_length).tolist()
+        return group_length
+
+    def __getitem__(self, item):
+        raw_data = self.dataset[item]
+        return self.tokenize_fn(raw_data)
+
+    def __len__(self):
+        return len(self.dataset)
+
+
+class NewLlavaTokenizeFunction():
+
+    def __init__(self,
+                 tokenizer,
+                 chat_template,
+                 per_img_tokens,
+                 image_dir=None,
+                 raw_format='llava',
+                 max_length=2048,
+                 image_processor=None,
+                 pad_image_to_square=False):
+
+        self.tokenizer = tokenizer
+        self.chat_template = chat_template
+        self.image_dir = image_dir
+        self.raw_format = raw_format
+        self.per_img_tokens = per_img_tokens
+        self.max_length = max_length
+        self.pad_image_to_square = pad_image_to_square
+        self.image_processor = image_processor
+
+    def __call__(self, item):
+
+        formatter = OPENAI_FORMAT_MAP[self.raw_format]
+        msg = ChatMessages.from_dict(formatter(item))
+        tokenized = msg.tokenize(self.tokenizer, self.chat_template)
+
+        images = []
+        if 'image_urls' in tokenized:
+            for url in tokenized.get('image_urls', []):
+                if url is not None:
+                    if self.image_dir:
+                        url = os.path.join(self.image_dir, url)
+                    img = Image.open(url).convert('RGB')
+                    if self.pad_image_to_square:
+                        img = expand2square(
+                            img,
+                            tuple(
+                                int(x * 255) for x in self.image_processor.image_mean))
+                    images.append(img)
+
+        if len(images):
+            num_img_tokens = [self.per_img_tokens for _ in images]
+            outputs = self.image_processor(images, return_tensors='pt')
+            pixel_values = outputs['pixel_values']
+            tokenized['pixel_values'] = pixel_values
+            tokenized['num_img_tokens'] = [sum(num_img_tokens)]
+            tokenized['num_tokens'] += sum(num_img_tokens) - len(images)
+        else:
+            tokenized['pixel_values'] = None
+            tokenized['num_img_tokens'] = [0]
+
+        input_ids = tokenized['input_ids']
+        labels = tokenized['labels']
+
+        if len(input_ids) > self.max_length:
+            print(f' The length of input_ids is {len(input_ids)} larger than {self.max_length}. Truncate it.')
+            input_ids = input_ids[:self.max_length]
+            labels = labels[:self.max_length]
+            tokenized['num_tokens'] = self.max_length
+            tokenized['input_ids'] = input_ids
+            tokenized['labels'] = labels
+        return tokenized
+
+
+class NewLlavaCollator():
+
+    def __init__(self, pad_token_id=0, ignore_id=-100, pack_batch=False):
+        self.pack_batch = pack_batch
+        self.pad_token_id = pad_token_id
+        self.ignore_id = ignore_id
+
+    def __call__(self, instances):
+
+        _instances = []
+        for ins in instances:
+            if isinstance(ins, list):
+                _instances.extend(ins)
+            else:
+                _instances.append(ins)
+
+        instances = _instances
+
+        input_ids = []
+        labels = []
+        num_tokens = []
+        num_img_tokens = []
+        pixel_values = []
+
+        for data in instances:
+
+            input_ids.append(torch.LongTensor(data['input_ids']))
+            labels.append(torch.LongTensor(data['labels']))
+
+            if isinstance(data['num_tokens'], int):
+                num_tokens.append(data['num_tokens'])
+            else:
+                num_tokens.extend(data['num_tokens'])
+
+            num_img_tokens.extend(data['num_img_tokens'])
+            if data['pixel_values'] is not None:
+                pixel_values.append(data['pixel_values'])
+
+        attention_mask = [torch.ones_like(ids) for ids in input_ids]
+        num_tokens = torch.IntTensor(num_tokens)
+        num_img_tokens = torch.IntTensor(num_img_tokens)
+
+        if len(instances) > 1 and self.pack_batch:
+
+            input_ids = torch.cat(input_ids, dim=0).unsqueeze(0)
+            labels = torch.cat(labels, dim=0).unsqueeze(0)
+            attention_mask = torch.cat(attention_mask, dim=0).unsqueeze(0)
+
+        elif len(instances) > 1 and not self.pack_batch:
+
+            input_ids = pad_sequence(
+                input_ids, batch_first=True, padding_value=self.pad_token_id)
+            labels = pad_sequence(
+                labels, batch_first=True, padding_value=self.ignore_id)
+            attention_mask = pad_sequence(
+                attention_mask, batch_first=True, padding_value=0)
+        else:
+            input_ids = torch.stack(input_ids)
+            labels = torch.stack(labels)
+            attention_mask = torch.stack(attention_mask)
+
+        if input_ids.shape != labels.shape:
+            raise RuntimeError('The shape of input_ids and labels must be '
+                               f'equal, but  found {input_ids.shape} and '
+                               f'{labels.shape}.')
+
+        if len(pixel_values) > 0:
+            pixel_values = torch.cat(pixel_values, dim=0)
+        else:
+            pixel_values = None
+
+        # TODO support sp
+        data_dict = {
+            'input_ids': input_ids,
+            'labels': labels,
+            'pixel_values': pixel_values,
+            'num_tokens': num_tokens,
+            'num_img_tokens': num_img_tokens,
+            'attention_mask': attention_mask.bool()
+        }
+
+        return data_dict

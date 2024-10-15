@@ -8,6 +8,7 @@ bash shell/llava_pretrain_internlm2_7b.sh
 ```
 
 只使用 batch packing 情况下 新版本预训练 2 小时 55 分钟，旧版本预训练3小时30分钟，占比 16.7%。
+在开启 tp=2 的情况下预训练 3 小时 30 分钟。
 
 ```shell
 conda activate xtuner_23
