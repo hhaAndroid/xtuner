@@ -583,6 +583,7 @@ def llava_sft(args):
     tokenize_fns = []
 
     dset_infos = load(args.datasets)
+    paths = []
     for _, info in dset_infos.items():
         dset_format = 'llava'
         image_dir = info.get('image_dir', None)
@@ -592,6 +593,7 @@ def llava_sft(args):
                                                image_processor=img_processor,
                                                pad_image_to_square=pad_image_to_square)
         tokenize_fns.append(tokenize_fn)
+        paths.append(info['annotations'])
 
     if args.dset_pack_level:
         pass
@@ -601,11 +603,9 @@ def llava_sft(args):
             DATASET_CLS_MAP[name] = LlavaDatasetForNonPack
 
     _datasets = load_datasets(
-        paths=args.datasets,
+        paths=paths,
         cache_dir=args.dset_cache_dir,
         file_types=args.dset_file_types,
-        sources=args.dset_sources,
-        sample_ratios=args.dset_sample_ratios,
         map_fns=tokenize_fns)
 
     if args.dset_pack_level and rank == 0 and args.debug:

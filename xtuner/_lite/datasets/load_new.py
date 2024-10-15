@@ -275,7 +275,7 @@ class JsonDataset(torch.utils.data.Dataset):
         end = (rank + 1) * num_per_rank
         dataset_shard = dataset[start:end]
 
-        desc = f'[Rank {rank}] {self.path}'
+        desc = f'[Rank {rank}] {os.path.basename(self.path)}'
         with ThreadPoolExecutor(max_workers=8) as executor:
             tokenized = list(
                 tqdm(

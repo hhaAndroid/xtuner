@@ -346,20 +346,19 @@ class LlavaDatasetForNonPack(torch.utils.data.Dataset):
                  path,
                  sample_ratio=1.0,
                  tokenize_fn=None,
-                 cache_dir=None,
-                 pad_image_to_square=False):
+                 cache_dir=None):
         super().__init__()
 
         if path.endswith('.json'):
-            dataset = load_json(path)
+            self.dataset = load_json(path)
         else:
-            dataset = load_jsonl(path)
+            self.dataset = load_jsonl(path)
 
         self.tokenize_fn = tokenize_fn
         self.conv2length_text = {}  # using dict to speedup the calculation of token length
         self.group_length = []
         print('Calculating the length of text data...')
-        for data_item in dataset:
+        for data_item in self.dataset:
             conversations = '\n'.join(
                 [temp['value'] for temp in data_item['conversations']])
             str_length = len(conversations)
@@ -427,6 +426,17 @@ class NewLlavaTokenizeFunction():
         msg = ChatMessages.from_dict(formatter(item))
         tokenized = msg.tokenize(self.tokenizer, self.chat_template)
 
+        input_ids = tokenized['input_ids']
+        labels = tokenized['labels']
+
+        if len(input_ids) > self.max_length:
+            print(f'The length of input_ids is {len(input_ids)} larger than {self.max_length}. Truncate it.')
+            input_ids = input_ids[:self.max_length]
+            labels = labels[:self.max_length]
+            tokenized['num_tokens'] = self.max_length
+            tokenized['input_ids'] = input_ids
+            tokenized['labels'] = labels
+
         images = []
         if 'image_urls' in tokenized:
             for url in tokenized.get('image_urls', []):
@@ -452,16 +462,6 @@ class NewLlavaTokenizeFunction():
             tokenized['pixel_values'] = None
             tokenized['num_img_tokens'] = [0]
 
-        input_ids = tokenized['input_ids']
-        labels = tokenized['labels']
-
-        if len(input_ids) > self.max_length:
-            print(f' The length of input_ids is {len(input_ids)} larger than {self.max_length}. Truncate it.')
-            input_ids = input_ids[:self.max_length]
-            labels = labels[:self.max_length]
-            tokenized['num_tokens'] = self.max_length
-            tokenized['input_ids'] = input_ids
-            tokenized['labels'] = labels
         return tokenized
 
 
