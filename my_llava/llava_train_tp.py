@@ -835,6 +835,11 @@ def llava_sft(args):
                 if param.requires_grad:
                     param_fp32 = torch.nn.Parameter(param.to(dtype=torch.float32))
                     setattr(module, p_name, param_fp32)
+        # 必须位于 tp 包装前,否则保存会有问题
+        rank0_meta_llava = copy.deepcopy(meta_llava)
+        meta_llava_map = map_meta_modules(llava, meta_llava)
+    else:
+        meta_llava_map = None
 
     dist.monitored_barrier(group=group, timeout=timeout)
 
@@ -915,12 +920,6 @@ def llava_sft(args):
     # ]
     # if rank == 0:
     #     print('xxxx', requried_grad_params1)
-
-    if rank == 0:
-        rank0_meta_llava = copy.deepcopy(meta_llava)
-        meta_llava_map = map_meta_modules(llava, meta_llava)
-    else:
-        meta_llava_map = None
 
     if args.tp_size > 1:
         param_init_fn = partial(
@@ -1142,7 +1141,8 @@ def llava_sft(args):
                             attention_mask=attention_mask)
 
                         shift_attention_mask = attention_mask[..., 1:]
-                        shift_logits = outputs.logits[..., :-1, :][shift_attention_mask.to(outputs.logits.device) != 0].contiguous()
+                        shift_logits = outputs.logits[..., :-1, :][
+                            shift_attention_mask.to(outputs.logits.device) != 0].contiguous()
                         shift_labels = labels[..., 1:][shift_attention_mask.to(labels.device) != 0].contiguous()
 
                         with loss_parallel():
@@ -1172,8 +1172,8 @@ def llava_sft(args):
                         avg_iter_loss.backward()
 
             step_loss += avg_iter_loss.item()
-            step_consumed_tokens += num_tokens.sum()
-            step_consumed_img_tokens += num_img_tokens.sum()
+            step_consumed_tokens += num_tokens.sum() / tp_size
+            step_consumed_img_tokens += num_img_tokens.sum() / tp_size
 
         grad_norm = shard_llava.clip_grad_norm_(args.max_grad_norm)
         optimizer.step()
@@ -1290,7 +1290,10 @@ def llava_sft(args):
                     f'memory is {max_memory / 1024 ** 3:.1f}GB.')
 
     train_cost_time = time.time() - start_train_t
-    logger.info(f'[Train] Cost {train_cost_time}s')
+    m, s = divmod(train_cost_time, 60)
+    h, m = divmod(m, 60)
+    d, h = divmod(h, 24)
+    logger.info("[Train] Cost: %d day, %d:%d:%d" % (d, h, m, s))
     # ------------------------    Training  End  ---------------------------- #
 
 
