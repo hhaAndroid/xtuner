@@ -17,7 +17,8 @@ OUTPUT_DIR='work_dirs/llava_pretrain_llama3_8b'
 if [ ! -d "$OUTPUT_DIR" ]; then
   mkdir -p "$OUTPUT_DIR"
 fi
-
+SCRIPT_NAME=$(basename "$0")
+cp "$0" "${OUTPUT_DIR}/${SCRIPT_NAME}"
 
 HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 srun -p ${PARTITION} --time 1-00:00:00 \
   --gres=gpu:${GPUS_PER_NODE} \

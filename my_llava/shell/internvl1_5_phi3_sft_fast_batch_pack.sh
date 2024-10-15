@@ -18,6 +18,8 @@ OUTPUT_DIR='work_dirs/internvl1_5_phi3_sft_fast_batch_pack'
 if [ ! -d "$OUTPUT_DIR" ]; then
   mkdir -p "$OUTPUT_DIR"
 fi
+SCRIPT_NAME=$(basename "$0")
+cp "$0" "${OUTPUT_DIR}/${SCRIPT_NAME}"
 
 # number of gpus: 32
 # batch size per gpu: 4

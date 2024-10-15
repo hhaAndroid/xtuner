@@ -18,6 +18,8 @@ OUTPUT_DIR='work_dirs/llava_sft_internlm2_7b_pack'
 if [ ! -d "$OUTPUT_DIR" ]; then
   mkdir -p "$OUTPUT_DIR"
 fi
+SCRIPT_NAME=$(basename "$0")
+cp "$0" "${OUTPUT_DIR}/${SCRIPT_NAME}"
 
 #   --resume \
 # python -m debugpy --connect 10.140.0.31:5688 llava_pretrain.py \

@@ -17,6 +17,8 @@ OUTPUT_DIR='work_dirs/llava_pretrain_internlm2_7b_pack'
 if [ ! -d "$OUTPUT_DIR" ]; then
   mkdir -p "$OUTPUT_DIR"
 fi
+SCRIPT_NAME=$(basename "$0")
+cp "$0" "${OUTPUT_DIR}/${SCRIPT_NAME}"
 
 MAX_LENGHT=2048
 HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 srun -p ${PARTITION} --time 1-00:00:00 \
