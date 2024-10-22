@@ -51,6 +51,20 @@ def dispatch_qwen2vl_varlen_attn_forward(module):
     return qwen2_vl_varlen_attn_forward.__name__
 
 
+def dispatch_qwen2vlmodel_forward(module):
+    assert module.__class__.__name__ == 'Qwen2VLModel'
+    from .qwen_vl2 import qwen2_vlmodel_forward
+    _dispatch_forward_fn(module, qwen2_vlmodel_forward)
+    return qwen2_vlmodel_forward.__name__
+
+
+def dispatch_qwen2vision_forward(module):
+    assert module.__class__.__name__ == 'Qwen2VisionTransformerPretrainedModel'
+    from .qwen_vl2 import qwen2_vision_forward
+    _dispatch_forward_fn(module, qwen2_vision_forward)
+    return qwen2_vision_forward.__name__
+
+
 DISPATCH_MAP = {
     'InternLM2FlashAttention2': dispatch_internlm_varlen_attn_forward,
     'CLIPAttention': dispatch_clip_attn_forward,
@@ -60,6 +74,9 @@ DISPATCH_MAP = {
     'LlamaRMSNorm': dispatch_rms_norm_forward,
     'LlamaFlashAttention2': dispatch_llama3_varlen_attn_forward,
     'Qwen2VLFlashAttention2': dispatch_qwen2vl_varlen_attn_forward,
+    # 这两个只是为了解决 checkpoint 报错问题
+    'Qwen2VLModel': dispatch_qwen2vlmodel_forward,
+    'Qwen2VisionTransformerPretrainedModel': dispatch_qwen2vision_forward
 }
 
 

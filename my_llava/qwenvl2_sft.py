@@ -16,7 +16,6 @@ import torch.distributed.checkpoint as dcp
 from accelerate.utils import set_module_tensor_to_device
 from torch.utils.data import Dataset as TorchDataset
 from mmengine import load, mkdir_or_exist
-from mmengine.dist import infer_launcher, init_dist
 from mmengine.runner import set_random_seed
 from mmengine.utils import get_git_hash
 from mmengine.utils.dl_utils import collect_env
@@ -38,12 +37,12 @@ from torch.distributed._composable.fsdp import MixedPrecisionPolicy
 from xtuner._lite import AutoTokenizer, get_logger
 from xtuner._lite.accelerate import (LoadWoInit,
                                      dispatch_modules, packed_sequence)
+from xtuner._lite.accelerate.fsdp import clip_grad_norm_
 from xtuner._lite.chat import CHAT_TEMPLATE_MAP
 from xtuner._lite.datasets import (LlavaCollator, LlavaRawDataset,
                                    LlavaTokenizeFunction, SoftPackerForLlava)
 from xtuner._lite.datasets.load import (LOAD_FN_MAP, load_datasets,
                                         load_from_cache)
-from xtuner._lite.modelings import register_remote_code
 from xtuner._lite.parallel import LengthGroupedSampler, ParallelSampler
 from torch.distributed.checkpoint.stateful import Stateful
 from torch.distributed._tensor import DTensor, distribute_tensor
@@ -69,6 +68,9 @@ def check_qwen_vl_deps_install():
 
 
 check_qwen_vl_deps_install()
+from transformers.models.qwen2_vl.image_processing_qwen2_vl import smart_resize
+from transformers import Qwen2VLForConditionalGeneration
+
 logger = get_logger()
 
 
@@ -156,6 +158,14 @@ def parse_args():
               'set, the loaded datasets will be cached to this dir. If the '
               '`datasets` are not set, the cached dataset in this dir will be '
               'loaded.'))
+    data_args.add_argument(
+        '--dset-pack-level',
+        choices=['soft'],
+        help=('the level of data packing. When `hard`, multiple data will be '
+              'packed to `max_length`, potentially causing some data to be '
+              'truncated, and the length of the packed data will always '
+              'be `max_length`; When `soft`, it will pack multiple  data '
+              'into nearly `max_length` without truncating the data.'))
     data_args.add_argument('--group-by-length', action='store_true')
     data_args.add_argument('--group-by-modality-length', action='store_true')
     data_args.add_argument(
@@ -330,6 +340,34 @@ def lazy_init_megatron(module, rank0_map, dp_mesh, tp_mesh=None, pp_mesh=None):
         buffer.data.copy_(rank0_buffer)
 
 
+def load_json_or_jsonl(json_path):
+    if json_path.endswith('.json'):
+        with open(json_path) as f:
+            data = json.load(f)
+    elif json_path.endswith('.jsonl'):
+        with open(json_path) as f:
+            data = f.readlines()
+    else:
+        raise ValueError(f'Unsupported file format: {json_path}, '
+                         f'only support .json and .jsonl.')
+    return data
+
+
+def smart_get_thw(image_size, image_processor):
+    orig_width, orig_height = image_size
+
+    resized_height, resized_width = smart_resize(
+        orig_height,
+        orig_width,
+        factor=image_processor.patch_size * image_processor.merge_size,
+        min_pixels=image_processor.min_pixels,
+        max_pixels=image_processor.max_pixels,
+    )
+    grid_t = 1  # 单图
+    grid_h, grid_w = resized_height // image_processor.patch_size, resized_width // image_processor.patch_size
+    return grid_t * grid_h * grid_w
+
+
 class LazyQwenVLDataset(TorchDataset):
     def __init__(self, data_name, data, model_name, max_length, group_by_length=False):
         self.data_name = data_name
@@ -343,39 +381,75 @@ class LazyQwenVLDataset(TorchDataset):
                                   assistant='{assistant}<|im_end|>\n')
         self.processor = AutoProcessor.from_pretrained(model_name)
         self.merge_length = self.processor.image_processor.merge_size ** 2
+
+        # default min_pixels 3136=56x56=28x28x2x2=56x56 pix 一张图片会占 4 个 token
+        # default max_pixels 12845056=28x28x128x128=3584x3584 一张图片会占 16384 个 token
+        if 'min_pixels' in data:
+            self.processor.image_processor.min_pixels = data['min_pixels']
+        if 'max_pixels' in data:
+            self.processor.image_processor.max_pixels = data['max_pixels']
         self.tokenizer = self.processor.tokenizer
 
         self.max_length = max_length
         self.group_by_length = group_by_length
         self.root = data.get('media_root', '')
 
-        logger.warning(f"{dist.get_rank()} ======= Start to process dataset: {data['annotation']}")
-        assert data['annotation'].endswith('jsonl'), f'annotation must be jsonl, but got {data["annotation"]}'
+        logger.info(f"{dist.get_rank()} ======= Start to process dataset: {os.path.basename(data['annotation'])}")
+        if dist.get_rank() == 0:
+            logger.info(f"{data_name} min_pixels: {self.processor.image_processor.min_pixels},"
+                        f"max_pixels: {self.processor.image_processor.max_pixels}")
+
+        self._is_jsonl = data['annotation'].endswith('.jsonl')
+        self.raw_data = load_json_or_jsonl(data['annotation'])
+        repeat_time = data.get('repeat_time', 1)
+        if repeat_time < 1:
+            # If repeat_time is less than 1, select a portion of the data
+            self.raw_data = self.raw_data[:int(len(self.raw_data) * repeat_time)]
+        if repeat_time > 1:
+            assert isinstance(repeat_time, int)
+            # Repeat the list if repeat_time is greater than 1
+            self.raw_data = self.raw_data * repeat_time
 
         self.group_length = []
-        repeat_time = data.get('repeat_time', 1)
-        with open(data['annotation'], 'r') as f:
-            self.raw_data = f.readlines()
-            if repeat_time < 1:
-                # If repeat_time is less than 1, select a portion of the data
-                self.raw_data = self.raw_data[:int(len(self.raw_data) * repeat_time)]
-            if repeat_time > 1:
-                assert isinstance(repeat_time, int)
-                # Repeat the list if repeat_time is greater than 1
-                self.raw_data = self.raw_data * repeat_time
-
         if self.group_by_length:
-            # 如果是多模态数据，则一定需要有 hw 属性
+            self.conv2length = {}
+            # 由于动态分辨率特点，在开启 group_by_length 时候我们需要通过 image_hw 精确计算实际的 image token
+            # 如果采用估算方式会差别较大。因此如果是多模态数据，则一定需要有 hw 属性
             # TODO: 支持视频
             for data_item in self.raw_data:
+                is_media = False
+                if self._is_jsonl:
+                    data_item = json.loads(data_item)
                 if ('image' in data_item and data_item['image'] is not None) or (
                         'video' in data_item and data_item['video'] is not None):
-                    assert 'image_hw' in data_item[
-                        'image'], 'image must have `hw` attribute when group_by_length is True'
+                    assert 'image_wh' in data_item, 'image must have `hw` attribute when group_by_length is True'
+                    is_media = True
 
-            # 由于动态分辨率特点，在开启 group_by_length 时候我们需要通过 image_hw 精确计算实际的 image token
-            # 如果采用估算方式会差别较大
-            raise NotImplementedError('group_by_length is not supported yet.')
+                image_size = data_item.get('image_wh', [0, 0])
+                if isinstance(image_size[0], list):
+                    image_size = image_size[0]
+
+                if image_size[0] == 0 or image_size[1] == 0:
+                    num_image_tokens = 0
+                else:
+                    num_image_tokens = smart_get_thw(image_size, self.processor.image_processor)
+                    num_image_tokens += 2
+
+                conversations = '\n'.join([temp['value'] for temp in data_item['conversations']])
+                str_length = len(conversations)
+                if str_length not in self.conv2length:
+                    token_length = self.tokenizer(
+                        conversations, return_tensors='pt', padding=False, truncation=False,
+                    ).input_ids.size(1)
+                    token_length += num_image_tokens
+                    self.conv2length[str_length] = token_length
+                else:
+                    token_length = self.conv2length[str_length]
+
+                if is_media:
+                    self.group_length.append(token_length)
+                else:
+                    self.group_length.append(-token_length)
 
     @property
     def modality_length(self):
@@ -481,8 +555,8 @@ class LazyQwenVLDataset(TorchDataset):
             'labels': ret['labels'],
             'pixel_values': media_inputs['pixel_values'],
             'image_grid_thw': media_grid_thw,
-            'num_token': [len(ret['input_ids'])],
-            'num_image_token': [media_grid_thw[0].prod() // self.merge_length + 2]
+            'num_tokens': [len(ret['input_ids'])],
+            'num_img_tokens': [media_grid_thw[0].prod().item() // self.merge_length + 2]
         }
         return out_data
 
@@ -504,8 +578,8 @@ class LazyQwenVLDataset(TorchDataset):
             'labels': ret['labels'],
             'pixel_values': media_inputs['pixel_values'],
             'image_grid_thw': media_grid_thw,
-            'num_token': [len(ret['input_ids'])],
-            'num_image_token': [0]
+            'num_tokens': [len(ret['input_ids'])],
+            'num_img_tokens': [0]
         }
         return out_data
 
@@ -516,7 +590,9 @@ class LazyQwenVLDataset(TorchDataset):
         i = i % len(self.raw_data)
         while True:
             try:
-                data_item = json.loads(self.raw_data[i])
+                data_item = self.raw_data[i]
+                if self._is_jsonl:
+                    data_item = json.loads(data_item)
                 if 'image' in data_item and data_item['image'] is not None:
                     if type(data_item['image']) == list and len(data_item['image']) > 1:
                         ret = self.multi_modal_multi_image_get_item(data_item)
@@ -534,7 +610,7 @@ class LazyQwenVLDataset(TorchDataset):
 
 
 def build_dataset(args):
-    ds_collections = json.loads(open(args.dataset).read())
+    ds_collections = json.loads(open(args.datasets).read())
     _datasets = []
     for name, _data in ds_collections.items():
         _dataset = LazyQwenVLDataset(name, _data, args.model, args.max_length, group_by_length=args.group_by_length)
@@ -597,10 +673,6 @@ def packing_collate(features, pack_batch=True, pad_id=0):
 
 
 def model_sft(args):
-    dist_launcher = infer_launcher()
-    init_dist(dist_launcher)
-    set_random_seed(args.seed)
-
     setup_parallel(tp_size=args.tp_size, sp_size=args.sp_size)
     set_random_seed(args.seed)
 
@@ -657,7 +729,7 @@ def model_sft(args):
     log_file = os.path.join(args.work_dir, f'rank{rank}.log')
 
     # Change the log format printed in the terminal
-    lvl = 'DEBUG' if args.debug else 'INFO'
+    lvl = 'INFO'
     logger.add(sys.stderr, level=lvl, format=log_format(rank))
     # Change the format saved in the log file
     logger.add(log_file, format=log_format(rank), backtrace=True, catch=True)
@@ -674,7 +746,6 @@ def model_sft(args):
         runtime_env.update(env)
         runtime_env['Seed'] = args.seed
         runtime_env['World Size'] = world_size
-        runtime_env['Distributed launcher'] = dist_launcher
 
         runtime_env_info = '\n    ' + '\n    '.join(
             f'{k}: {v}' for k, v in runtime_env.items())
@@ -690,9 +761,23 @@ def model_sft(args):
         logger.warning(f'{dist.get_rank()} ===== End of all dataset =====')
 
         if args.group_by_length:
-            raise NotImplementedError
+            if args.dset_pack_level:
+                length_property = 'max_length_per_pack'
+            else:
+                length_property = 'length'
+            sampler = LengthGroupedSampler(train_dataset, dp_mesh,
+                                           args.global_batch_size,
+                                           seed=args.seed,
+                                           length_property=length_property)
         elif args.group_by_modality_length:
-            raise NotImplementedError
+            # 当开启 soft packing 时，暂时不支持模态区分
+            if args.dset_pack_level:
+                raise NotImplementedError
+            else:
+                sampler = LengthGroupedSampler(train_dataset, dp_mesh,
+                                               args.global_batch_size,
+                                               seed=args.seed,
+                                               length_property='modality_length')
         else:
             sampler = ParallelSampler(
                 train_dataset, dp_mesh, args.global_batch_size, seed=args.seed, shuffle=True)
@@ -715,12 +800,10 @@ def model_sft(args):
         args.dtype = 'bf16' if torch.cuda.is_bf16_supported() else 'fp16'
     if args.dtype == 'fp16':
         dtype = torch.float16
-        autocast = torch.cuda.amp.autocast(enabled=True, dtype=dtype)
         scaler = ShardedGradScaler()
     elif args.dtype == 'bf16':
         if torch.cuda.is_bf16_supported():
             dtype = torch.bfloat16
-            autocast = torch.cuda.amp.autocast(enabled=True, dtype=dtype)
             scaler = None
         else:
             raise RuntimeError('The device does not support `bf16`, '
@@ -732,7 +815,7 @@ def model_sft(args):
     with profile_time_and_memory('[Model]'):
         with torch.device('meta'):
             with LoadWoInit():
-                meta_model = AutoModelForCausalLM.from_pretrained(
+                meta_model = Qwen2VLForConditionalGeneration.from_pretrained(
                     args.model,
                     attn_implementation='flash_attention_2',
                     torch_dtype=dtype)
@@ -755,7 +838,7 @@ def model_sft(args):
             # the same model into the CPU, wasting memory
             with torch.device('cpu'), profile_time_and_memory('[RANK_0 Load]'):
                 with LoadWoInit():
-                    rank0_model = AutoModelForCausalLM.from_pretrained(
+                    rank0_model = Qwen2VLForConditionalGeneration.from_pretrained(
                         args.model,
                         attn_implementation='flash_attention_2',
                         torch_dtype=dtype)
@@ -787,6 +870,16 @@ def model_sft(args):
 
         mp_policy = MixedPrecisionPolicy(param_dtype=dtype, reduce_dtype=dtype)
 
+        meta_model.visual.apply(param_init_fn)
+        fully_shard(
+            meta_model.visual,
+            mesh=dp_mesh,
+            mp_policy=mp_policy,
+            reshard_after_forward=reshard_after_forward,
+        )
+        for i, block in enumerate(meta_model.visual.blocks):
+            checkpoint(block)
+
         num_layers = len(meta_model.model.layers)
         num_recompute_layers = int(num_layers * 1.0)
         for i, block in enumerate(meta_model.model.layers):
@@ -806,10 +899,12 @@ def model_sft(args):
             )
 
             if i < num_recompute_layers:
+                # 有 bug，无法处理当模块输入是 **kwargs 的情况，暂时只能 dispatch 这个模块的 forward
                 checkpoint(block)
 
         meta_model.model.embed_tokens.apply(param_init_fn)
         meta_model.model.norm.apply(param_init_fn)
+        meta_model.lm_head.apply(param_init_fn)
 
         model = fully_shard(
             meta_model,
@@ -829,7 +924,7 @@ def model_sft(args):
 
     max_memory = get_torch_device_module().max_memory_allocated()
     logger.info('[Train] Begin Train Loop. The current GPU memory is '
-                f'{(max_memory / 1024**3):.1f}GB')
+                f'{(max_memory / 1024 ** 3):.1f}GB')
 
     global_batch_size = args.global_batch_size
     mirco_batch_size = args.mirco_batch_size
@@ -840,7 +935,7 @@ def model_sft(args):
     per_step_iters = global_batch_size // mirco_batch_size // dp_size
     per_epoch_iters = len(train_dataloader)
     per_epoch_steps = math.ceil(per_epoch_iters / per_step_iters)
-
+    logger.info(f'[Optimizer] Global batch size: {global_batch_size}, Gradient accumulative counts: {per_step_iters}')
     total_epochs = args.epochs
     total_steps = per_epoch_steps * total_epochs
 
@@ -901,14 +996,18 @@ def model_sft(args):
     torch.cuda.empty_cache()
     torch.cuda.reset_peak_memory_stats()
     max_memory = torch.cuda.max_memory_allocated()
-    logger.info('[Train] Begin Train Loop. The current GPU memory is '
-                f'{(max_memory / 1024 ** 3):.1f}GB')
+
     save_hf_ckpt_names = []
     save_pt_ckpt_names = []
     max_keep_ckpts = args.max_keep_ckpts
     if max_keep_ckpts <= 0:
         # 全部都保存
         max_keep_ckpts = 100000000
+
+    if rank == 0:
+        logger.info('[Train] Begin Train Loop. The current GPU memory is '
+                    f'{(max_memory / 1024 ** 3):.1f}GB')
+        logger.info('The FSDP adopts a lazy design, so the first iteration will be slow.')
 
     for step in range(start_step, total_steps):
 
@@ -950,7 +1049,7 @@ def model_sft(args):
             packed_ctx = packed_sequence(num_tokens, enable=True)
 
             with packed_ctx:
-                outputs = model(**data)
+                outputs = model(**data, use_cache=False)
                 avg_iter_loss = outputs.loss / per_step_iters
 
                 if scaler:
@@ -962,7 +1061,8 @@ def model_sft(args):
             step_consumed_tokens += num_tokens.sum()
             step_consumed_img_tokens += num_img_tokens.sum()
 
-        grad_norm = model.clip_grad_norm_(args.max_grad_norm)
+        grad_norm = clip_grad_norm_(requried_grad_params, fsdp_mesh, args.max_grad_norm)
+        # grad_norm=torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm, foreach=True)
         optimizer.step()
         optimizer.zero_grad()
 
@@ -1009,15 +1109,8 @@ def model_sft(args):
                     set_module_tensor_to_device(saved_llava, name, 'cpu',
                                                 param)
 
-                if args.llm_use_lora:
-                    merged_llm = saved_llava.language_model.merge_and_unload()
-                    saved_llava.language_model = merged_llm
-
-                if args.vit_use_lora:
-                    merged_vit = saved_llava.vision_tower.merge_and_unload()
-                    saved_llava.vision_tower = merged_vit
-
                 saved_llava.save_pretrained(hf_dir)
+
                 del saved_llava
 
             dist.barrier()

@@ -21,7 +21,8 @@ fi
 SCRIPT_NAME=$(basename "$0")
 cp "$0" "${OUTPUT_DIR}/${SCRIPT_NAME}"
 
-# 如果不是用 soft packing，则不需要数据缓存
+# --group-by-modality-length \
+# --group-by-length \
 HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 srun -p ${PARTITION} --time 1-00:00:00 \
   --gres=gpu:${GPUS_PER_NODE} \
   --nodes=${NODES} \
@@ -37,6 +38,7 @@ HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 srun -p ${PARTITION} --time 1-00:00
   --max-length 32768 \
   --num-workers 4 \
   --mirco-batch-size $MIRCO_BATCH_SIZE \
+  --group-by-length \
   --global-batch-size $((MIRCO_BATCH_SIZE*GPUS*ACCUMULATIVE_COUNTS)) \
   --lr 2e-5 \
   --wd 0.0 \
