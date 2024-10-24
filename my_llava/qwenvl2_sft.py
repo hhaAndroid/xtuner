@@ -368,6 +368,56 @@ def smart_get_thw(image_size, image_processor):
     return grid_t * grid_h * grid_w
 
 
+_EXIF_ORIENT = 274  # exif 'Orientation' tag
+
+
+def _apply_exif_orientation(image):
+    """
+    Applies the exif orientation correctly.
+
+    This code exists per the bug:
+      https://github.com/python-pillow/Pillow/issues/3973
+    with the function `ImageOps.exif_transpose`. The Pillow source raises errors with
+    various methods, especially `tobytes`
+
+    Function based on:
+      https://github.com/wkentaro/labelme/blob/v4.5.4/labelme/utils/image.py#L59
+      https://github.com/python-pillow/Pillow/blob/7.1.2/src/PIL/ImageOps.py#L527
+
+    Args:
+        image (PIL.Image): a PIL image
+
+    Returns:
+        (PIL.Image): the PIL image with exif orientation applied, if applicable
+    """
+    if not hasattr(image, "getexif"):
+        return image
+
+    try:
+        exif = image.getexif()
+    except Exception:  # https://github.com/facebookresearch/detectron2/issues/1885
+        exif = None
+
+    if exif is None:
+        return image
+
+    orientation = exif.get(_EXIF_ORIENT)
+
+    method = {
+        2: Image.FLIP_LEFT_RIGHT,
+        3: Image.ROTATE_180,
+        4: Image.FLIP_TOP_BOTTOM,
+        5: Image.TRANSPOSE,
+        6: Image.ROTATE_270,
+        7: Image.TRANSVERSE,
+        8: Image.ROTATE_90,
+    }.get(orientation)
+
+    if method is not None:
+        return image.transpose(method)
+    return image
+
+
 class LazyQwenVLDataset(TorchDataset):
     def __init__(self, data_name, data, model_name, max_length, group_by_length=False):
         self.data_name = data_name
@@ -546,6 +596,8 @@ class LazyQwenVLDataset(TorchDataset):
             llm_pos_ids_list.append(torch.arange(text_len).view(1, -1).expand(3, -1) + st_idx)
 
             t, h, w = thw
+            h = h // self.processor.image_processor.merge_size
+            w = w // self.processor.image_processor.merge_size
             t_index = torch.arange(t).view(-1, 1).expand(-1, h * w).flatten()
             h_index = torch.arange(h).view(1, -1, 1).expand(t, -1, w).flatten()
             w_index = torch.arange(w).view(1, 1, -1).expand(t, h, -1).flatten()
@@ -578,11 +630,11 @@ class LazyQwenVLDataset(TorchDataset):
             image_path = image_path[0]
         image_path = os.path.join(self.root, image_path)
         image = Image.open(image_path).convert('RGB')
+        image = _apply_exif_orientation(image)
         media_inputs = self.processor.image_processor(images=image, videos=None, return_tensors='pt')
         media_grid_thw = media_inputs['image_grid_thw']
 
         ret = self.process_text(data_item['conversations'], media_grid_thw, media_type='image')
-
         position_id = self.calc_position_id(ret['input_ids'], media_grid_thw)
 
         out_data = {
@@ -609,15 +661,18 @@ class LazyQwenVLDataset(TorchDataset):
         for image_path_ in image_path:
             image_path_ = os.path.join(self.root, image_path_)
             image = Image.open(image_path_).convert('RGB')
+            image = _apply_exif_orientation(image)
             all_image.append(image)
         media_inputs = self.processor.image_processor(images=all_image, videos=None, return_tensors='pt')
         media_grid_thw = media_inputs['image_grid_thw']
         ret = self.process_text(data_item['conversations'], media_grid_thw, media_type='image')
+        position_id = self.calc_position_id(ret['input_ids'], media_grid_thw)
 
-        num_img_tokens = sum([media_grid_thw[i].prod().item() // self.merge_length + 2 for i in image_path])
+        num_img_tokens = sum(media_grid_thw[i].prod().item() // self.merge_length + 2 for i in range(len(all_image)))
         out_data = {
             'input_ids': ret['input_ids'],
             'labels': ret['labels'],
+            'position_id': position_id,  # (3,n)
             'pixel_values': media_inputs['pixel_values'],
             'image_grid_thw': media_grid_thw,
             'num_tokens': [len(ret['input_ids'])],
