@@ -373,6 +373,7 @@ class LazyQwenVLDataset(TorchDataset):
         self.data_name = data_name
         _model_cfg = AutoConfig.from_pretrained(model_name)
         self.image_token_id = _model_cfg.image_token_id  # <|image_pad|>
+        self.vision_start_token_id = _model_cfg.vision_start_token_id  # <vision_start_token_id>
         self.video_token_id = _model_cfg.video_token_id  # <|video_pad|>
         self.image_token_str = '<|vision_start|><|image_pad|><|vision_end|>'
         self.video_token_str = '<|vision_start|><|video_pad|><|vision_end|>'
@@ -425,15 +426,18 @@ class LazyQwenVLDataset(TorchDataset):
                     assert 'image_wh' in data_item, 'image must have `hw` attribute when group_by_length is True'
                     is_media = True
 
-                image_size = data_item.get('image_wh', [0, 0])
-                if isinstance(image_size[0], list):
-                    image_size = image_size[0]
+                image_size = data_item.get('image_wh', [[0, 0]])
+                if not isinstance(image_size[0], list):
+                    image_size = [image_size]
 
-                if image_size[0] == 0 or image_size[1] == 0:
-                    num_image_tokens = 0
-                else:
-                    num_image_tokens = smart_get_thw(image_size, self.processor.image_processor)
-                    num_image_tokens += 2
+                num_image_tokens = 0
+                for image_size_ in image_size:
+                    if image_size_[0] == 0 or image_size_[1] == 0:
+                        pass
+                    else:
+                        num_image_tokens_ = smart_get_thw(image_size_, self.processor.image_processor)
+                        num_image_tokens += num_image_tokens_
+                        num_image_tokens += 2
 
                 conversations = '\n'.join([temp['value'] for temp in data_item['conversations']])
                 str_length = len(conversations)
@@ -526,6 +530,35 @@ class LazyQwenVLDataset(TorchDataset):
                 f'is longer than max_length, cut to {self.max_length}')
         return {'input_ids': input_ids, 'labels': labels}
 
+    def calc_position_id(self, input_ids, media_grid_thw):
+        # TODO: check video
+        input_ids_ = torch.tensor(input_ids, dtype=torch.long)
+        vision_start_indices = torch.argwhere(input_ids_ == self.vision_start_token_id).squeeze(1)
+        vision_tokens = input_ids_[vision_start_indices + 1]
+        image_nums = (vision_tokens == self.image_token_id).sum()
+        st = 0
+        llm_pos_ids_list: list = []
+        for i in range(image_nums):
+            thw = media_grid_thw[i]
+            ed = input_ids.index(self.image_token_id, st)
+            text_len = ed - st
+            st_idx = llm_pos_ids_list[-1].max() + 1 if len(llm_pos_ids_list) > 0 else 0
+            llm_pos_ids_list.append(torch.arange(text_len).view(1, -1).expand(3, -1) + st_idx)
+
+            t, h, w = thw
+            t_index = torch.arange(t).view(-1, 1).expand(-1, h * w).flatten()
+            h_index = torch.arange(h).view(1, -1, 1).expand(t, -1, w).flatten()
+            w_index = torch.arange(w).view(1, 1, -1).expand(t, h, -1).flatten()
+            llm_pos_ids_list.append(torch.stack([t_index, h_index, w_index]) + text_len + st_idx)
+            st = ed + t * h * w
+
+        if st < len(input_ids):
+            st_idx = llm_pos_ids_list[-1].max() + 1 if len(llm_pos_ids_list) > 0 else 0
+            text_len = len(input_ids) - st
+            llm_pos_ids_list.append(torch.arange(text_len).view(1, -1).expand(3, -1) + st_idx)
+        position_ids = torch.cat(llm_pos_ids_list, dim=1).reshape(3, -1)
+        return position_ids
+
     def multi_modal_get_item(self, data_item):
         # Ensure the first conversation contains an image placeholder
         if '<image>\n' in data_item['conversations'][0]['value']:
@@ -550,9 +583,12 @@ class LazyQwenVLDataset(TorchDataset):
 
         ret = self.process_text(data_item['conversations'], media_grid_thw, media_type='image')
 
+        position_id = self.calc_position_id(ret['input_ids'], media_grid_thw)
+
         out_data = {
             'input_ids': ret['input_ids'],
             'labels': ret['labels'],
+            'position_id': position_id,  # (3,n)
             'pixel_values': media_inputs['pixel_values'],
             'image_grid_thw': media_grid_thw,
             'num_tokens': [len(ret['input_ids'])],
@@ -561,7 +597,33 @@ class LazyQwenVLDataset(TorchDataset):
         return out_data
 
     def multi_modal_multi_image_get_item(self, data_item):
-        raise NotImplementedError
+        image_path = data_item['image']
+        if '<image>' not in data_item['conversations'][0]['value']:
+            data_item['conversations'][0]['value'] = '<image>' * len(image_path) + data_item['conversations'][0][
+                'value']
+
+        assert len(image_path) == data_item['conversations'][0]['value'].count('<image>'), \
+            f'Image number not match: {image_path} vs {data_item["conversations"][0]["value"]}'
+
+        all_image = []
+        for image_path_ in image_path:
+            image_path_ = os.path.join(self.root, image_path_)
+            image = Image.open(image_path_).convert('RGB')
+            all_image.append(image)
+        media_inputs = self.processor.image_processor(images=all_image, videos=None, return_tensors='pt')
+        media_grid_thw = media_inputs['image_grid_thw']
+        ret = self.process_text(data_item['conversations'], media_grid_thw, media_type='image')
+
+        num_img_tokens = sum([media_grid_thw[i].prod().item() // self.merge_length + 2 for i in image_path])
+        out_data = {
+            'input_ids': ret['input_ids'],
+            'labels': ret['labels'],
+            'pixel_values': media_inputs['pixel_values'],
+            'image_grid_thw': media_grid_thw,
+            'num_tokens': [len(ret['input_ids'])],
+            'num_img_tokens': [num_img_tokens]
+        }
+        return out_data
 
     def video_get_item(self, data_item):
         raise NotImplementedError
@@ -572,10 +634,10 @@ class LazyQwenVLDataset(TorchDataset):
         media_grid_thw = media_inputs['image_grid_thw']
 
         ret = self.process_text(data_item['conversations'], media_grid_thw, media_type='text')
-
         out_data = {
             'input_ids': ret['input_ids'],
             'labels': ret['labels'],
+            'position_id': torch.arange(len(ret['input_ids']))[None].expand(3, -1),  # (3,n)
             'pixel_values': media_inputs['pixel_values'],
             'image_grid_thw': media_grid_thw,
             'num_tokens': [len(ret['input_ids'])],
@@ -628,6 +690,7 @@ def packing_collate(features, pack_batch=True, pad_id=0):
     num_tokens = []
     num_img_tokens = []
     image_grid_thws = []
+    position_ids = []
 
     for data in features:
         input_ids.append(torch.LongTensor(data['input_ids']))
@@ -636,6 +699,7 @@ def packing_collate(features, pack_batch=True, pad_id=0):
         num_img_tokens.extend(data['num_img_tokens'])
         pixel_values.append(data['pixel_values'])
         image_grid_thws.append(data['image_grid_thw'])
+        position_ids.append(data['position_id'])
 
     attention_mask = [ids.ne(pad_id) for ids in input_ids]
     num_tokens = torch.IntTensor(num_tokens)
@@ -648,6 +712,7 @@ def packing_collate(features, pack_batch=True, pad_id=0):
         attention_mask = torch.cat(attention_mask, dim=0).unsqueeze(0)
         image_grid_thws = torch.cat(image_grid_thws, dim=0)
         pixel_values = torch.cat(pixel_values, dim=0)
+        position_ids = torch.cat(position_ids, dim=1).unsqueeze(1)  # (3,1,n)
     elif len(features) > 1 and not pack_batch:
         raise NotImplementedError
     else:
@@ -658,12 +723,14 @@ def packing_collate(features, pack_batch=True, pad_id=0):
         attention_mask = torch.stack(attention_mask)
         image_grid_thws = image_grid_thws[0]
         pixel_values = pixel_values[0]
+        position_ids = position_ids[0]
 
     data_dict = {
         'input_ids': input_ids,
         'labels': labels,
         'attention_mask': attention_mask.bool(),
         'pixel_values': pixel_values,
+        'position_ids': position_ids,
         'image_grid_thw': image_grid_thws,
         'num_tokens': num_tokens,
         'num_img_tokens': num_img_tokens,
@@ -1042,11 +1109,12 @@ def model_sft(args):
             data = next(data_iterator)
             step_data_time += time.time() - _data_start_t
 
+            # exist position_id
             data = _prepare_input(data)
             num_tokens = data.pop('num_tokens')
             num_img_tokens = data.pop('num_img_tokens')
 
-            packed_ctx = packed_sequence(num_tokens, enable=True)
+            packed_ctx = packed_sequence(num_tokens, enable=True, skip_position_ids=True)
 
             with packed_ctx:
                 outputs = model(**data, use_cache=False)

@@ -40,10 +40,6 @@ def qwen2_vl_varlen_attn_forward(
 
     bsz, q_len, _ = hidden_states.size()
 
-    attn_context = MessageHub.get_instance('packed_sequence')
-    position_ids = attn_context.get_info('position_ids')
-    assert position_ids.size(1) == q_len, f'{position_ids.size(1)} {q_len}'
-
     query_states = self.q_proj(hidden_states)
     key_states = self.k_proj(hidden_states)
     value_states = self.v_proj(hidden_states)
@@ -67,17 +63,7 @@ def qwen2_vl_varlen_attn_forward(
         kv_seq_len += past_key_value.get_usable_length(kv_seq_len,
                                                        self.layer_idx)
 
-    assert position_ids is not None
-    if position_embeddings is None:
-        warnings.warn(
-            "The attention layers in this model are transitioning from computing the RoPE embeddings internally "
-            "through `position_ids` (2D tensor with the indexes of the tokens), to using externally computed "
-            "`position_embeddings` (Tuple of tensors, containing cos and sin). In v4.46 `position_ids` will be "
-            "removed and `position_embeddings` will be mandatory."
-        )
-        cos, sin = self.rotary_emb(value_states, position_ids)
-    else:
-        cos, sin = position_embeddings
+    cos, sin = position_embeddings
 
     query_states, key_states = apply_multimodal_rotary_pos_emb(
         query_states, key_states, cos, sin, self.rope_scaling["mrope_section"]
@@ -162,6 +148,7 @@ def qwen2_vl_varlen_attn_forward(
                                                                             -1)
 
     assert SUPPORT_FLASH2
+    attn_context = MessageHub.get_instance('packed_sequence')
     cumulative_lengths = attn_context.get_info('cumulative_lengths')
     if cumulative_lengths is not None and SUPPORT_FLASH2 and bsz == 1:
         max_seqlen = attn_context.get_info('max_seqlen')
@@ -233,11 +220,6 @@ def qwen2_vlmodel_forward(
         cache_position = torch.arange(
             past_seen_tokens, past_seen_tokens + inputs_embeds.shape[1], device=inputs_embeds.device
         )
-
-    # ====================================================================
-    ctx = MessageHub.get_instance('packed_sequence')
-    position_ids = ctx.get_info('position_ids')
-    # ====================================================================
 
     # the hard coded `3` is for temporal, height and width.
     if position_ids is None:
