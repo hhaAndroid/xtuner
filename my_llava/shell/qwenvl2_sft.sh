@@ -23,6 +23,7 @@ cp "$0" "${OUTPUT_DIR}/${SCRIPT_NAME}"
 
 # --group-by-modality-length \
 # --group-by-length \
+# --liger \
 HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 srun -p ${PARTITION} --time 1-00:00:00 \
   --gres=gpu:${GPUS_PER_NODE} \
   --nodes=${NODES} \

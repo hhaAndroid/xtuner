@@ -114,6 +114,8 @@ def parse_args():
         '--freeze-vit',
         action='store_true',
         help="Not updating vit's parameters")
+    parser.add_argument(
+        '--liger', action='store_true', help='use liger kernel')
     model_args.add_argument(
         '--tp-size',
         default=1,
@@ -795,6 +797,14 @@ def packing_collate(features, pack_batch=True, pad_id=0):
 
 
 def model_sft(args):
+    if args.liger:
+        from xtuner._lite.modelings import apply_liger_kernel_to_qwen2_vl
+        try:
+            from liger_kernel.transformers.geglu import LigerGEGLUMLP
+        except ImportError:
+            raise ImportError('Please install liger_kernel to use liger.')
+        apply_liger_kernel_to_qwen2_vl()
+
     setup_parallel(tp_size=args.tp_size, sp_size=args.sp_size)
     set_random_seed(args.seed)
 
@@ -1130,6 +1140,8 @@ def model_sft(args):
         logger.info('[Train] Begin Train Loop. The current GPU memory is '
                     f'{(max_memory / 1024 ** 3):.1f}GB')
         logger.info('The FSDP adopts a lazy design, so the first iteration will be slow.')
+        if args.liger:
+            logger.info('====== use liger kernel =====')
 
     for step in range(start_step, total_steps):
 
