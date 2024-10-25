@@ -21,6 +21,8 @@ from mmengine.utils import get_git_hash
 from mmengine.utils.dl_utils import collect_env
 from PIL import Image
 import json
+from concurrent.futures import ThreadPoolExecutor
+from tqdm import tqdm
 from torch.distributed.checkpoint.state_dict import (StateDictOptions,
                                                      get_model_state_dict,
                                                      get_state_dict, set_state_dict)
@@ -49,6 +51,8 @@ from torch.distributed._tensor import DTensor, distribute_tensor
 from torch.distributed._composable import checkpoint
 from torch.distributed._composable.fsdp import fully_shard
 from collections.abc import Mapping
+import hashlib
+import inspect
 
 
 def check_qwen_vl_deps_install():
@@ -99,6 +103,30 @@ def _prepare_input(data, device='cuda'):
         kwargs = {"device": device}
         return data.to(non_blocking=True, **kwargs)
     return data
+
+
+def calculate_jsonl_sha256(path):
+    with open(path, 'rb') as f:
+        file_hash = hashlib.sha256()
+        while chunk := f.read(8192):
+            file_hash.update(chunk)
+    return file_hash.hexdigest()
+
+
+def calculate_json_sha256(file_path):
+    with open(file_path, 'rb') as f:
+        data = f.read()
+
+    hash_object = hashlib.sha256(data)
+    hash_hex = hash_object.hexdigest()
+    return hash_hex
+
+
+def calculate_tokenize_fn_sha256(tokenize_fn):
+    """Calculate SHA-256 hash for an instance method's source code."""
+    # Get the source code of the method
+    fn_source = inspect.getsource(tokenize_fn.__call__)
+    return hashlib.sha256(fn_source.encode('utf-8')).hexdigest()
 
 
 def parse_args():
@@ -170,6 +198,7 @@ def parse_args():
               'into nearly `max_length` without truncating the data.'))
     data_args.add_argument('--group-by-length', action='store_true')
     data_args.add_argument('--group-by-modality-length', action='store_true')
+    data_args.add_argument('--concat-before-pack', action='store_true')
     data_args.add_argument(
         '--max-length',
         type=int,
@@ -367,7 +396,7 @@ def smart_get_thw(image_size, image_processor):
     )
     grid_t = 1  # 单图
     grid_h, grid_w = resized_height // image_processor.patch_size, resized_width // image_processor.patch_size
-    return grid_t * grid_h * grid_w
+    return [grid_t, grid_h, grid_w]
 
 
 _EXIF_ORIENT = 274  # exif 'Orientation' tag
@@ -421,7 +450,10 @@ def _apply_exif_orientation(image):
 
 
 class LazyQwenVLDataset(TorchDataset):
-    def __init__(self, data_name, data, model_name, max_length, group_by_length=False):
+    def __init__(self, data_name, data, model_name, max_length,
+                 group_by_length=False,
+                 pack_data=False,
+                 pack_data_cache_dir=None):
         self.data_name = data_name
         _model_cfg = AutoConfig.from_pretrained(model_name)
         self.image_token_id = _model_cfg.image_token_id  # <|image_pad|>
@@ -452,8 +484,9 @@ class LazyQwenVLDataset(TorchDataset):
             logger.info(f"{data_name} min_pixels: {self.processor.image_processor.min_pixels},"
                         f"max_pixels: {self.processor.image_processor.max_pixels}")
 
-        self._is_jsonl = data['annotation'].endswith('.jsonl')
-        self.raw_data = load_json_or_jsonl(data['annotation'])
+        self.annotation = data['annotation']
+        self._is_jsonl = self.annotation.endswith('.jsonl')
+        self.raw_data = load_json_or_jsonl(self.annotation)
         repeat_time = data.get('repeat_time', 1)
         if repeat_time < 1:
             # If repeat_time is less than 1, select a portion of the data
@@ -464,48 +497,138 @@ class LazyQwenVLDataset(TorchDataset):
             self.raw_data = self.raw_data * repeat_time
 
         self.group_length = []
-        if self.group_by_length:
-            self.conv2length = {}
-            # 由于动态分辨率特点，在开启 group_by_length 时候我们需要通过 image_hw 精确计算实际的 image token
-            # 如果采用估算方式会差别较大。因此如果是多模态数据，则一定需要有 hw 属性
-            # TODO: 支持视频
-            for data_item in self.raw_data:
-                is_media = False
-                if self._is_jsonl:
-                    data_item = json.loads(data_item)
-                if ('image' in data_item and data_item['image'] is not None) or (
-                        'video' in data_item and data_item['video'] is not None):
-                    assert 'image_wh' in data_item, 'image must have `hw` attribute when group_by_length is True'
-                    is_media = True
+        if self.group_by_length and not pack_data:
+            self.calc_group_len()
 
-                image_size = data_item.get('image_wh', [[0, 0]])
-                if not isinstance(image_size[0], list):
-                    image_size = [image_size]
+        # -------------------pack---------------------------------------
+        self.num_tokens = None
+        self.pack_data_cache_dir = pack_data_cache_dir
+        if pack_data:
+            assert pack_data_cache_dir is not None, 'pack_data_cache_dir must be provided when pack_data is True'
+            self.calc_packing_info()
 
-                num_image_tokens = 0
-                for image_size_ in image_size:
-                    if image_size_[0] == 0 or image_size_[1] == 0:
-                        pass
-                    else:
-                        num_image_tokens_ = smart_get_thw(image_size_, self.processor.image_processor)
-                        num_image_tokens += num_image_tokens_
-                        num_image_tokens += 2
+    def calc_packing_info(self):
+        if os.path.exists(self.pack_data_cache_dir):
+            assert os.path.isdir(self.pack_data_cache_dir)
+        else:
+            mkdir_or_exist(self.pack_data_cache_dir)
+        if self._is_jsonl:
+            file_hash = calculate_jsonl_sha256(self.annotation)
+        else:
+            file_hash = calculate_json_sha256(self.annotation)
+        tok_hash = calculate_tokenize_fn_sha256(self.tokenizer)
+        tok_hash += file_hash
+        file_cache_dir = os.path.join(self.pack_data_cache_dir, tok_hash)
+        if not os.path.exists(file_cache_dir):
+            mkdir_or_exist(file_cache_dir)
 
-                conversations = '\n'.join([temp['value'] for temp in data_item['conversations']])
-                str_length = len(conversations)
-                if str_length not in self.conv2length:
-                    token_length = self.tokenizer(
-                        conversations, return_tensors='pt', padding=False, truncation=False,
-                    ).input_ids.size(1)
-                    token_length += num_image_tokens
-                    self.conv2length[str_length] = token_length
+        if 'num_tokens.npy' in os.listdir(file_cache_dir):
+            _cached_file = os.path.join(file_cache_dir, 'num_tokens.npy')
+            num_tokens = np.load(_cached_file)
+            logger.info(f"Load num_tokens from cache: {os.path.basename(self.annotation)}")
+        else:
+            num_tokens = self.count_tokens_for_pack(file_cache_dir)
+        self.num_tokens = num_tokens
+
+    def count_tokens_for_pack(self, cache_dir=None):
+        num_samples = len(self.raw_data)
+
+        if dist.is_available():
+            world_size = dist.get_world_size()
+            rank = dist.get_rank()
+        else:
+            world_size = 1
+            rank = 0
+
+        num_per_rank = math.ceil(num_samples / world_size)
+
+        start = rank * num_per_rank
+        end = (rank + 1) * num_per_rank
+        dataset_shard = self.raw_data[start:end]
+
+        desc = f'[Rank {rank}] {os.path.basename(self.annotation)}'
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            tokenized = list(
+                tqdm(
+                    executor.map(self._pre_tokenize_fn_for_pack, dataset_shard),
+                    desc=desc,
+                    total=len(dataset_shard)))
+
+        _num_tokens = [data['num_tokens'] for data in tokenized]
+        _num_tokens = np.array(_num_tokens)
+
+        if dist.is_available():
+            num_tokens = [None] * world_size
+            dist.all_gather_object(num_tokens, _num_tokens)
+            num_tokens = np.concatenate(num_tokens, axis=0)
+        else:
+            num_tokens = _num_tokens
+
+        if rank == 0 and cache_dir:
+            save_path = os.path.join(cache_dir, 'num_tokens.npy')
+            np.save(save_path, num_tokens)
+
+        return num_tokens
+
+    def _pre_tokenize_fn_for_pack(self, data_item):
+        if self._is_jsonl:
+            data_item = json.loads(data_item)
+        if 'image' in data_item and data_item['image'] is not None:
+            if type(data_item['image']) == list and len(data_item['image']) > 1:
+                num_tokens = self.multi_modal_multi_image_get_item(data_item, pack_data=True)
+            else:
+                num_tokens = self.multi_modal_get_item(data_item, pack_data=True)
+        elif 'video' in data_item and data_item['video'] is not None and data_item['video'] != '':
+            num_tokens = self.video_get_item(data_item, pack_data=True)
+        else:
+            num_tokens = self.pure_text_get_item(data_item, pack_data=True)
+        return {'num_tokens': num_tokens}
+
+    # --------------------------------------------------------------
+
+    def calc_group_len(self):
+        conv2length = {}
+        # 由于动态分辨率特点，在开启 group_by_length 时候我们需要通过 image_hw 精确计算实际的 image token
+        # 如果采用估算方式会差别较大。因此如果是多模态数据，则一定需要有 hw 属性
+        # TODO: 支持视频
+        for data_item in self.raw_data:
+            is_media = False
+            if self._is_jsonl:
+                data_item = json.loads(data_item)
+            if ('image' in data_item and data_item['image'] is not None) or (
+                    'video' in data_item and data_item['video'] is not None):
+                assert 'image_wh' in data_item, 'image must have `hw` attribute when group_by_length is True'
+                is_media = True
+
+            image_size = data_item.get('image_wh', [[0, 0]])
+            if not isinstance(image_size[0], list):
+                image_size = [image_size]
+
+            num_image_tokens = 0
+            for image_size_ in image_size:
+                if image_size_[0] == 0 or image_size_[1] == 0:
+                    pass
                 else:
-                    token_length = self.conv2length[str_length]
+                    thw = smart_get_thw(image_size_, self.processor.image_processor)
+                    num_image_tokens_ = thw[0] * thw[1] * thw[2]
+                    num_image_tokens += num_image_tokens_
+                    num_image_tokens += 2
 
-                if is_media:
-                    self.group_length.append(token_length)
-                else:
-                    self.group_length.append(-token_length)
+            conversations = '\n'.join([temp['value'] for temp in data_item['conversations']])
+            str_length = len(conversations)
+            if str_length not in conv2length:
+                token_length = self.tokenizer(
+                    conversations, return_tensors='pt', padding=False, truncation=False,
+                ).input_ids.size(1)
+                token_length += num_image_tokens
+                conv2length[str_length] = token_length
+            else:
+                token_length = conv2length[str_length]
+
+            if is_media:
+                self.group_length.append(token_length)
+            else:
+                self.group_length.append(-token_length)
 
     @property
     def modality_length(self):
@@ -613,7 +736,7 @@ class LazyQwenVLDataset(TorchDataset):
         position_ids = torch.cat(llm_pos_ids_list, dim=1).reshape(3, -1)
         return position_ids
 
-    def multi_modal_get_item(self, data_item):
+    def multi_modal_get_item(self, data_item, pack_data=False):
         # Ensure the first conversation contains an image placeholder
         if '<image>\n' in data_item['conversations'][0]['value']:
             data_item['conversations'][0]['value'] = data_item['conversations'][0]['value'].replace('<image>\n', '')
@@ -627,9 +750,24 @@ class LazyQwenVLDataset(TorchDataset):
         if '<image>' not in data_item['conversations'][0]['value']:
             data_item['conversations'][0]['value'] = '<image>' + data_item['conversations'][0]['value']
 
+        if pack_data:
+            # 只需要 num_tokens 即可，其余不需要
+            assert 'image_wh' in data_item, 'image must have `hw` attribute when group_by_length is True'
+            image_size = data_item.get('image_wh', [[0, 0]])
+            if not isinstance(image_size[0], list):
+                image_size = [image_size]
+
+            media_grid_thw = []
+            for size in image_size:
+                media_grid_thw.append(smart_get_thw(size, self.processor.image_processor))
+            media_grid_thw = torch.tensor(media_grid_thw, dtype=torch.int).reshape(-1, 3)
+            ret = self.process_text(data_item['conversations'], media_grid_thw, media_type='image')
+            return len(ret['input_ids'])
+
         image_path = data_item['image']
         if isinstance(image_path, list):
             image_path = image_path[0]
+
         image_path = os.path.join(self.root, image_path)
         image = Image.open(image_path).convert('RGB')
         image = _apply_exif_orientation(image)
@@ -650,7 +788,7 @@ class LazyQwenVLDataset(TorchDataset):
         }
         return out_data
 
-    def multi_modal_multi_image_get_item(self, data_item):
+    def multi_modal_multi_image_get_item(self, data_item, pack_data=False):
         image_path = data_item['image']
         if '<image>' not in data_item['conversations'][0]['value']:
             data_item['conversations'][0]['value'] = '<image>' * len(image_path) + data_item['conversations'][0][
@@ -658,6 +796,20 @@ class LazyQwenVLDataset(TorchDataset):
 
         assert len(image_path) == data_item['conversations'][0]['value'].count('<image>'), \
             f'Image number not match: {image_path} vs {data_item["conversations"][0]["value"]}'
+
+        if pack_data:
+            # 只需要 num_tokens 即可，其余不需要
+            assert 'image_wh' in data_item, 'image must have `hw` attribute when group_by_length is True'
+            image_size = data_item.get('image_wh', [[0, 0]])
+            if not isinstance(image_size[0], list):
+                image_size = [image_size]
+
+            media_grid_thw = []
+            for size in image_size:
+                media_grid_thw.append(smart_get_thw(size, self.processor.image_processor))
+            media_grid_thw = torch.tensor(media_grid_thw, dtype=torch.int).reshape(-1, 3)
+            ret = self.process_text(data_item['conversations'], media_grid_thw, media_type='image')
+            return len(ret['input_ids'])
 
         all_image = []
         for image_path_ in image_path:
@@ -682,15 +834,19 @@ class LazyQwenVLDataset(TorchDataset):
         }
         return out_data
 
-    def video_get_item(self, data_item):
+    def video_get_item(self, data_item, pack_data=False):
         raise NotImplementedError
 
-    def pure_text_get_item(self, data_item):
+    def pure_text_get_item(self, data_item, pack_data=False):
         image = Image.new('RGB', (224, 224), (255, 255, 255))
         media_inputs = self.processor.image_processor(images=image, videos=None, return_tensors='pt')
         media_grid_thw = media_inputs['image_grid_thw']
 
         ret = self.process_text(data_item['conversations'], media_grid_thw, media_type='text')
+
+        if pack_data:
+            return len(ret['input_ids'])
+
         out_data = {
             'input_ids': ret['input_ids'],
             'labels': ret['labels'],
@@ -728,15 +884,106 @@ class LazyQwenVLDataset(TorchDataset):
         return ret
 
 
+class SoftPackDataset(torch.utils.data.Dataset):
+
+    def __init__(self, datasets, pack_max_length=32768, concat_before_pack=True):
+        if concat_before_pack:
+            if dist.get_rank() == 0:
+                logger.info(f'[Dataset] Concat before pack.')
+            num_tokens = [
+                np.concatenate([dset.num_tokens for dset in datasets])
+            ]
+            datasets = [ConcatDataset(datasets)]
+        else:
+            num_tokens: list = [dset.num_tokens for dset in datasets]
+        self.datasets = datasets
+        self.pack_max_length = pack_max_length
+
+        pack_infos = []
+        orig_lens = [len(dset) for dset in datasets]
+        for i, dataset in enumerate(self.datasets):
+            _infos = self.get_pack_infos(dataset, i, num_tokens[i])
+            pack_infos.extend(_infos)
+        self.pack_infos = pack_infos
+
+        if dist.get_rank() == 0:
+            logger.info(f'[Dataset] (Original) {orig_lens} samples.')
+            logger.info(f'[Dataset] (Packed) {len(self)} samples.')
+
+    def get_pack_infos(self, dataset, dataset_id, num_tokens):
+        # _ori_lens = dataset['num_tokens']
+        inds = [i for i in range(len(dataset))]
+        random.shuffle(inds)
+
+        item_buffer = []
+        length_buffer = []
+        max_length_one_pack = 0
+
+        pack_infos = []
+        for shfl_i in inds:
+            if num_tokens[shfl_i] > self.pack_max_length:
+                raise ValueError(f'one sample len {num_tokens[shfl_i]} > pack_max_length {self.pack_max_length}. '
+                                 'Please increase pack_max_length.')
+
+            if num_tokens[shfl_i] + sum(length_buffer) <= self.pack_max_length:
+                item_buffer.append(shfl_i)
+                length_buffer.append(num_tokens[shfl_i])
+                max_length_one_pack = max(max_length_one_pack,
+                                          num_tokens[shfl_i])
+            else:
+                if len(item_buffer) > 0:
+                    info = {
+                        'indices': item_buffer,
+                        'dataset_id': dataset_id,
+                        'max_length_per_pack': int(max_length_one_pack)
+                    }
+                    pack_infos.append(info)
+
+                item_buffer = [shfl_i]
+                length_buffer = [num_tokens[shfl_i]]
+                max_length_one_pack = num_tokens[shfl_i]
+
+        if len(item_buffer) > 0:
+            info = {
+                'indices': item_buffer,
+                'dataset_id': dataset_id,
+                'max_length_per_pack': int(max_length_one_pack)
+            }
+
+            pack_infos.append(info)
+
+        return pack_infos
+
+    def __len__(self):
+        return len(self.pack_infos)
+
+    def __getitem__(self, item):
+        indices = self.pack_infos[item]['indices']
+        dataset_id = self.pack_infos[item]['dataset_id']
+        return [self.datasets[dataset_id][i] for i in indices]
+
+
 def build_dataset(args):
     ds_collections = json.loads(open(args.datasets).read())
     _datasets = []
     for name, _data in ds_collections.items():
-        _dataset = LazyQwenVLDataset(name, _data, args.model, args.max_length, group_by_length=args.group_by_length)
+        _dataset = LazyQwenVLDataset(name, _data, args.model, args.max_length,
+                                     group_by_length=args.group_by_length,
+                                     pack_data=args.dset_pack_level,
+                                     pack_data_cache_dir=args.dset_cache_dir)
+        if dist.get_rank() == 0:
+            logger.info(f'[Dataset] (Original) {name}: {len(_dataset)} samples.')
         _datasets.append(_dataset)
 
     assert len(_datasets) > 0, 'No dataset found.'
-    train_dataset = ConcatDataset(_datasets)
+    if args.dset_pack_level:
+        train_dataset = SoftPackDataset(_datasets,
+                                        pack_max_length=args.pack_max_length,
+                                        concat_before_pack=args.concat_before_pack)
+    else:
+        train_dataset = ConcatDataset(_datasets)
+        if dist.get_rank() == 0:
+            logger.info(f'[Dataset] (Original) {len(train_dataset)} samples.')
     return train_dataset
 
 
@@ -763,7 +1010,7 @@ def packing_collate(features, pack_batch=True, pad_id=0):
     num_img_tokens = torch.IntTensor(num_img_tokens)
 
     if len(features) > 1 and pack_batch:
-        # batch packing
+        # packing
         input_ids = torch.cat(input_ids, dim=0).unsqueeze(0)
         labels = torch.cat(labels, dim=0).unsqueeze(0)
         attention_mask = torch.cat(attention_mask, dim=0).unsqueeze(0)
@@ -773,14 +1020,12 @@ def packing_collate(features, pack_batch=True, pad_id=0):
     elif len(features) > 1 and not pack_batch:
         raise NotImplementedError
     else:
-        # soft packing
-        assert len(features) == 1
         input_ids = torch.stack(input_ids)
         labels = torch.stack(labels)
         attention_mask = torch.stack(attention_mask)
-        image_grid_thws = image_grid_thws[0]
-        pixel_values = pixel_values[0]
-        position_ids = position_ids[0]
+        image_grid_thws = torch.stack(image_grid_thws)
+        pixel_values = torch.stack(pixel_values)  # (b,...)
+        position_ids = torch.stack(position_ids, dim=1)  # (3,b,n)
 
     data_dict = {
         'input_ids': input_ids,
@@ -923,7 +1168,6 @@ def model_sft(args):
             persistent_workers=args.num_workers > 0)
 
         if rank == 0:
-            logger.info(f'[Dataset] (Original) {len(train_dataset)} samples.')
             logger.info(f'[Dataloader] {len(train_dataloader)} batches.')
 
         dist.barrier()
