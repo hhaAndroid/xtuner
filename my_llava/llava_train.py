@@ -101,6 +101,8 @@ def parse_args():
         choices=CHAT_TEMPLATE_MAP.keys(),
         help=('repo id or local path of the tokenizer. '
               'Defaults to the same as `model`'))
+    parser.add_argument(
+        '--liger', action='store_true', help='use liger kernel')
     model_args.add_argument(
         '--freeze-llm',
         action='store_true',
@@ -422,6 +424,14 @@ def llava_sft(args):
     ###########################################################################
     #                           1. Environment                                #
     ###########################################################################
+    if args.liger:
+        from xtuner._lite.modelings import apply_liger_kernel_to_llava_clip_internlm2
+        try:
+            from liger_kernel.transformers.geglu import LigerGEGLUMLP
+        except ImportError:
+            raise ImportError('Please install liger_kernel to use liger.')
+        apply_liger_kernel_to_llava_clip_internlm2()
+
     if args.llm_use_lora:
         args.freeze_llm = True
 
@@ -936,6 +946,8 @@ def llava_sft(args):
     max_memory = torch.cuda.max_memory_allocated()
     logger.info('[Train] Begin Train Loop. The current GPU memory is '
                 f'{(max_memory / 1024 ** 3):.1f}GB')
+    if args.liger:
+        logger.info('[Liger] Liger is enabled.')
     save_hf_ckpt_names = []
     save_pt_ckpt_names = []
     max_keep_ckpts = args.max_keep_ckpts

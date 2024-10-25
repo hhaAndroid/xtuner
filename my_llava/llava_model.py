@@ -13,6 +13,7 @@ from xtuner._lite.parallel import (LengthGroupedSampler, ParallelSampler,
                                    setup_parallel, get_sp_group, split_for_sequence_parallel)
 
 from mmengine import MessageHub
+import os
 
 
 class _GatherFromSeqParallelRegion(torch.autograd.Function):
@@ -251,21 +252,32 @@ class LlavaForConditionalGeneration(HF_LlavaForConditionalGeneration):
 
         logits = outputs[0]
 
-        loss = None
-        if labels is not None:
-            # Shift so that tokens < n predict n
-            if attention_mask is not None:
-                shift_attention_mask = attention_mask[..., 1:]
-                shift_logits = logits[..., :-1, :][shift_attention_mask.to(logits.device) != 0].contiguous()
-                shift_labels = labels[..., 1:][shift_attention_mask.to(labels.device) != 0].contiguous()
-            else:
-                shift_logits = logits[..., :-1, :].contiguous()
-                shift_labels = labels[..., 1:].contiguous()
-            # Flatten the tokens
-            loss_fct = nn.CrossEntropyLoss()
-            loss = loss_fct(
-                shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1).to(shift_logits.device)
-            )
+        use_liger_kernel = os.environ.get('USE_LIGER_KERNEL', None)
+        if use_liger_kernel and labels is not None:
+            hidden_states = logits
+            from liger_kernel.transformers import LigerFusedLinearCrossEntropyLoss
+            loss_fn = LigerFusedLinearCrossEntropyLoss()
+            shift_hidden_states = hidden_states[..., :-1, :].contiguous()
+            shift_hidden_states = shift_hidden_states.view(-1, self.language_model.config.hidden_size)
+            shift_labels = labels[..., 1:].contiguous()
+            shift_labels = shift_labels.view(-1)
+            loss = loss_fn(self.language_model.output.weight, shift_hidden_states, shift_labels)
+        else:
+            loss = None
+            if labels is not None:
+                # Shift so that tokens < n predict n
+                if attention_mask is not None:
+                    shift_attention_mask = attention_mask[..., 1:]
+                    shift_logits = logits[..., :-1, :][shift_attention_mask.to(logits.device) != 0].contiguous()
+                    shift_labels = labels[..., 1:][shift_attention_mask.to(labels.device) != 0].contiguous()
+                else:
+                    shift_logits = logits[..., :-1, :].contiguous()
+                    shift_labels = labels[..., 1:].contiguous()
+                # Flatten the tokens
+                loss_fct = nn.CrossEntropyLoss()
+                loss = loss_fct(
+                    shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1).to(shift_logits.device)
+                )
 
         if not return_dict:
             output = (logits,) + outputs[1:]

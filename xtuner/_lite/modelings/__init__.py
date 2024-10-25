@@ -1,3 +1,5 @@
+import os
+
 from .internlm2 import InternLM2Config, InternLM2ForCausalLM
 
 try:
@@ -5,6 +7,7 @@ try:
     from liger_kernel.transformers.geglu import LigerGEGLUMLP
     from liger_kernel.transformers.layer_norm import LigerLayerNorm
     from liger_kernel.transformers.rms_norm import LigerRMSNorm
+    from liger_kernel.transformers.rope import liger_rotary_pos_emb
     from liger_kernel.transformers.swiglu import (
         LigerSwiGLUMLP
     )
@@ -232,3 +235,19 @@ def apply_liger_kernel_to_qwen2_vl(
     if swiglu:
         modeling_qwen2_vl.Qwen2MLP = LigerSwiGLUMLP
 
+
+def apply_liger_kernel_to_llava_clip_internlm2(
+    cross_entropy: bool = False,
+    fused_linear_cross_entropy: bool = True,
+    rms_norm: bool = True,
+    layer_norm: bool = True,
+    swiglu: bool = True
+) -> None:
+    from transformers.models.clip import modeling_clip
+    modeling_clip.LayerNorm = LigerLayerNorm
+
+    from internlm2 import modeling_internlm2
+    modeling_internlm2.InternLM2RMSNorm = LigerRMSNorm
+    modeling_internlm2.InternLM2MLP = LigerSwiGLUMLP
+    modeling_internlm2.apply_rotary_pos_emb = liger_rotary_pos_emb
+    os.environ["USE_LIGER_KERNEL"] = "1"

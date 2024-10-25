@@ -15,6 +15,7 @@
 # limitations under the License.
 """PyTorch InternLM2.5 model."""
 import math
+import os
 import queue
 import threading
 from typing import List, Optional, Tuple, Union
@@ -1192,16 +1193,21 @@ class InternLM2ForCausalLM(InternLM2PreTrainedModel):
         )
 
         hidden_states = outputs[0]
-        if self.config.pretraining_tp > 1:
-            output_slices = self.output.weight.split(self.vocab_size // self.config.pretraining_tp, dim=0)
-            logits = [
-                F.linear(hidden_states, output_slices[i])  # pylint: disable=not-callable
-                for i in range(self.config.pretraining_tp)
-            ]
-            logits = torch.cat(logits, dim=-1)
+
+        use_liger_kernel = os.environ.get('USE_LIGER_KERNEL', None)
+        if use_liger_kernel is not None:
+            logits = hidden_states
         else:
-            logits = self.output(hidden_states)
-        logits = logits.float()
+            if self.config.pretraining_tp > 1:
+                output_slices = self.output.weight.split(self.vocab_size // self.config.pretraining_tp, dim=0)
+                logits = [
+                    F.linear(hidden_states, output_slices[i])  # pylint: disable=not-callable
+                    for i in range(self.config.pretraining_tp)
+                ]
+                logits = torch.cat(logits, dim=-1)
+            else:
+                logits = self.output(hidden_states)
+            logits = logits.float()
 
         loss = None
         if labels is not None:
