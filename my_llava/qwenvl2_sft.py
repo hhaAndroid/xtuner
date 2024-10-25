@@ -1,7 +1,7 @@
 # Copyright (c) OpenMMLab. All rights reserved.
 import warnings
 # display once
-warnings.filterwarnings('ignore', '`torch.cpu.amp.autocast(args...)`+')
+warnings.filterwarnings("ignore", message=".*torch.cpu.amp.autocast.*")
 
 import argparse
 import copy
