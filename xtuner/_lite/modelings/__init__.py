@@ -1,4 +1,5 @@
 import os
+import torch.nn as nn
 
 from .internlm2 import InternLM2Config, InternLM2ForCausalLM
 
@@ -9,27 +10,23 @@ try:
     from liger_kernel.transformers.rms_norm import LigerRMSNorm
     from liger_kernel.transformers.rope import liger_rotary_pos_emb
     from liger_kernel.transformers.swiglu import (
-        LigerSwiGLUMLP
+        LigerSwiGLUMLP, LigerSiLUMulFunction
     )
     from liger_kernel.transformers.fused_linear_cross_entropy import (
         LigerFusedLinearCrossEntropyLoss,
     )
+    from transformers.models.qwen2_vl.modeling_qwen2_vl import (
+        Qwen2VLCausalLMOutputWithPast
+    )
 except ImportError:
     pass
 
-from transformers.utils import (
-    add_start_docstrings_to_model_forward,
-    replace_return_docstrings,
-)
 from typing import List, Optional, Tuple, Union
 
 import torch
 from torch.nn import CrossEntropyLoss
-from transformers.models.qwen2_vl.modeling_qwen2_vl import (
-    _CONFIG_FOR_DOC,
-    QWEN2_VL_INPUTS_DOCSTRING,
-    Qwen2VLCausalLMOutputWithPast,
-)
+from mmengine.utils.version_utils import digit_version
+
 
 def register_remote_code():
     from transformers import AutoConfig, AutoModelForCausalLM
@@ -38,10 +35,6 @@ def register_remote_code():
         InternLM2Config, InternLM2ForCausalLM, exist_ok=True)
 
 
-@add_start_docstrings_to_model_forward(QWEN2_VL_INPUTS_DOCSTRING)
-@replace_return_docstrings(
-    output_type=Qwen2VLCausalLMOutputWithPast, config_class=_CONFIG_FOR_DOC
-)
 def lce_forward(
     self,
     input_ids: torch.LongTensor = None,
@@ -236,18 +229,39 @@ def apply_liger_kernel_to_qwen2_vl(
         modeling_qwen2_vl.Qwen2MLP = LigerSwiGLUMLP
 
 
-def apply_liger_kernel_to_llava_clip_internlm2(
-    cross_entropy: bool = False,
-    fused_linear_cross_entropy: bool = True,
-    rms_norm: bool = True,
-    layer_norm: bool = True,
-    swiglu: bool = True
-) -> None:
-    from transformers.models.clip import modeling_clip
-    modeling_clip.LayerNorm = LigerLayerNorm
+class LigerSwiGLUMLPForInternlm2(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        self.config = config
+        self.hidden_size = config.hidden_size
+        self.intermediate_size = config.intermediate_size
+        self.w1 = nn.Linear(self.hidden_size, self.intermediate_size, bias=False)
+        self.w3 = nn.Linear(self.hidden_size, self.intermediate_size, bias=False)
+        self.w2 = nn.Linear(self.intermediate_size, self.hidden_size, bias=False)
+        if config.hidden_act not in ["silu", "swish"]:
+            raise ValueError(f"Activation function {config.hidden_act} not supported.")
 
-    from internlm2 import modeling_internlm2
+    def forward(self, x):
+        return self.w2(
+            LigerSiLUMulFunction.apply(self.w1(x), self.w3(x))
+        )
+
+
+def apply_liger_kernel_to_llava_clip_internlm2(
+        cross_entropy: bool = False,
+        fused_linear_cross_entropy: bool = True,
+        rms_norm: bool = True,
+        layer_norm: bool = True,
+        swiglu: bool = True
+) -> None:
+    # modeling_clip
+    nn.LayerNorm = LigerLayerNorm
+
+    from .internlm2 import modeling_internlm2
+    if digit_version(torch.__version__) >= digit_version('2.4.0'):
+        modeling_internlm2.InternLM2MLP = LigerSwiGLUMLPForInternlm2
     modeling_internlm2.InternLM2RMSNorm = LigerRMSNorm
-    modeling_internlm2.InternLM2MLP = LigerSwiGLUMLP
-    modeling_internlm2.apply_rotary_pos_emb = liger_rotary_pos_emb
+
+    from ..accelerate.dispatches import internlm2
+    internlm2.apply_rotary_pos_emb = liger_rotary_pos_emb
     os.environ["USE_LIGER_KERNEL"] = "1"

@@ -106,6 +106,8 @@ def parse_args():
         choices=CHAT_TEMPLATE_MAP.keys(),
         help=('repo id or local path of the tokenizer. '
               'Defaults to the same as `model`'))
+    parser.add_argument(
+        '--liger', action='store_true', help='use liger kernel')
     model_args.add_argument(
         '--freeze-llm',
         action='store_true',
@@ -432,6 +434,14 @@ def llava_sft(args):
     ###########################################################################
     #                           1. Environment                                #
     ###########################################################################
+    if args.liger:
+        from xtuner._lite.modelings import apply_liger_kernel_to_llava_clip_internlm2
+        try:
+            from liger_kernel.transformers.geglu import LigerGEGLUMLP
+        except ImportError:
+            raise ImportError('Please install liger_kernel to use liger.')
+        apply_liger_kernel_to_llava_clip_internlm2()
+
     if args.llm_use_lora:
         args.freeze_llm = True
 
@@ -945,6 +955,8 @@ def llava_sft(args):
     if max_keep_ckpts <= 0:
         # 全部都保存
         max_keep_ckpts = 100000000
+    if args.liger:
+        logger.info('[Liger] Liger is enabled.')
 
     for step in range(start_step, total_steps):
 
