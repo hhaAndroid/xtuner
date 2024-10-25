@@ -24,7 +24,8 @@ cp "$0" "${OUTPUT_DIR}/${SCRIPT_NAME}"
 # --group-by-modality-length \
 # --group-by-length \
 # --liger \
-MAX_LENGHT = 32768
+
+MAX_LENGHT=32768
 HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 srun -p ${PARTITION} --time 1-00:00:00 \
   --gres=gpu:${GPUS_PER_NODE} \
   --nodes=${NODES} \
@@ -36,10 +37,10 @@ HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 srun -p ${PARTITION} --time 1-00:00
   ${SRUN_ARGS} \
   python -u qwenvl2_sft.py \
   --model /mnt/hwfile/xtuner/huanghaian/model/Qwen2-VL-2B-Instruct \
-  --datasets data/qwenvl2_sft.json \
-  --concat-before-pack \
+  --datasets data/qwenvl2_sft_test.json \
   --max-length $MAX_LENGHT \
   --pack-max-length $((MIRCO_BATCH_SIZE * MAX_LENGHT)) \
+  --concat-before-pack \
   --num-workers 4 \
   --mirco-batch-size 1 \
   --group-by-length \

@@ -1,4 +1,8 @@
 # Copyright (c) OpenMMLab. All rights reserved.
+import warnings
+# display once
+warnings.filterwarnings('ignore', '`torch.cpu.amp.autocast(args...)`+')
+
 import argparse
 import copy
 import math
@@ -900,11 +904,14 @@ class SoftPackDataset(torch.utils.data.Dataset):
         self.pack_max_length = pack_max_length
 
         pack_infos = []
+        self.max_length_per_pack = []
         orig_lens = [len(dset) for dset in datasets]
         for i, dataset in enumerate(self.datasets):
             _infos = self.get_pack_infos(dataset, i, num_tokens[i])
+            self.max_length_per_pack.extend([info['max_length_per_pack'] for info in _infos])
             pack_infos.extend(_infos)
         self.pack_infos = pack_infos
+        assert len(self.pack_infos) == len(self.max_length_per_pack)
 
         if dist.get_rank() == 0:
             logger.info(f'[Dataset] (Original) {orig_lens} samples.')
@@ -988,6 +995,14 @@ def build_dataset(args):
 
 
 def packing_collate(features, pack_batch=True, pad_id=0):
+    _features = []
+    for ins in features:
+        if isinstance(ins, list):
+            _features.extend(ins)
+        else:
+            _features.append(ins)
+    features = _features
+
     input_ids = []
     labels = []
     pixel_values = []
@@ -1024,7 +1039,7 @@ def packing_collate(features, pack_batch=True, pad_id=0):
         labels = torch.stack(labels)
         attention_mask = torch.stack(attention_mask)
         image_grid_thws = torch.stack(image_grid_thws)
-        pixel_values = torch.stack(pixel_values)  # (b,...)
+        pixel_values = torch.cat(pixel_values, dim=0)
         position_ids = torch.stack(position_ids, dim=1)  # (3,b,n)
 
     data_dict = {
