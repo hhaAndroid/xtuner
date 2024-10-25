@@ -1132,7 +1132,10 @@ def llava_sft(args):
                     f'memory is {max_memory / 1024 ** 3:.1f}GB.')
 
     train_cost_time = time.time() - start_train_t
-    logger.info(f'[Train] Cost {train_cost_time}s')
+    m, s = divmod(train_cost_time, 60)
+    h, m = divmod(m, 60)
+    d, h = divmod(h, 24)
+    logger.info("[Train] Cost: %d day, %d:%d:%d" % (d, h, m, s))
     # ------------------------    Training  End  ---------------------------- #
 
 
