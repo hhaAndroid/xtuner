@@ -1,6 +1,6 @@
 {
     "llava_pretrain": {
         "media_root": "/mnt/hwfile/xtuner/linzhihao/dataset/llava_data/LLaVA-Pretrain/images",
-        "annotations": "/mnt/hwfile/xtuner/linzhihao/dataset/llava_data/LLaVA-Pretrain/blip_laion_cc_sbu_558k.json"
+        "annotation": "/mnt/hwfile/xtuner/linzhihao/dataset/llava_data/LLaVA-Pretrain/blip_laion_cc_sbu_558k.json"
     }
 }

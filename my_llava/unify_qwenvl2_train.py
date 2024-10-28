@@ -8,7 +8,6 @@ import argparse
 import math
 import os
 import time
-import copy
 from datetime import timedelta
 from functools import partial
 import random
@@ -23,22 +22,39 @@ from xtuner._lite.parallel.new_setup import setup_parallel, \
     get_fsdp_mesh, get_dp_mesh, get_tp_mesh, get_world_mesh, get_sp_mesh, \
     profile_time_and_memory, get_torch_device_module
 from torch.distributed._composable.fsdp import MixedPrecisionPolicy
-from xtuner._lite import AutoTokenizer, get_logger
+from xtuner._lite import get_logger
 from xtuner._lite.accelerate import (LoadWoInit,
                                      dispatch_modules, packed_sequence)
 from xtuner._lite.accelerate.fsdp import clip_grad_norm_
-from torch.distributed._composable import checkpoint
 from torch.distributed._composable.fsdp import fully_shard
-from xtuner._lite.modelings import register_remote_code
-from llava_model import LlavaForConditionalGeneration
-from transformers import (AutoConfig, AutoModelForCausalLM, AutoProcessor,
-                          CLIPVisionModel, LlavaConfig, CLIPImageProcessor,
-                          LlavaProcessor)
+from transformers import (AutoConfig, AutoProcessor)
 
 from xtuner._lite.datasets.dataset_fn import check_args, \
     set_logger_envs, build_train_dataloader, build_dataset, BaseOrigDataset, \
-    _apply_exif_orientation, expand2square, _prepare_input, is_interval
+    _apply_exif_orientation, _prepare_input, is_interval
 from xtuner._lite.modelings.model_fn import map_meta_modules, lazy_init_megatron, save_ckpt, resume
+from xtuner._lite.checkpoint import checkpoint
+
+
+def check_qwen_vl_deps_install():
+    """check qwen_vl_utils."""
+    try:
+        import qwen_vl_utils  # noqa: F401
+    except ImportError:
+        raise ImportError(
+            'please install qwen_vl_utils by pip install qwen_vl_utils'  # noqa: E501
+        )
+    try:
+        from transformers import Qwen2VLForConditionalGeneration  # noqa: F401
+    except ImportError:
+        raise ImportError(
+            'please install latest transformers by '
+            'pip install git+https://github.com/huggingface/transformers.git')
+
+
+check_qwen_vl_deps_install()
+from transformers.models.qwen2_vl.image_processing_qwen2_vl import smart_resize
+from transformers import Qwen2VLForConditionalGeneration
 
 logger = get_logger()
 
@@ -47,23 +63,8 @@ def parse_args():
     parser = argparse.ArgumentParser(description='Train LLM')
 
     model_args = parser.add_argument_group('model', 'Model Related Settings')
-
-    # pretrain
-    model_args.add_argument('--llm', help='repo id or local path of the model')
     model_args.add_argument(
-        '--vit',
-        default='openai/clip-vit-large-patch14-336',
-        help='repo id or local path of the model')
-
-    # sft
-    model_args.add_argument(
-        '--llava', help='repo id or local path of the model')
-
-    model_args.add_argument(
-        '-t',
-        '--tokenizer',
-        help=('repo id or local path of the tokenizer. '
-              'Defaults to the same as `model`'))
+        '--model', help='repo id or local path of the model')
     parser.add_argument(
         '--liger', action='store_true', help='use liger kernel')
     model_args.add_argument(
@@ -125,13 +126,13 @@ def parse_args():
     data_args.add_argument(
         '--max-length',
         type=int,
-        default=2048,
+        default=32768,
         help=('the maximum length of each piece of data, any excess will be '
               'truncated.'))
     data_args.add_argument(
         '--pack-max-length',
         type=int,
-        default=2048,
+        default=32768,
         help='the maximum length of each pack of data')
     data_args.add_argument(
         '--max-keep-ckpts',
@@ -210,24 +211,48 @@ def parse_args():
     return args
 
 
-class LazyLLaVADataset(BaseOrigDataset):
-    def __init__(self, data_name, data, tokenizer, image_processor,
-                 pad_image_to_square=False,
-                 patch_size=14, max_length=2048,
+def smart_get_thw(image_size, image_processor):
+    orig_width, orig_height = image_size
+
+    resized_height, resized_width = smart_resize(
+        orig_height,
+        orig_width,
+        factor=image_processor.patch_size * image_processor.merge_size,
+        min_pixels=image_processor.min_pixels,
+        max_pixels=image_processor.max_pixels,
+    )
+    grid_t = 1  # 单图
+    grid_h, grid_w = resized_height // image_processor.patch_size, resized_width // image_processor.patch_size
+    return [grid_t, grid_h, grid_w]
+
+
+class LazyQwenVLDataset(BaseOrigDataset):
+    def __init__(self, data_name, data, model_name,
+                 max_length=32768,
                  group_by_length=False,
                  pack_data=False, pack_data_cache_dir=None):
-        self.img_processor = image_processor
-        self.pad_image_to_square = pad_image_to_square
-        self.chat_template = dict(system='<|im_start|>system\n{system}<|im_end|>\n',
-                                  user='<|im_start|>user\n{user}<|im_end|>\n<|im_start|>assistant\n',
-                                  assistant='{assistant}<|im_end|>')
 
-        _crop_size = image_processor.crop_size
-        img_size = (_crop_size['height'], _crop_size['width'])
-        self.per_img_tokens = (img_size[0] // patch_size) * (img_size[1] // patch_size)
+        _model_cfg = AutoConfig.from_pretrained(model_name)
+        self.image_token_id = _model_cfg.image_token_id  # <|image_pad|>
+        self.vision_start_token_id = _model_cfg.vision_start_token_id  # <vision_start_token_id>
+        self.video_token_id = _model_cfg.video_token_id  # <|video_pad|>
+        self.image_token_str = '<|vision_start|><|image_pad|><|vision_end|>'
+        self.video_token_str = '<|vision_start|><|video_pad|><|vision_end|>'
+        self.chat_template = dict(system='<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n',
+                                  user='<|im_start|>user\n{user}<|im_end|>\n<|im_start|>assistant\n',
+                                  assistant='{assistant}<|im_end|>\n')
+        self.processor = AutoProcessor.from_pretrained(model_name)
+        self.merge_length = self.processor.image_processor.merge_size ** 2
+
+        # default min_pixels 3136=56x56=28x28x2x2=56x56 pix 一张图片会占 4 个 token
+        # default max_pixels 12845056=28x28x128x128=3584x3584 一张图片会占 16384 个 token
+        if 'min_pixels' in data:
+            self.processor.image_processor.min_pixels = data['min_pixels']
+        if 'max_pixels' in data:
+            self.processor.image_processor.max_pixels = data['max_pixels']
 
         super().__init__(data_name, data, self.chat_template,
-                         tokenizer=tokenizer,
+                         tokenizer=self.processor.tokenizer,
                          max_length=max_length,
                          group_by_length=group_by_length,
                          pack_data=pack_data,
@@ -235,29 +260,49 @@ class LazyLLaVADataset(BaseOrigDataset):
 
     def calc_group_len(self):
         group_length = []
-        conv2length_text = {}
         print('Calculating the length of text data...')
+        conv2length = {}
+        # 由于动态分辨率特点，在开启 group_by_length 时候我们需要通过 image_hw 精确计算实际的 image token
+        # 如果采用估算方式会差别较大。因此如果是多模态数据，则一定需要有 hw 属性
+        # TODO: 支持视频
         for data_item in self.raw_data:
+            is_media = False
             if self._is_jsonl:
                 data_item = json.loads(data_item)
-            conversations = '\n'.join(
-                [temp['value'] for temp in data_item['conversations']])
+            if ('image' in data_item and data_item['image'] is not None) or (
+                    'video' in data_item and data_item['video'] is not None):
+                assert 'image_wh' in data_item, 'image must have `hw` attribute when group_by_length is True'
+                is_media = True
+
+            image_size = data_item.get('image_wh', [[0, 0]])
+            if not isinstance(image_size[0], list):
+                image_size = [image_size]
+
+            num_image_tokens = 0
+            for image_size_ in image_size:
+                if image_size_[0] == 0 or image_size_[1] == 0:
+                    pass
+                else:
+                    thw = smart_get_thw(image_size_, self.processor.image_processor)
+                    num_image_tokens_ = thw[0] * thw[1] * thw[2]
+                    num_image_tokens += num_image_tokens_
+                    num_image_tokens += 2
+
+            conversations = '\n'.join([temp['value'] for temp in data_item['conversations']])
             str_length = len(conversations)
-            if str_length not in conv2length_text:
+            if str_length not in conv2length:
                 token_length = self.tokenizer(
-                    conversations,
-                    return_tensors='pt',
-                    padding=False,
-                    truncation=False,
+                    conversations, return_tensors='pt', padding=False, truncation=False,
                 ).input_ids.size(1)
-                conv2length_text[str_length] = token_length
+                token_length += num_image_tokens
+                conv2length[str_length] = token_length
             else:
-                token_length = conv2length_text[str_length]
-            if 'image' in data_item and data_item['image'] is not None:
-                token_length += self.per_img_tokens
+                token_length = conv2length[str_length]
+
+            if is_media:
+                group_length.append(token_length)
             else:
-                token_length = -token_length
-            group_length.append(token_length)
+                group_length.append(-token_length)
         print('Finished calculating the length of text data...')
         return group_length
 
@@ -270,15 +315,39 @@ class LazyLLaVADataset(BaseOrigDataset):
             else:
                 num_tokens = self.multi_modal_get_item(data_item, pack_data=True)
         elif 'video' in data_item and data_item['video'] is not None and data_item['video'] != '':
-            raise NotImplementedError
+            num_tokens = self.video_get_item(data_item, pack_data=True)
         else:
             num_tokens = self.pure_text_get_item(data_item, pack_data=True)
         return {'num_tokens': num_tokens}
 
     def multi_modal_get_item(self, data_item, pack_data=False):
+        # Ensure the first conversation contains an image placeholder
+        if '<image>\n' in data_item['conversations'][0]['value']:
+            data_item['conversations'][0]['value'] = data_item['conversations'][0]['value'].replace('<image>\n', '')
+
+        if '\n<image>' in data_item['conversations'][0]['value']:
+            data_item['conversations'][0]['value'] = data_item['conversations'][0]['value'].replace('\n<image>', '')
+
+        if '<image>' in data_item['conversations'][0]['value']:
+            data_item['conversations'][0]['value'] = data_item['conversations'][0]['value'].replace('<image>', '')
+
+        if '<image>' not in data_item['conversations'][0]['value']:
+            data_item['conversations'][0]['value'] = '<image>' + data_item['conversations'][0]['value']
+
         if pack_data:
-            ret = self.process_text(data_item['conversations'], media_type='image')
-            return len(ret['input_ids']) + self.per_img_tokens - 1
+            # 只需要 num_tokens 即可，其余不需要
+            assert 'image_wh' in data_item, 'image must have `hw` attribute when group_by_length is True'
+            image_size = data_item.get('image_wh', [[0, 0]])
+            if not isinstance(image_size[0], list):
+                image_size = [image_size]
+
+            media_grid_thw = []
+            for size in image_size:
+                media_grid_thw.append(smart_get_thw(size, self.processor.image_processor))
+            media_grid_thw = torch.tensor(media_grid_thw, dtype=torch.int).reshape(-1, 3)
+            sum_media_grid_thw = media_grid_thw.prod(dim=1) / self.merge_length
+            ret = self.process_text(data_item['conversations'], media_type='image', image_grids=sum_media_grid_thw)
+            return len(ret['input_ids'])
 
         image_path = data_item['image']
         if isinstance(image_path, list):
@@ -287,40 +356,142 @@ class LazyLLaVADataset(BaseOrigDataset):
         image_path = os.path.join(self.root, image_path)
         image = Image.open(image_path).convert('RGB')
         image = _apply_exif_orientation(image)
-        if self.pad_image_to_square:
-            image = expand2square(
-                image,
-                tuple(
-                    int(x * 255) for x in self.img_processor.image_mean))
+        media_inputs = self.processor.image_processor(images=image, videos=None, return_tensors='pt')
+        media_grid_thw = media_inputs['image_grid_thw']
 
-        outputs = self.img_processor(image, return_tensors='pt')
-        pixel_values = outputs['pixel_values']
-        ret = self.process_text(data_item['conversations'], media_type='image')
-        data = {
+        sum_media_grid_thw = media_grid_thw.prod(dim=1) / self.merge_length
+        ret = self.process_text(data_item['conversations'], media_type='image', image_grids=sum_media_grid_thw)
+        position_id = self.calc_position_id(ret['input_ids'], media_grid_thw)
+
+        out_data = {
             'input_ids': ret['input_ids'],
             'labels': ret['labels'],
-            'pixel_values': pixel_values,
-            'num_tokens': [len(ret['input_ids']) + self.per_img_tokens - 1],
-            'num_img_tokens': [self.per_img_tokens],
+            'position_id': position_id,  # (3,n)
+            'pixel_values': media_inputs['pixel_values'],
+            'image_grid_thw': media_grid_thw,
+            'num_tokens': [len(ret['input_ids'])],
+            'num_img_tokens': [sum_media_grid_thw[0] + 2]
         }
+        return out_data
 
-        return data
+    def multi_modal_multi_image_get_item(self, data_item, pack_data=False):
+        image_path = data_item['image']
+        if '<image>' not in data_item['conversations'][0]['value']:
+            data_item['conversations'][0]['value'] = '<image>' * len(image_path) + data_item['conversations'][0][
+                'value']
+
+        assert len(image_path) == data_item['conversations'][0]['value'].count('<image>'), \
+            f'Image number not match: {image_path} vs {data_item["conversations"][0]["value"]}'
+
+        if pack_data:
+            # 只需要 num_tokens 即可，其余不需要
+            assert 'image_wh' in data_item, 'image must have `hw` attribute when group_by_length is True'
+            image_size = data_item.get('image_wh', [[0, 0]])
+            if not isinstance(image_size[0], list):
+                image_size = [image_size]
+
+            media_grid_thw = []
+            for size in image_size:
+                media_grid_thw.append(smart_get_thw(size, self.processor.image_processor))
+            media_grid_thw = torch.tensor(media_grid_thw, dtype=torch.int).reshape(-1, 3)
+            sum_media_grid_thw = media_grid_thw.prod(dim=1) / self.merge_length
+            ret = self.process_text(data_item['conversations'], media_type='image', image_grids=sum_media_grid_thw)
+            return len(ret['input_ids'])
+
+        all_image = []
+        for image_path_ in image_path:
+            image_path_ = os.path.join(self.root, image_path_)
+            image = Image.open(image_path_).convert('RGB')
+            image = _apply_exif_orientation(image)
+            all_image.append(image)
+        media_inputs = self.processor.image_processor(images=all_image, videos=None, return_tensors='pt')
+        media_grid_thw = media_inputs['image_grid_thw']
+        sum_media_grid_thw = media_grid_thw.prod(dim=1) / self.merge_length
+        ret = self.process_text(data_item['conversations'], media_type='image', image_grids=sum_media_grid_thw)
+        position_id = self.calc_position_id(ret['input_ids'], media_grid_thw)
+
+        num_img_tokens = sum(sum_media_grid_thw[i].item() + 2 for i in range(len(all_image)))
+        out_data = {
+            'input_ids': ret['input_ids'],
+            'labels': ret['labels'],
+            'position_id': position_id,  # (3,n)
+            'pixel_values': media_inputs['pixel_values'],
+            'image_grid_thw': media_grid_thw,
+            'num_tokens': [len(ret['input_ids'])],
+            'num_img_tokens': [num_img_tokens]
+        }
+        return out_data
+
+    def video_get_item(self, data_item, pack_data=False):
+        raise NotImplementedError
 
     def pure_text_get_item(self, data_item, pack_data=False):
+        image = Image.new('RGB', (224, 224), (255, 255, 255))
+        media_inputs = self.processor.image_processor(images=image, videos=None, return_tensors='pt')
+        media_grid_thw = media_inputs['image_grid_thw']
+
         ret = self.process_text(data_item['conversations'], media_type='text')
+
         if pack_data:
             return len(ret['input_ids'])
 
-        data = {
+        out_data = {
             'input_ids': ret['input_ids'],
             'labels': ret['labels'],
+            'position_id': torch.arange(len(ret['input_ids']))[None].expand(3, -1),  # (3,n)
+            'pixel_values': media_inputs['pixel_values'],
+            'image_grid_thw': media_grid_thw,
             'num_tokens': [len(ret['input_ids'])],
-            'num_img_tokens': [0],
+            'num_img_tokens': [0]
         }
-        return data
+        return out_data
 
     def _process_media_format_first_round(self, input_, media_type, image_grids):
+        # 图片占位符只能在第一轮对话中出现
+        if media_type == 'image':
+            assert '<image>' in input_, f'Image placeholder not found in the first conversation: {input_}'
+            index = 0
+            while '<image>' in input_:
+                input_ = input_.replace("<image>", self.image_token_str, 1)
+                input_ = input_.replace(
+                    "<|image_pad|>", "<|placeholder|>" * image_grids[index], 1
+                )
+                index += 1
+            input_ = input_.replace("<|placeholder|>", "<|image_pad|>")
+        elif media_type == 'video':
+            raise NotImplementedError
         return input_
+
+    def calc_position_id(self, input_ids, media_grid_thw):
+        # TODO: check video
+        input_ids_ = torch.tensor(input_ids, dtype=torch.long)
+        vision_start_indices = torch.argwhere(input_ids_ == self.vision_start_token_id).squeeze(1)
+        vision_tokens = input_ids_[vision_start_indices + 1]
+        image_nums = (vision_tokens == self.image_token_id).sum()
+        st = 0
+        llm_pos_ids_list: list = []
+        for i in range(image_nums):
+            thw = media_grid_thw[i]
+            ed = input_ids.index(self.image_token_id, st)
+            text_len = ed - st
+            st_idx = llm_pos_ids_list[-1].max() + 1 if len(llm_pos_ids_list) > 0 else 0
+            llm_pos_ids_list.append(torch.arange(text_len).view(1, -1).expand(3, -1) + st_idx)
+
+            t, h, w = thw
+            h = h // self.processor.image_processor.merge_size
+            w = w // self.processor.image_processor.merge_size
+            t_index = torch.arange(t).view(-1, 1).expand(-1, h * w).flatten()
+            h_index = torch.arange(h).view(1, -1, 1).expand(t, -1, w).flatten()
+            w_index = torch.arange(w).view(1, 1, -1).expand(t, h, -1).flatten()
+            llm_pos_ids_list.append(torch.stack([t_index, h_index, w_index]) + text_len + st_idx)
+            st = ed + t * h * w
+
+        if st < len(input_ids):
+            st_idx = llm_pos_ids_list[-1].max() + 1 if len(llm_pos_ids_list) > 0 else 0
+            text_len = len(input_ids) - st
+            llm_pos_ids_list.append(torch.arange(text_len).view(1, -1).expand(3, -1) + st_idx)
+        position_ids = torch.cat(llm_pos_ids_list, dim=1).reshape(3, -1)
+        return position_ids
 
     def __getitem__(self, i):
         i = i % len(self.raw_data)
@@ -335,7 +506,7 @@ class LazyLLaVADataset(BaseOrigDataset):
                     else:
                         ret = self.multi_modal_get_item(data_item)
                 elif 'video' in data_item and data_item['video'] is not None and data_item['video'] != '':
-                    raise NotImplementedError
+                    ret = self.video_get_item(data_item)
                 else:
                     ret = self.pure_text_get_item(data_item)
                 break
@@ -359,14 +530,17 @@ def packing_collate(features, pack_batch=True, pad_id=0):
     pixel_values = []
     num_tokens = []
     num_img_tokens = []
+    image_grid_thws = []
+    position_ids = []
 
     for data in features:
         input_ids.append(torch.LongTensor(data['input_ids']))
         labels.append(torch.LongTensor(data['labels']))
         num_tokens.extend(data['num_tokens'])
         num_img_tokens.extend(data['num_img_tokens'])
-        if 'pixel_values' in data:
-            pixel_values.append(data['pixel_values'])
+        pixel_values.append(data['pixel_values'])
+        image_grid_thws.append(data['image_grid_thw'])
+        position_ids.append(data['position_id'])
 
     attention_mask = [ids.ne(pad_id) for ids in input_ids]
     num_tokens = torch.IntTensor(num_tokens)
@@ -377,26 +551,26 @@ def packing_collate(features, pack_batch=True, pad_id=0):
         input_ids = torch.cat(input_ids, dim=0).unsqueeze(0)
         labels = torch.cat(labels, dim=0).unsqueeze(0)
         attention_mask = torch.cat(attention_mask, dim=0).unsqueeze(0)
-        if len(pixel_values) > 0:
-            pixel_values = torch.cat(pixel_values, dim=0)
-        else:
-            pixel_values = None
+        image_grid_thws = torch.cat(image_grid_thws, dim=0)
+        pixel_values = torch.cat(pixel_values, dim=0)
+        position_ids = torch.cat(position_ids, dim=1).unsqueeze(1)  # (3,1,n)
     elif len(features) > 1 and not pack_batch:
         raise NotImplementedError
     else:
         input_ids = torch.stack(input_ids)
         labels = torch.stack(labels)
         attention_mask = torch.stack(attention_mask)
-        if len(pixel_values) > 0:
-            pixel_values = torch.cat(pixel_values, dim=0)
-        else:
-            pixel_values = None
+        image_grid_thws = torch.stack(image_grid_thws)
+        pixel_values = torch.cat(pixel_values, dim=0)
+        position_ids = torch.stack(position_ids, dim=1)  # (3,b,n)
 
     data_dict = {
         'input_ids': input_ids,
         'labels': labels,
         'attention_mask': attention_mask.bool(),
         'pixel_values': pixel_values,
+        'position_ids': position_ids,
+        'image_grid_thw': image_grid_thws,
         'num_tokens': num_tokens,
         'num_img_tokens': num_img_tokens,
     }
@@ -404,53 +578,30 @@ def packing_collate(features, pack_batch=True, pad_id=0):
     return data_dict
 
 
-def build_llava_model(args, config, world_size, dtype=torch.float32,
-                      tokenizer=None, device='cpu', resize_emb=False,
-                      is_pretrain=False):
+def build_llava_model(args, dtype=torch.float32, device='cpu'):
     with torch.device(device):
-        _cfg = copy.deepcopy(config)
+        with LoadWoInit():
+            qwenvl = Qwen2VLForConditionalGeneration.from_pretrained(
+                args.model,
+                attn_implementation='flash_attention_2',
+                torch_dtype=dtype)
 
-        if is_pretrain:
-            llava = LlavaForConditionalGeneration(_cfg)
-            if device != 'meta':
-                del llava.language_model
-                del llava.vision_tower
-                with LoadWoInit():
-                    llm = AutoModelForCausalLM.from_pretrained(
-                        args.llm, config=_cfg.text_config)
-                    vit = CLIPVisionModel.from_pretrained(
-                        args.vit, config=_cfg.vision_config)
-                llava.language_model = llm
-                llava.vision_tower = vit
-        else:
-            with LoadWoInit():
-                llava = LlavaForConditionalGeneration.from_pretrained(
-                    args.llava, config=_cfg)
-
-        llava.to(dtype)
-
-        if resize_emb:
-            ori_emb_shape = llava.get_input_embeddings().weight.shape
-            # TODO: transformers=4.46.0 会报错，暂时不支持
-            llava.resize_token_embeddings(len(tokenizer))
-            new_emb_shape = llava.get_input_embeddings().weight.shape
-            logger.info('Pad the parameters of `embbedings` and `output` from '
-                        f'shape {ori_emb_shape} to shape {new_emb_shape}')
+        qwenvl.to(dtype)
 
         if args.freeze_llm:
-            llava.language_model.requires_grad_(False)
-            llava.language_model.eval()
+            qwenvl.model.requires_grad_(False)
+            qwenvl.model.eval()
 
         if args.freeze_vit:
-            llava.vision_tower.requires_grad_(False)
-            llava.vision_tower.eval()
+            qwenvl.visual.requires_grad_(False)
+            qwenvl.visual.eval()
 
-    for module in llava.modules():
+    for module in qwenvl.modules():
         for p_name, param in module.named_parameters(recurse=False):
             if param.requires_grad:
                 param_fp32 = torch.nn.Parameter(param.to(dtype=torch.float32))
                 setattr(module, p_name, param_fp32)
-    return llava
+    return qwenvl
 
 
 def build_fsdp_model(rank0_model, meta_model, dp_mesh, tp_mesh, dtype, args):
@@ -474,28 +625,19 @@ def build_fsdp_model(rank0_model, meta_model, dp_mesh, tp_mesh, dtype, args):
     mp_policy = MixedPrecisionPolicy(param_dtype=dtype, reduce_dtype=dtype)
 
     # visual
-    meta_model.vision_tower.apply(param_init_fn)
+    meta_model.visual.apply(param_init_fn)
     fully_shard(
-        meta_model.vision_tower,
+        meta_model.visual,
         mesh=dp_mesh,
         mp_policy=mp_policy,
         reshard_after_forward=reshard_after_forward,
     )
-    for i, layer in enumerate(meta_model.vision_tower.vision_model.encoder.layers):
-        checkpoint(layer)
+    for i, block in enumerate(meta_model.visual.blocks):
+        checkpoint(block)
 
-    # projects
-    meta_model.multi_modal_projector.apply(param_init_fn)
-    fully_shard(
-        meta_model.multi_modal_projector,
-        mesh=dp_mesh,
-        mp_policy=mp_policy,
-        reshard_after_forward=reshard_after_forward)  # False is zero2, True is zero3
-
-    # llm
-    num_layers = len(meta_model.language_model.model.layers)
+    num_layers = len(meta_model.model.layers)
     num_recompute_layers = int(num_layers * 1.0)
-    for i, block in enumerate(meta_model.language_model.model.layers):
+    for i, block in enumerate(meta_model.model.layers):
         block.apply(param_init_fn)
 
         fully_shard(
@@ -506,12 +648,11 @@ def build_fsdp_model(rank0_model, meta_model, dp_mesh, tp_mesh, dtype, args):
         )
 
         if i < num_recompute_layers:
-            # 有 bug，无法处理当模块输入是 **kwargs 的情况，暂时只能 dispatch 这个模块的 forward
             checkpoint(block)
 
-    meta_model.language_model.model.tok_embeddings.apply(param_init_fn)
-    meta_model.language_model.model.norm.apply(param_init_fn)
-    meta_model.language_model.output.apply(param_init_fn)
+    meta_model.model.embed_tokens.apply(param_init_fn)
+    meta_model.model.norm.apply(param_init_fn)
+    meta_model.lm_head.apply(param_init_fn)
 
     model = fully_shard(
         meta_model,
@@ -524,12 +665,12 @@ def build_fsdp_model(rank0_model, meta_model, dp_mesh, tp_mesh, dtype, args):
 
 def llava_train(args):
     if args.liger:
-        from xtuner._lite.modelings import apply_liger_kernel_to_llava_clip_internlm2
+        from xtuner._lite.modelings import apply_liger_kernel_to_qwen2_vl
         try:
             from liger_kernel.transformers.geglu import LigerGEGLUMLP
         except ImportError:
             raise ImportError('Please install liger_kernel to use liger.')
-        apply_liger_kernel_to_llava_clip_internlm2()
+        apply_liger_kernel_to_qwen2_vl()
 
     setup_parallel(tp_size=args.tp_size, sp_size=args.sp_size)
     set_random_seed(args.seed)
@@ -543,72 +684,21 @@ def llava_train(args):
     dp_size = dp_mesh.size()
     tp_size = tp_mesh.size()
     sp_size = sp_mesh.size()
-    world_size = world_mesh.size()
 
     rank = world_mesh.get_rank()
 
     check_args(args)
     set_logger_envs(args)
 
-    if args.llm is not None:
-        is_pretrain = True
-        pad_image_to_square = False
-        assert args.vit, 'Please specify the `vit` model.'
-        logger.info(f'============ Pretraining mode ============')
-    else:
-        is_pretrain = False
-        pad_image_to_square = True
-        assert args.llava, 'Please specify the `llava` model.'
-        logger.info(f'============ SFT mode ============')
-
-    if args.tokenizer is None:
-        if is_pretrain:
-            args.tokenizer = args.llm
-        else:
-            args.tokenizer = args.llava
-    tokenizer = AutoTokenizer.from_pretrained(
-        args.tokenizer,
-        trust_remote_code=True,
-        padding_side='right')
-
-    # If you directly use the pre-trained tokenizer, you may encounter
-    # a pickle error of InternLM2TokenizerFast, but the reason is currently unclear.
-    # Therefore, we need to append the tokenizer again.
-    img_token = '<image>'
-    tokenizer.add_tokens([img_token], special_tokens=True)
-    img_token_id = tokenizer.convert_tokens_to_ids([img_token])[0]
-    logger.info(f'[Tokenizer] Added a new token `{img_token}`, '
-                f'token id is {img_token_id}, the new vocab size is '
-                f'{len(tokenizer)}')
-
-    register_remote_code()
-    if is_pretrain:
-        _text_config = AutoConfig.from_pretrained(args.llm)
-        _vision_config = AutoConfig.from_pretrained(args.vit).vision_config
-        llava_config = LlavaConfig(
-            _vision_config, _text_config,
-            image_token_index=img_token_id,
-            pad_token_id=0)
-        _img_processor = CLIPImageProcessor.from_pretrained(args.vit)
-        processor = LlavaProcessor(_img_processor, tokenizer)
-    else:
-        llava_config = AutoConfig.from_pretrained(args.llava)
-        if hasattr(llava_config.text_config, 'auto_map'):
-            delattr(llava_config.text_config, 'auto_map')
-        processor = AutoProcessor.from_pretrained(
-            args.llava, trust_remote_code=True)
-
     with profile_time_and_memory('[Dataset & Dataloader]'):
         ds_collections = json.loads(open(args.datasets).read())
         _datasets = []
         for name, _data in ds_collections.items():
-            _dataset = LazyLLaVADataset(name, _data, tokenizer, processor.image_processor,
-                                        patch_size=llava_config.vision_config.patch_size,
-                                        pad_image_to_square=pad_image_to_square,
-                                        max_length=args.max_length,
-                                        group_by_length=args.group_by_length,
-                                        pack_data=args.dset_pack,
-                                        pack_data_cache_dir=args.dset_cache_dir)
+            _dataset = LazyQwenVLDataset(name, _data, args.model,
+                                         max_length=args.max_length,
+                                         group_by_length=args.group_by_length,
+                                         pack_data=args.dset_pack,
+                                         pack_data_cache_dir=args.dset_cache_dir)
             if dist.get_rank() == 0:
                 logger.info(f'[Dataset] (Original) {name}: {len(_dataset)} samples.')
             _datasets.append(_dataset)
@@ -619,16 +709,7 @@ def llava_train(args):
     args.dtype = 'bf16'
     dtype = torch.bfloat16
     with profile_time_and_memory('[Model]'):
-        need_resize_emb = False
-        _llm_vocab_size = llava_config.text_config.vocab_size
-        if _llm_vocab_size < len(tokenizer):
-            need_resize_emb = True
-
-        llava_config.text_config.attn_implementation = 'flash_attention_2'
-        llava_config.text_config.use_cache = False
-        meta_model = build_llava_model(args, llava_config, world_size, dtype=dtype,
-                                       tokenizer=tokenizer, device='meta',
-                                       resize_emb=need_resize_emb, is_pretrain=is_pretrain)
+        meta_model = build_llava_model(args, dtype=dtype, device='meta')
         dispatch_modules(meta_model)
         if dist.get_rank() == 0:
             logger.info(meta_model)
@@ -639,9 +720,7 @@ def llava_train(args):
         if rank == 0:
             # 用于初始化 meta_model 权重和后续保存权重
             logger.info(f'=====[Build CPU Model]=======')
-            rank0_model = build_llava_model(args, llava_config, world_size, dtype=dtype,
-                                            tokenizer=tokenizer, device='cpu',
-                                            resize_emb=need_resize_emb, is_pretrain=is_pretrain)
+            rank0_model = build_llava_model(args, dtype=dtype, device='cpu')
         else:
             rank0_model = None
         dist.monitored_barrier(group=group, timeout=timeout)
@@ -660,6 +739,10 @@ def llava_train(args):
 
     optimizer = AdamW(
         requried_grad_params, lr=args.lr, weight_decay=args.wd, fused=True)
+
+    max_memory = get_torch_device_module().max_memory_allocated()
+    logger.info('[Train] Begin Train Loop. The current GPU memory is '
+                f'{(max_memory / 1024 ** 3):.1f}GB')
 
     global_batch_size = args.global_batch_size
     mirco_batch_size = args.mirco_batch_size
@@ -751,7 +834,7 @@ def llava_train(args):
             num_tokens = data.pop('num_tokens')
             num_img_tokens = data.pop('num_img_tokens')
 
-            packed_ctx = packed_sequence(num_tokens, enable=True)
+            packed_ctx = packed_sequence(num_tokens, enable=True, skip_position_ids=True)
 
             with packed_ctx:
                 outputs = fsdp_model(**data, use_cache=False)

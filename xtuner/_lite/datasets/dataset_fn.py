@@ -334,6 +334,9 @@ class BaseOrigDataset(Dataset):
             assert pack_data_cache_dir is not None, 'pack_data_cache_dir must be provided when pack_data is True'
             self.num_tokens = self.calc_packing_info()
 
+    def __len__(self):
+        return len(self.raw_data)
+
     def calc_group_len(self):
         raise NotImplementedError
 
@@ -472,7 +475,7 @@ class BaseOrigDataset(Dataset):
 
 def build_dataset(args, datasets):
     assert len(datasets) > 0, 'No dataset found.'
-    if args.dset_pack_level:
+    if args.dset_pack:
         train_dataset = SoftPackDataset(datasets,
                                         pack_max_length=args.pack_max_length,
                                         concat_before_pack=args.concat_before_pack)
@@ -486,7 +489,7 @@ def build_dataset(args, datasets):
 def build_train_dataloader(args, train_dataset, collate_fn):
     dp_mesh = get_dp_mesh()
     if args.group_by_length:
-        if args.dset_pack_level:
+        if args.dset_pack:
             length_property = 'max_length_per_pack'
         else:
             length_property = 'length'
@@ -496,7 +499,7 @@ def build_train_dataloader(args, train_dataset, collate_fn):
                                        length_property=length_property)
     elif args.group_by_modality_length:
         # 当开启 soft packing 时，暂时不支持模态区分
-        if args.dset_pack_level:
+        if args.dset_pack:
             raise NotImplementedError
         else:
             sampler = LengthGroupedSampler(train_dataset, dp_mesh,

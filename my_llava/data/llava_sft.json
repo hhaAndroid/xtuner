@@ -1,6 +1,6 @@
 {
     "llava_sft": {
         "media_root": "/mnt/hwfile/xtuner/linzhihao/dataset/llava_data/llava_images",
-        "annotations": "/mnt/hwfile/xtuner/linzhihao/dataset/llava_data/LLaVA-Instruct-150K/llava_v1_5_mix665k.json"
+        "annotation": "/mnt/hwfile/xtuner/linzhihao/dataset/llava_data/LLaVA-Instruct-150K/llava_v1_5_mix665k.json"
     }
 }
