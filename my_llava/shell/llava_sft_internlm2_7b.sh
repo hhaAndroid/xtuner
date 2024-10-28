@@ -21,7 +21,6 @@ fi
 SCRIPT_NAME=$(basename "$0")
 cp "$0" "${OUTPUT_DIR}/${SCRIPT_NAME}"
 
-# 如果不是用 soft packing，则不需要数据缓存
 HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 srun -p ${PARTITION} --time 1-00:00:00 \
   --gres=gpu:${GPUS_PER_NODE} \
   --nodes=${NODES} \
@@ -31,10 +30,9 @@ HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 srun -p ${PARTITION} --time 1-00:00
   --kill-on-bad-exit=1 \
   --quotatype=${QUOTA_TYPE} \
   ${SRUN_ARGS} \
-  python -u llava_train.py \
+  python -u unify_llava_train.py \
   --llava work_dirs/llava_pretrain_internlm2_7b/20240724201849/hf-2180 \
   --tokenizer /mnt/hwfile/xtuner/huanghaian/model/internlm2-chat-7b \
-  --chat-template 'internlm2' \
   --freeze-vit \
   --datasets data/llava_sft.json \
   --group-by-modality-length \
