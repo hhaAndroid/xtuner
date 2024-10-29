@@ -296,6 +296,54 @@ def llama3_varlen_attention_sp_ulysses_ring(
     return output
 
 
+def attention_sp_ulysses_ring(
+        query: Tensor,
+        key: Tensor,
+        value: Tensor,
+        ulysses_pg,
+        ring_pg,
+        ring_impl_type: str = "basic",
+):
+    scatter_idx = 2
+    gather_idx = 1
+    ulysses_world_size = dist.get_world_size(ulysses_pg)
+    if ulysses_world_size > 1:
+        query = SeqAllToAll4D.apply(
+            ulysses_pg, query, scatter_idx, gather_idx
+        )
+        key = SeqAllToAll4D.apply(
+            ulysses_pg, key, scatter_idx, gather_idx
+        )
+        value = SeqAllToAll4D.apply(
+            ulysses_pg, value, scatter_idx, gather_idx
+        )
+
+    ring_attn_fn = RING_IMPL_DICT[ring_impl_type]
+    out = ring_attn_fn(
+        query,
+        key,
+        value,
+        causal=True,
+        group=ring_pg,
+    )
+
+    if type(out) == tuple:
+        context_layer, _, _ = out
+    else:
+        context_layer = out
+
+    if ulysses_world_size > 1:
+        # (bs, seq_len, head_cnt/N, head_size) -> (bs, seq_len/N, head_cnt, head_size)
+        # scatter 1, gather 2
+        output = SeqAllToAll4D.apply(
+            ulysses_pg, context_layer, gather_idx, scatter_idx
+        )
+    else:
+        output = context_layer
+
+    return output
+
+
 class LongContextVarLenAttentionForLlaMa3(torch.nn.Module):
     """Initialization.
 

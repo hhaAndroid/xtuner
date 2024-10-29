@@ -9,7 +9,7 @@ from transformers.cache_utils import StaticCache
 
 from ._attention import SUPPORT_FLASH2, flash_attn_wo_mask, varlen_flash_attn
 import torch.nn.functional as F
-from xtuner._lite.yunchang import llama3_varlen_attention_sp_ulysses_ring
+from xtuner._lite.yunchang import llama3_varlen_attention_sp_ulysses_ring, attention_sp_ulysses_ring
 from xtuner._lite.parallel.setup import get_ring_group, get_ring_world_size, get_sp_world_size, get_ulysess_group
 
 
@@ -25,7 +25,7 @@ class InternLM2RotaryEmbedding(torch.nn.Module):
         self.max_position_embeddings = max_position_embeddings
         self.base = base
         self.inv_freq = 1.0 / (
-            base**(torch.arange(0, dim, 2).float().to(device) / dim))
+                base ** (torch.arange(0, dim, 2).float().to(device) / dim))
 
         # Build here to make `torch.jit.trace` work.
         self.max_seq_len_cached = max_position_embeddings
@@ -73,6 +73,7 @@ def apply_rotary_pos_emb(q, k, cos, sin, position_ids=None, unsqueeze_dim=1):
     k_embed = (k * cos) + (rotate_half(k) * sin)
     return q_embed, k_embed
 
+
 def apply_rotary_pos_emb_mla(q, k, cos, sin, position_ids=None, unsqueeze_dim=1):  # pylint: disable=unused-argument
     """Applies Rotary Position Embedding to the query and key tensors.
 
@@ -102,6 +103,7 @@ def apply_rotary_pos_emb_mla(q, k, cos, sin, position_ids=None, unsqueeze_dim=1)
     k_embed = (k_fp32 * cos) + (rotate_half(k_fp32) * sin)
     return q_embed.to(dtype=orig_dtype), k_embed.to(dtype=orig_dtype)
 
+
 def repeat_kv(hidden_states: torch.Tensor, n_rep: int) -> torch.Tensor:
     """This is the equivalent of torch.repeat_interleave(x, dim=1,
     repeats=n_rep).
@@ -113,9 +115,9 @@ def repeat_kv(hidden_states: torch.Tensor, n_rep: int) -> torch.Tensor:
     if n_rep == 1:
         return hidden_states
     hidden_states = hidden_states[:, :,
-                                  None, :, :].expand(batch,
-                                                     num_key_value_heads,
-                                                     n_rep, slen, head_dim)
+                    None, :, :].expand(batch,
+                                       num_key_value_heads,
+                                       n_rep, slen, head_dim)
     return hidden_states.reshape(batch, num_key_value_heads * n_rep, slen,
                                  head_dim)
 
@@ -127,24 +129,24 @@ def repeat_kv_bshd(hidden_states: torch.Tensor, n_rep: int) -> torch.Tensor:
     if n_rep == 1:
         return hidden_states
     hidden_states = hidden_states[:, :, :,
-                                  None, :].expand(batch, slen,
-                                                  num_key_value_heads, n_rep,
-                                                  head_dim)
+                    None, :].expand(batch, slen,
+                                    num_key_value_heads, n_rep,
+                                    head_dim)
     return hidden_states.reshape(batch, slen, num_key_value_heads * n_rep,
                                  head_dim)
 
 
 def _internlm2_varlen_attn_forward(
-    self,
-    hidden_states: torch.Tensor,
-    attention_mask: Optional[torch.Tensor] = None,
-    position_ids: Optional[torch.LongTensor] = None,
-    past_key_value: Optional[Tuple[torch.Tensor]] = None,
-    output_attentions: bool = False,
-    use_cache: bool = False,
-    cache_position: Optional[torch.LongTensor] = None,
+        self,
+        hidden_states: torch.Tensor,
+        attention_mask: Optional[torch.Tensor] = None,
+        position_ids: Optional[torch.LongTensor] = None,
+        past_key_value: Optional[Tuple[torch.Tensor]] = None,
+        output_attentions: bool = False,
+        use_cache: bool = False,
+        cache_position: Optional[torch.LongTensor] = None,
 ) -> Tuple[torch.Tensor, Optional[torch.Tensor],
-           Optional[Tuple[torch.Tensor]]]:
+Optional[Tuple[torch.Tensor]]]:
     # Modified from https://huggingface.co/internlm/internlm-7b/blob/939a68c0dc1bd5f35b63c87d44af05ce33379061/modeling_internlm.py#L161  # noqa:E501
     if isinstance(past_key_value, StaticCache):
         raise ValueError(
@@ -230,29 +232,71 @@ def _internlm2_varlen_attn_forward(
     assert SUPPORT_FLASH2
     cumulative_lengths = attn_context.get_info('cumulative_lengths')
     if cumulative_lengths is not None and SUPPORT_FLASH2 and bsz == 1:
+        reset_mask = os.environ.get('RESET_MASK')
+        force_use_ring = os.environ.get('FORCE_USE_RING')
+        ring_impl_type = os.environ.get('RING_IMPL_TYPE')
         # 仅仅用于测试该分支下 sp ulyess 是否正确
         force_to_new_sp = os.environ.get('FORCE_TO_NEW_SP')
-        if get_ring_world_size() > 1 or force_to_new_sp:
-            # 只有开启了 ring 情况下才运行，如果只是普通 sp，则依然运行原先逻辑
-            assert cumulative_lengths[-1] % get_sp_world_size() == 0, f'==={cumulative_lengths[-1]}===='
-            q_unpad, k_unpad, v_unpad = query_states.flatten(0, 1), key_states.flatten(
-                0, 1), value_states.flatten(0, 1)
-            attn_output = llama3_varlen_attention_sp_ulysses_ring(
-                q_unpad,
-                k_unpad,
-                v_unpad,
-                cumulative_lengths,
-                ulysses_pg=get_ulysess_group(),
-                ring_pg=get_ring_group(),
-                causal=True,
-                # 如果想更省显存，可以设置为 1。-1 表示不切分
-                heads_k_stride=-1
-            )
-            attn_output = attn_output.unsqueeze(0)
+        if reset_mask:
+            if get_ring_world_size() > 1 or force_to_new_sp:
+                if force_use_ring:
+                    attn_output = attention_sp_ulysses_ring(query_states,
+                                                            key_states,
+                                                            value_states,
+                                                            ulysses_pg=get_ulysess_group(),
+                                                            ring_pg=get_ring_group(),
+                                                            ring_impl_type=ring_impl_type)
+                else:
+                    # TODO: 暂时还是调用 llama3_varlen_attention_sp_ulysses_ring
+                    # TODO: 最合理的应该是 llama3_attention_sp_ulysses_ring
+                    # 只有开启了 ring 情况下才运行，如果只是普通 sp，则依然运行原先逻辑
+                    assert cumulative_lengths[-1] % get_sp_world_size() == 0, f'==={cumulative_lengths[-1]}===='
+                    q_unpad, k_unpad, v_unpad = query_states.flatten(0, 1), key_states.flatten(
+                        0, 1), value_states.flatten(0, 1)
+                    attn_output = llama3_varlen_attention_sp_ulysses_ring(
+                        q_unpad,
+                        k_unpad,
+                        v_unpad,
+                        cumulative_lengths,
+                        ulysses_pg=get_ulysess_group(),
+                        ring_pg=get_ring_group(),
+                        causal=True,
+                        # 如果想更省显存，可以设置为 1。-1 表示不切分
+                        heads_k_stride=-1
+                    )
+                    attn_output = attn_output.unsqueeze(0)
+            else:
+                attn_output = flash_attn_wo_mask(
+                    query_states,
+                    key_states,
+                    value_states,
+                    causal=True,
+                    training=self.training)
         else:
-            max_seqlen = attn_context.get_info('max_seqlen')
-            attn_output = varlen_flash_attn(query_states, key_states, value_states,
-                                            cumulative_lengths, max_seqlen)
+            if get_ring_world_size() > 1 or force_to_new_sp:
+                # 只有开启了 ring 情况下才运行，如果只是普通 sp，则依然运行原先逻辑
+                assert cumulative_lengths[-1] % get_sp_world_size() == 0, f'==={cumulative_lengths[-1]}===='
+                q_unpad, k_unpad, v_unpad = query_states.flatten(0, 1), key_states.flatten(
+                    0, 1), value_states.flatten(0, 1)
+                if force_use_ring:
+                    raise NotImplementedError
+                else:
+                    attn_output = llama3_varlen_attention_sp_ulysses_ring(
+                        q_unpad,
+                        k_unpad,
+                        v_unpad,
+                        cumulative_lengths,
+                        ulysses_pg=get_ulysess_group(),
+                        ring_pg=get_ring_group(),
+                        causal=True,
+                        # 如果想更省显存，可以设置为 1。-1 表示不切分
+                        heads_k_stride=-1
+                    )
+                    attn_output = attn_output.unsqueeze(0)
+            else:
+                max_seqlen = attn_context.get_info('max_seqlen')
+                attn_output = varlen_flash_attn(query_states, key_states, value_states,
+                                                cumulative_lengths, max_seqlen)
     else:
         attn_output = flash_attn_wo_mask(
             query_states,
@@ -272,33 +316,32 @@ def _internlm2_varlen_attn_forward(
 
 
 def internlm2_varlen_attn_forward(
-    self,
-    hidden_states: torch.Tensor,
-    attention_mask: Optional[torch.Tensor] = None,
-    position_ids: Optional[torch.LongTensor] = None,
-    past_key_value: Optional[Tuple[torch.Tensor]] = None,
-    output_attentions: bool = False,
-    use_cache: bool = False,
-    cache_position: Optional[torch.LongTensor] = None,
+        self,
+        hidden_states: torch.Tensor,
+        attention_mask: Optional[torch.Tensor] = None,
+        position_ids: Optional[torch.LongTensor] = None,
+        past_key_value: Optional[Tuple[torch.Tensor]] = None,
+        output_attentions: bool = False,
+        use_cache: bool = False,
+        cache_position: Optional[torch.LongTensor] = None,
 ) -> Tuple[torch.Tensor, Optional[torch.Tensor],
-           Optional[Tuple[torch.Tensor]]]:
-
+Optional[Tuple[torch.Tensor]]]:
     return _internlm2_varlen_attn_forward(self, hidden_states, attention_mask,
                                           position_ids, past_key_value,
                                           output_attentions, use_cache)
 
 
 def _internlm2_mla_varlen_attn_forward(
-    self,
-    hidden_states: torch.Tensor,
-    attention_mask: Optional[torch.Tensor] = None,
-    position_ids: Optional[torch.LongTensor] = None,
-    past_key_value: Optional[Tuple[torch.Tensor]] = None,
-    output_attentions: bool = False,
-    use_cache: bool = False,
-    cache_position: Optional[torch.LongTensor] = None,
+        self,
+        hidden_states: torch.Tensor,
+        attention_mask: Optional[torch.Tensor] = None,
+        position_ids: Optional[torch.LongTensor] = None,
+        past_key_value: Optional[Tuple[torch.Tensor]] = None,
+        output_attentions: bool = False,
+        use_cache: bool = False,
+        cache_position: Optional[torch.LongTensor] = None,
 ) -> Tuple[torch.Tensor, Optional[torch.Tensor],
-           Optional[Tuple[torch.Tensor]]]:
+Optional[Tuple[torch.Tensor]]]:
     output_attentions = False
 
     bsz, q_len, _ = hidden_states.size()
@@ -407,17 +450,16 @@ def _internlm2_mla_varlen_attn_forward(
 
 
 def internlm2_mla_varlen_attn_forward(
-    self,
-    hidden_states: torch.Tensor,
-    attention_mask: Optional[torch.Tensor] = None,
-    position_ids: Optional[torch.LongTensor] = None,
-    past_key_value: Optional[Tuple[torch.Tensor]] = None,
-    output_attentions: bool = False,
-    use_cache: bool = False,
-    cache_position: Optional[torch.LongTensor] = None,
+        self,
+        hidden_states: torch.Tensor,
+        attention_mask: Optional[torch.Tensor] = None,
+        position_ids: Optional[torch.LongTensor] = None,
+        past_key_value: Optional[Tuple[torch.Tensor]] = None,
+        output_attentions: bool = False,
+        use_cache: bool = False,
+        cache_position: Optional[torch.LongTensor] = None,
 ) -> Tuple[torch.Tensor, Optional[torch.Tensor],
-           Optional[Tuple[torch.Tensor]]]:
-
+Optional[Tuple[torch.Tensor]]]:
     return _internlm2_mla_varlen_attn_forward(self, hidden_states, attention_mask,
-                                          position_ids, past_key_value,
-                                          output_attentions, use_cache)
+                                              position_ids, past_key_value,
+                                              output_attentions, use_cache)
