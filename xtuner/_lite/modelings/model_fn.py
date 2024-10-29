@@ -131,7 +131,7 @@ def resume(args, fsdp_model, optimizer, warmup_scheduler, cosine_scheduler, star
     return start_step
 
 def save_ckpt(args, step, total_steps, fsdp_model, rank0_model, warmup_scheduler, cosine_scheduler, optimizer,
-              max_keep_ckpts, save_hf_ckpt_names, save_pt_ckpt_names):
+              max_keep_ckpts, save_hf_ckpt_names, save_pt_ckpt_names, tokenizer, processor):
     torch.cuda.empty_cache()
     torch.cuda.reset_peak_memory_stats()
     max_memory = torch.cuda.max_memory_allocated()
@@ -155,7 +155,10 @@ def save_ckpt(args, step, total_steps, fsdp_model, rank0_model, warmup_scheduler
                                         param)
 
         saved_model.save_pretrained(hf_dir)
-
+        if tokenizer is not None:
+            tokenizer.save_pretrained(hf_dir)
+        if processor is not None:
+            processor.save_pretrained(hf_dir)
         del saved_model
 
     dist.barrier()

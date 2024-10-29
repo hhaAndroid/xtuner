@@ -606,7 +606,7 @@ def llava_train(args):
                                         patch_size=llava_config.vision_config.patch_size,
                                         pad_image_to_square=pad_image_to_square,
                                         max_length=args.max_length,
-                                        group_by_length=args.group_by_length,
+                                        group_by_length=args.group_by_length or args.group_by_modality_length,
                                         pack_data=args.dset_pack,
                                         pack_data_cache_dir=args.dset_cache_dir)
             if dist.get_rank() == 0:
@@ -659,7 +659,7 @@ def llava_train(args):
         logger.info(f'[Optimizer] {requried_grad_name}')
 
     optimizer = AdamW(
-        requried_grad_params, lr=args.lr, weight_decay=args.wd, fused=True)
+        requried_grad_params, lr=args.lr, weight_decay=args.wd, fused=False)  # True 会出现 CPU OOM，不清楚为啥
 
     global_batch_size = args.global_batch_size
     mirco_batch_size = args.mirco_batch_size
@@ -787,7 +787,7 @@ def llava_train(args):
 
         if is_interval(step, total_steps, checkpoint_interval):
             save_ckpt(args, step, total_steps, fsdp_model, rank0_model, warmup_scheduler, cosine_scheduler,
-                      optimizer, max_keep_ckpts, save_hf_ckpt_names, save_pt_ckpt_names)
+                      optimizer, max_keep_ckpts, save_hf_ckpt_names, save_pt_ckpt_names, tokenizer, processor)
 
     train_cost_time = time.time() - start_train_t
     m, s = divmod(train_cost_time, 60)
