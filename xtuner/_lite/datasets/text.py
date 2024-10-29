@@ -517,14 +517,14 @@ class TextCollator():
             labels.append(torch.LongTensor(data['labels']))
             num_tokens.extend(data['num_tokens'])
 
-        attention_mask = [torch.ones_like(ids) for ids in input_ids]
+        # attention_mask = [torch.ones_like(ids) for ids in input_ids]
         num_tokens = torch.IntTensor(num_tokens)
 
         if len(instances) > 1 and self.pack_batch:
 
             input_ids = torch.cat(input_ids, dim=0).unsqueeze(0)
             labels = torch.cat(labels, dim=0).unsqueeze(0)
-            attention_mask = torch.cat(attention_mask, dim=0).unsqueeze(0)
+            # attention_mask = torch.cat(attention_mask, dim=0).unsqueeze(0)
 
         elif len(instances) > 1 and not self.pack_batch:
 
@@ -532,18 +532,18 @@ class TextCollator():
                 input_ids, batch_first=True, padding_value=pad_index)
             labels = pad_sequence(
                 labels, batch_first=True, padding_value=IGNORE_INDEX)
-            attention_mask = pad_sequence(
-                attention_mask, batch_first=True, padding_value=0)
+            # attention_mask = pad_sequence(
+            #     attention_mask, batch_first=True, padding_value=0)
         else:
             input_ids = torch.stack(input_ids)
             labels = torch.stack(labels)
-            attention_mask = torch.stack(attention_mask)
+            # attention_mask = torch.stack(attention_mask)
 
         if get_sp_world_size() > 1:
             ori_seq_len = input_ids.shape[1]
             input_ids = pad_for_sequence_parallel(input_ids, pad_index)
             labels = pad_for_sequence_parallel(labels, IGNORE_INDEX)
-            attention_mask = pad_for_sequence_parallel(attention_mask, 0)
+            # attention_mask = pad_for_sequence_parallel(attention_mask, 0)
             pad_seq_len = input_ids.shape[1] - ori_seq_len
             if pad_seq_len > 0:
                 pad_num_token = torch.tensor([pad_seq_len]).int()
@@ -562,7 +562,7 @@ class TextCollator():
             'input_ids': input_ids,
             'labels': labels,
             'num_tokens': num_tokens,
-            'attention_mask': attention_mask.bool()
+            # 'attention_mask': attention_mask.bool()
         }
 
         return data_dict
