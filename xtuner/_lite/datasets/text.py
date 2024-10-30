@@ -499,10 +499,15 @@ class HardPackerForText(SoftPackerForText):
         return packed
 
 
-class TextCollator():
+class TextCollator:
 
-    def __init__(self, pack_batch=False):
+    def __init__(self, pack_batch=False, force_div_ring=False, ring_size=1, max_pack_len=-1):
         self.pack_batch = pack_batch
+
+        if force_div_ring:
+            assert ring_size > 1
+        self.ring_size = ring_size
+        self.max_pack_len = max_pack_len
 
     def __call__(self, instances):
 
