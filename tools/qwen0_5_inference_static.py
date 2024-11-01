@@ -11,9 +11,7 @@ from transformers.cache_utils import StaticCache
 import argparse
 
 
-def single_device(max_new_tokens):
-    model_name = "/mnt/petrelfs/huanghaian/Qwen2.5-0.5B-Instruct"
-
+def single_device(model_name, max_new_tokens):
     config = AutoConfig.from_pretrained(model_name)
     model = Qwen2ForCausalLM.from_pretrained(
         model_name,
@@ -44,11 +42,14 @@ def single_device(max_new_tokens):
                                   dtype=torch.bfloat16,
                                   device='cuda')
     output_ids = []
+
     for i in range(max_new_tokens):
         output = model(input_ids=input_ids, past_key_values=past_key_values, use_cache=True)
         logits = output[0]
         next_token_logits = logits[:, -1, :]
         next_token_id = torch.argmax(next_token_logits, dim=-1)
+        if next_token_id == tokenizer.eos_token_id:
+            break
         input_ids = next_token_id[None]
         output_ids.append(input_ids)
 
@@ -57,7 +58,7 @@ def single_device(max_new_tokens):
     print(response)
 
 
-def multi_device(max_new_tokens):
+def multi_device(model_name, max_new_tokens):
     # 分布式
     dist_launcher = infer_launcher()
     init_dist(dist_launcher)
@@ -66,7 +67,6 @@ def multi_device(max_new_tokens):
     sp_size = dist.get_world_size()
     setup_parallel(sp_size, ring_size=sp_size)
 
-    model_name = "/mnt/petrelfs/huanghaian/Qwen2.5-0.5B-Instruct"
     tokenizer = AutoTokenizer.from_pretrained(model_name)
 
     prompt = "请简要介绍什么是代码。"
@@ -116,6 +116,9 @@ def multi_device(max_new_tokens):
 
         dist.broadcast(input_ids, src=world_size - 1)
 
+        if next_token_id == tokenizer.eos_token_id:
+            break
+
         position_ids += 1
         position_ids = position_ids[:, -1][None]
         dist.broadcast(position_ids, src=world_size - 1)
@@ -137,10 +140,11 @@ def parse_args():
 
 if __name__ == '__main__':
     args = parse_args()
-    max_new_tokens = 512
+    max_new_tokens = 256
+    model_name = "/mnt/petrelfs/huanghaian/Qwen2.5-0.5B-Instruct"
     if args.single:
         # srun -p llm_razor --gres=gpu:1 --time 1:00:00 python a.py
-        single_device(max_new_tokens)
+        single_device(model_name,max_new_tokens)
     else:
         # srun -p llm_razor --gres=gpu:2 --ntasks=2 --ntasks-per-node=2 --cpus-per-task=16 --time 1:00:00 python a.py
-        multi_device(max_new_tokens)
+        multi_device(model_name, max_new_tokens)

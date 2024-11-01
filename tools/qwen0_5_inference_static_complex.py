@@ -95,9 +95,7 @@ class CustomQwen2ForCausalLM(Qwen2ForCausalLM):
         return model_inputs
 
 
-def single_device(max_new_tokens):
-    model_name = "/mnt/petrelfs/huanghaian/Qwen2.5-0.5B-Instruct"
-
+def single_device(model_name,max_new_tokens):
     model = CustomQwen2ForCausalLM.from_pretrained(
         model_name,
         torch_dtype=torch.bfloat16,
@@ -135,7 +133,7 @@ def single_device(max_new_tokens):
     print(response)
 
 
-def multi_device(max_new_tokens):
+def multi_device(model_name, max_new_tokens):
     dist_launcher = infer_launcher()
     init_dist(dist_launcher)
     set_random_seed(42)
@@ -143,7 +141,6 @@ def multi_device(max_new_tokens):
     sp_size = dist.get_world_size()
     setup_parallel(sp_size, ring_size=sp_size)
 
-    model_name = "/mnt/petrelfs/huanghaian/Qwen2.5-0.5B-Instruct"
     tokenizer = AutoTokenizer.from_pretrained(model_name)
 
     prompt = "请简要介绍什么是代码。"
@@ -201,10 +198,11 @@ def parse_args():
 
 if __name__ == '__main__':
     args = parse_args()
-    max_new_tokens = 512
+    max_new_tokens = 256
+    model_name = "/mnt/petrelfs/huanghaian/Qwen2.5-0.5B-Instruct"
     if args.single:
         # srun -p llm_razor --gres=gpu:1 --time 1:00:00 python a.py
-        single_device(max_new_tokens)
+        single_device(model_name,max_new_tokens)
     else:
         # srun -p llm_razor --gres=gpu:2 --ntasks=2 --ntasks-per-node=2 --cpus-per-task=16 --time 1:00:00 python a.py
-        multi_device(max_new_tokens)
+        multi_device(model_name, max_new_tokens)
