@@ -10,7 +10,7 @@ import torch.distributed as dist
 from transformers.cache_utils import StaticCache
 
 
-def single_device():
+def single_device(max_new_tokens):
     model_name = "/mnt/petrelfs/huanghaian/Qwen2.5-0.5B-Instruct"
 
     config = AutoConfig.from_pretrained(model_name)
@@ -37,8 +37,6 @@ def single_device():
     model_inputs = tokenizer([text], return_tensors="pt").to(model.device)
     input_ids = model_inputs.input_ids.to(model.device)
 
-    max_new_tokens = 30
-
     past_key_values = StaticCache(config,
                                   batch_size=1,
                                   max_cache_len=input_ids.shape[1]+max_new_tokens,
@@ -58,7 +56,7 @@ def single_device():
     print(response)
 
 
-def multi_device():
+def multi_device(max_new_tokens):
     # 分布式
     dist_launcher = infer_launcher()
     init_dist(dist_launcher)
@@ -102,7 +100,6 @@ def multi_device():
     world_size = dist.get_world_size(get_sp_group())
     rank = dist.get_rank(get_sp_group())
 
-    max_new_tokens = 30
     past_key_values = StaticCache(config,
                                   batch_size=1,
                                   max_cache_len=input_ids.shape[1]+max_new_tokens,
@@ -131,7 +128,8 @@ def multi_device():
 
 
 if __name__ == '__main__':
+    max_new_tokens = 512
     # srun -p llm_razor --gres=gpu:1 --time 1:00:00 python a.py
-    # single_device()
+    # single_device(max_new_tokens)
     # srun -p llm_razor --gres=gpu:2 --ntasks=2 --ntasks-per-node=2 --cpus-per-task=16 --time 1:00:00 python a.py
-    multi_device()
+    multi_device(max_new_tokens)
