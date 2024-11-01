@@ -8,6 +8,7 @@ from xtuner._lite.parallel.setup import get_sp_group, setup_parallel
 
 import torch.distributed as dist
 from transformers.cache_utils import StaticCache
+import argparse
 
 
 def single_device(max_new_tokens):
@@ -39,7 +40,7 @@ def single_device(max_new_tokens):
 
     past_key_values = StaticCache(config,
                                   batch_size=1,
-                                  max_cache_len=input_ids.shape[1]+max_new_tokens,
+                                  max_cache_len=input_ids.shape[1] + max_new_tokens,
                                   dtype=torch.bfloat16,
                                   device='cuda')
     output_ids = []
@@ -102,7 +103,7 @@ def multi_device(max_new_tokens):
 
     past_key_values = StaticCache(config,
                                   batch_size=1,
-                                  max_cache_len=input_ids.shape[1]+max_new_tokens,
+                                  max_cache_len=input_ids.shape[1] + max_new_tokens,
                                   dtype=torch.bfloat16,
                                   device='cuda')
     output_ids = []
@@ -127,9 +128,19 @@ def multi_device(max_new_tokens):
         print(response)
 
 
+def parse_args():
+    parser = argparse.ArgumentParser(description='Test')
+    parser.add_argument('-s', '--single', action='store_true', help='single device')
+    args = parser.parse_args()
+    return args
+
+
 if __name__ == '__main__':
+    args = parse_args()
     max_new_tokens = 512
-    # srun -p llm_razor --gres=gpu:1 --time 1:00:00 python a.py
-    # single_device(max_new_tokens)
-    # srun -p llm_razor --gres=gpu:2 --ntasks=2 --ntasks-per-node=2 --cpus-per-task=16 --time 1:00:00 python a.py
-    multi_device(max_new_tokens)
+    if args.single:
+        # srun -p llm_razor --gres=gpu:1 --time 1:00:00 python a.py
+        single_device(max_new_tokens)
+    else:
+        # srun -p llm_razor --gres=gpu:2 --ntasks=2 --ntasks-per-node=2 --cpus-per-task=16 --time 1:00:00 python a.py
+        multi_device(max_new_tokens)

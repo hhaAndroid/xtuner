@@ -9,19 +9,19 @@ export PYTHONPATH="$(pwd):$(pwd)/../"
 #  -m debugpy --connect 10.140.0.31:15689
 echo "================================================"
 echo "单卡 static"
-srun -p llm_razor --gres=gpu:1 --time 1:00:00 python qwen0_5_inference_static.py
+srun -p llm_razor --gres=gpu:1 --time 1:00:00 python qwen0_5_inference_static.py -s
 echo "================================================"
 echo "双卡 static"
 srun -p llm_razor --gres=gpu:2 --ntasks=2 --ntasks-per-node=2 --cpus-per-task=16 --time 1:00:00 python qwen0_5_inference_static.py
 echo "================================================"
 echo "单卡 dynamic"
-srun -p llm_razor --gres=gpu:1 --time 1:00:00 python qwen0_5_inference_dynamic.py
+srun -p llm_razor --gres=gpu:1 --time 1:00:00 python qwen0_5_inference_dynamic.py -s
 echo "================================================"
 echo "双卡 dynamic"
 srun -p llm_razor --gres=gpu:2 --ntasks=2 --ntasks-per-node=2 --cpus-per-task=16 --time 1:00:00 python qwen0_5_inference_dynamic.py
 echo "================================================"
 echo "单卡 hf static"
-srun -p llm_razor --gres=gpu:1 --time 1:00:00 python qwen0_5_inference_static_complex.py
+srun -p llm_razor --gres=gpu:1 --time 1:00:00 python qwen0_5_inference_static_complex.py -s
 echo "================================================"
 echo "双卡 hf static"
 srun -p llm_razor --gres=gpu:2 --ntasks=2 --ntasks-per-node=2 --cpus-per-task=16 --time 1:00:00 python qwen0_5_inference_static_complex.py

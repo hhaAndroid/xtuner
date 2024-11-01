@@ -8,6 +8,7 @@ from xtuner._lite.parallel.setup import get_sp_group, setup_parallel
 
 import torch.distributed as dist
 from mmengine.dist import is_distributed
+import argparse
 
 
 class CustomQwen2ForCausalLM(Qwen2ForCausalLM):
@@ -191,9 +192,19 @@ def multi_device(max_new_tokens):
         print(response)
 
 
+def parse_args():
+    parser = argparse.ArgumentParser(description='Test')
+    parser.add_argument('-s', '--single', action='store_true', help='single device')
+    args = parser.parse_args()
+    return args
+
+
 if __name__ == '__main__':
+    args = parse_args()
     max_new_tokens = 512
-    # srun -p llm_razor --gres=gpu:1 --time 1:00:00 python a.py
-    # single_device(max_new_tokens)
-    # srun -p llm_razor --gres=gpu:2 --ntasks=2 --ntasks-per-node=2 --cpus-per-task=16 --time 1:00:00 python a.py
-    multi_device(max_new_tokens)
+    if args.single:
+        # srun -p llm_razor --gres=gpu:1 --time 1:00:00 python a.py
+        single_device(max_new_tokens)
+    else:
+        # srun -p llm_razor --gres=gpu:2 --ntasks=2 --ntasks-per-node=2 --cpus-per-task=16 --time 1:00:00 python a.py
+        multi_device(max_new_tokens)
