@@ -1,6 +1,7 @@
 import torch
 import torch.distributed as dist
 from flash_attn.flash_attn_interface import _flash_attn_forward, _flash_attn_backward
+from flash_attn import flash_attn_with_kvcache
 from .utils import RingComm, update_out_and_lse, get_default_args
 
 
@@ -286,3 +287,61 @@ def ring_flash_attn_func(
         return_attn_probs,
         group,
     )
+
+
+@torch.no_grad()
+def ring_flash_attn_inference_func(
+        q,
+        k,
+        v,
+        cache_seqlens,
+        dropout_p=0.0,
+        softmax_scale=None,
+        causal=False,
+        window_size=(-1, -1),
+        alibi_slopes=None,
+        deterministic=False,
+        return_attn_probs=False,
+        group=None,
+):
+    assert q.shape[1] == 1
+    out, lse = flash_attn_with_kvcache(
+            q,
+            k,
+            v,
+            causal=True,
+            cache_seqlens=cache_seqlens,
+            return_softmax_lse=True)
+    # 如果不用 kvcache 类方法
+    # params = get_default_args(_flash_attn_forward).copy()
+    # params.update(
+    #     {
+    #         "q": q,
+    #         "k": k,
+    #         "v": v,
+    #         "dropout_p": dropout_p,
+    #         "softmax_scale": softmax_scale,
+    #         "causal": causal,
+    #         "window_size": window_size,
+    #         "alibi_slopes": alibi_slopes,
+    #         "return_softmax": True and dropout_p > 0,
+    #     }
+    # )
+    # out, _, _, _, _, lse, _, _ = _flash_attn_forward(**params)
+
+    out_list = [
+        torch.empty_like(out, device=out.device, dtype=out.dtype)
+        for _ in range(dist.get_world_size(group))
+    ]
+    dist.all_gather(out_list, out)
+    out_lse = [
+        torch.empty_like(lse, device=lse.device, dtype=lse.dtype)
+        for _ in range(dist.get_world_size(group))
+    ]
+    dist.all_gather(out_lse, lse)
+
+    new_out = None
+    new_lse = None
+    for i in reversed(range(dist.get_world_size(group))):
+        new_out, new_lse = update_out_and_lse(new_out, new_lse, out_list[i], out_lse[i])
+    return new_out.to(q.dtype)

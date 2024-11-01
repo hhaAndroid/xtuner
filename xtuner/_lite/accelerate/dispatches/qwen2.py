@@ -10,11 +10,18 @@ from transformers.models.qwen2.modeling_qwen2 import (apply_rotary_pos_emb,
                                                       repeat_kv)
 
 from ._attention import flash_attn_wo_mask, varlen_flash_attn
+from flash_attn import flash_attn_with_kvcache
+import torch.distributed as dist
+from xtuner._lite.parallel.setup import get_sp_group, get_ring_group, get_ring_world_size, get_sp_world_size, \
+    get_ulysess_group
+from xtuner._lite.yunchang import attention_sp_ulysses_ring, ring_flash_attn_inference_func
+from mmengine.dist import is_distributed, all_gather_object, all_gather
 
 SUPPORT_FLASH2 = False
 
 try:
     from flash_attn import flash_attn_func
+
     _flash_supports_window_size = 'window_size' in list(
         inspect.signature(flash_attn_func).parameters)
     SUPPORT_FLASH2 = True
@@ -22,17 +29,142 @@ except ImportError:
     pass
 
 
+def qwen2_attn_forward_inference(
+        self,
+        hidden_states: torch.Tensor,
+        attention_mask: Optional[torch.Tensor] = None,
+        position_ids: Optional[torch.LongTensor] = None,
+        past_key_value: Optional[Cache] = None,
+        output_attentions: bool = False,
+        use_cache=False,
+        cache_position=None,
+        position_embeddings=None,  # will become mandatory in v4.46
+):
+    bsz, q_len, _ = hidden_states.size()
+
+    query_states = self.q_proj(hidden_states)
+    key_states = self.k_proj(hidden_states)
+    value_states = self.v_proj(hidden_states)
+
+    query_states = query_states.view(bsz, q_len, self.num_heads, self.head_dim).transpose(1, 2)
+    key_states = key_states.view(bsz, q_len, self.num_key_value_heads, self.head_dim).transpose(1, 2)
+    value_states = value_states.view(bsz, q_len, self.num_key_value_heads, self.head_dim).transpose(1, 2)
+    cos, sin = position_embeddings
+    query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin)
+
+    kv_seq_len = key_states.shape[-2]
+
+    is_prefilled = past_key_value.get_seq_length(self.layer_idx) == 0
+    if is_distributed():
+        # 单卡不进行修改
+        rank = dist.get_rank(get_sp_group())
+        world_size = dist.get_world_size(get_sp_group())
+    else:
+        rank = 0
+        world_size = 1
+
+    if past_key_value is not None:
+        # Activate slicing cache only if the config has a value `sliding_windows` attribute
+        kv_seq_len = key_states.shape[-2] + cache_position[0]
+
+        if world_size > 1:
+            if is_prefilled:
+                cache_kwargs = {"sin": sin, "cos": cos, "cache_position": cache_position}  # Specific to RoPE models
+                key_states, value_states = past_key_value.update(key_states, value_states, self.layer_idx, cache_kwargs)
+            else:
+                if rank == world_size - 1:
+                    # 在 decode 阶段，只有最后一个 rank 才需要更新
+                    cache_kwargs = {"sin": sin, "cos": cos, "cache_position": cache_position}  # Specific to RoPE models
+                    key_states, value_states = past_key_value.update(key_states, value_states, self.layer_idx,
+                                                                     cache_kwargs)
+                else:
+                    kv_seq_len = cache_position[0]
+                    key_states, value_states = past_key_value.key_cache[self.layer_idx], past_key_value.value_cache[
+                        self.layer_idx]
+        else:
+            cache_kwargs = {"sin": sin, "cos": cos, "cache_position": cache_position}  # Specific to RoPE models
+            key_states, value_states = past_key_value.update(key_states, value_states, self.layer_idx, cache_kwargs)
+    # repeat k/v heads if n_kv_heads < n_heads
+    key_states = repeat_kv(key_states, self.num_key_value_groups)
+    value_states = repeat_kv(value_states, self.num_key_value_groups)
+    dropout_rate = 0.0 if not self.training else self.attention_dropout
+
+    input_dtype = query_states.dtype
+    if input_dtype == torch.float32:
+        if torch.is_autocast_enabled():
+            target_dtype = torch.get_autocast_gpu_dtype()
+        # Handle the case where the model is quantized
+        elif hasattr(self.config, "_pre_quantization_dtype"):
+            target_dtype = self.config._pre_quantization_dtype
+        else:
+            target_dtype = self.q_proj.weight.dtype
+
+        print(
+            f"The input hidden states seems to be silently casted in float32, this might be related to"
+            f" the fact you have upcasted embedding or layer norm layers in float32. We will cast back the input in"
+            f" {target_dtype}."
+        )
+
+        query_states = query_states.to(target_dtype)
+        key_states = key_states.to(target_dtype)
+        value_states = value_states.to(target_dtype)
+
+    # Reashape to the expected shape for Flash Attention
+    query_states = query_states.transpose(1, 2)
+    key_states = key_states.transpose(1, 2)
+    value_states = value_states.transpose(1, 2)
+
+    if world_size == 1:
+        attn_output = flash_attn_with_kvcache(
+            query_states,
+            key_states,
+            value_states,
+            causal=True,
+            cache_seqlens=kv_seq_len.item())
+    else:
+        if query_states.shape[1] > 1 and is_prefilled:
+            key_states = key_states[:, :kv_seq_len, ...]
+            value_states = value_states[:, :kv_seq_len, ...]
+            assert key_states.shape[1] == query_states.shape[1]
+            attn_output = attention_sp_ulysses_ring(query_states,
+                                                    key_states,
+                                                    value_states,
+                                                    ulysses_pg=get_ulysess_group(),
+                                                    ring_pg=get_ring_group(),
+                                                    ring_impl_type='basic')
+        else:
+            attn_output = ring_flash_attn_inference_func(query_states,
+                                                         key_states,
+                                                         value_states,
+                                                         causal=True,
+                                                         group=get_ring_group(),
+                                                         cache_seqlens=kv_seq_len.item())
+    # ---------------- flash attention forward end ------------------- #
+    attn_output = attn_output.reshape(bsz, q_len, self.hidden_size).contiguous()
+    attn_output = self.o_proj(attn_output)
+    return attn_output, None, past_key_value
+
+
 def qwen2_varlen_attn_forward(
-    self,
-    hidden_states: torch.Tensor,
-    attention_mask: Optional[torch.Tensor] = None,
-    position_ids: Optional[torch.LongTensor] = None,
-    past_key_value: Optional[Cache] = None,
-    output_attentions: bool = False,
-    use_cache: bool = False,
-    **kwargs,
+        self,
+        hidden_states: torch.Tensor,
+        attention_mask: Optional[torch.Tensor] = None,
+        position_ids: Optional[torch.LongTensor] = None,
+        past_key_value: Optional[Cache] = None,
+        output_attentions: bool = False,
+        use_cache: bool = False,
+        **kwargs,
 ):
     is_training = self.training
+    if not is_training:
+        attn_output, attn_weights, past_key_value = qwen2_attn_forward_inference(self,
+                                                                                 hidden_states,
+                                                                                 attention_mask,
+                                                                                 position_ids,
+                                                                                 past_key_value,
+                                                                                 output_attentions,
+                                                                                 use_cache, **kwargs)
+        return attn_output, attn_weights, past_key_value
 
     assert is_training == (past_key_value is None)
 
@@ -147,11 +279,11 @@ def qwen2_varlen_attn_forward(
         causal = self.is_causal and q_len != 1
 
     use_sliding_windows = (
-        _flash_supports_window_size
-        and getattr(self.config, 'sliding_window', None) is not None
-        and kv_seq_len > self.config.sliding_window
-        and self.layer_idx < self.config.max_window_layers
-        and self.config.use_sliding_window)
+            _flash_supports_window_size
+            and getattr(self.config, 'sliding_window', None) is not None
+            and kv_seq_len > self.config.sliding_window
+            and self.layer_idx < self.config.max_window_layers
+            and self.config.use_sliding_window)
 
     window_size = (self.config.sliding_window,
                    self.config.sliding_window) if use_sliding_windows else (-1,
