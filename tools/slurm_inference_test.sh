@@ -5,6 +5,7 @@ MASTER_PORT=$((RANDOM % 101 + 30000))
 echo $MASTER_ADDR
 echo $MASTER_PORT
 
+export PYTHONPATH="$(pwd):$(pwd)/../"
 #  -m debugpy --connect 10.140.0.31:15689
 echo "单卡 static"
 srun -p llm_razor --gres=gpu:1 --time 1:00:00 python qwen0_5_inference_static.py
