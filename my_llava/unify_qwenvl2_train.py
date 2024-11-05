@@ -372,7 +372,8 @@ class LazyQwenVLDataset(BaseOrigDataset):
             'pixel_values': media_inputs['pixel_values'],
             'image_grid_thw': media_grid_thw,
             'num_tokens': [len(ret['input_ids'])],
-            'num_img_tokens': [sum_media_grid_thw[0] + 2]
+            'num_img_tokens': [sum_media_grid_thw[0] + 2],
+            'num_imgs': [1]
         }
         return out_data
 
@@ -420,7 +421,8 @@ class LazyQwenVLDataset(BaseOrigDataset):
             'pixel_values': media_inputs['pixel_values'],
             'image_grid_thw': media_grid_thw,
             'num_tokens': [len(ret['input_ids'])],
-            'num_img_tokens': [num_img_tokens]
+            'num_img_tokens': [num_img_tokens],
+            'num_imgs': [len(all_image)]
         }
         return out_data
 
@@ -444,7 +446,8 @@ class LazyQwenVLDataset(BaseOrigDataset):
             'pixel_values': media_inputs['pixel_values'],
             'image_grid_thw': media_grid_thw,
             'num_tokens': [len(ret['input_ids'])],
-            'num_img_tokens': [0]
+            'num_img_tokens': [0],
+            'num_imgs': [0]
         }
         return out_data
 
@@ -532,6 +535,7 @@ def packing_collate(features, pack_batch=True, pad_id=0):
     pixel_values = []
     num_tokens = []
     num_img_tokens = []
+    num_imgs= []
     image_grid_thws = []
     position_ids = []
 
@@ -543,10 +547,12 @@ def packing_collate(features, pack_batch=True, pad_id=0):
         pixel_values.append(data['pixel_values'])
         image_grid_thws.append(data['image_grid_thw'])
         position_ids.append(data['position_id'])
+        num_imgs.append(data['num_imgs'])
 
     attention_mask = [ids.ne(pad_id) for ids in input_ids]
     num_tokens = torch.IntTensor(num_tokens)
     num_img_tokens = torch.IntTensor(num_img_tokens)
+    num_imgs = torch.IntTensor(num_imgs)
 
     if len(features) > 1 and pack_batch:
         # packing
@@ -575,6 +581,7 @@ def packing_collate(features, pack_batch=True, pad_id=0):
         'image_grid_thw': image_grid_thws,
         'num_tokens': num_tokens,
         'num_img_tokens': num_img_tokens,
+        'num_imgs': num_imgs,
     }
 
     return data_dict
@@ -830,6 +837,7 @@ def llava_train(args):
         step_start_t = time.time()
         step_consumed_tokens = 0
         step_consumed_img_tokens = 0
+        step_consumed_imgs = 0
         for _ in range(per_step_iters):
             _data_start_t = time.time()
             data = next(data_iterator)
@@ -838,6 +846,7 @@ def llava_train(args):
             data = _prepare_input(data)
             num_tokens = data.pop('num_tokens')
             num_img_tokens = data.pop('num_img_tokens')
+            num_imgs = data.pop('num_imgs')
 
             packed_ctx = packed_sequence(num_tokens, enable=True, skip_position_ids=True)
 
@@ -849,6 +858,7 @@ def llava_train(args):
             step_loss += avg_iter_loss.item()
             step_consumed_tokens += num_tokens.sum()
             step_consumed_img_tokens += num_img_tokens.sum()
+            step_consumed_imgs += num_imgs.sum()
 
         grad_norm = clip_grad_norm_(requried_grad_params, fsdp_mesh, args.max_grad_norm)
         optimizer.step()
@@ -869,6 +879,7 @@ def llava_train(args):
                 f'max_memory: {(max_memory / 1024 ** 3):.1f}GB  '
                 f'text_tokens: {step_text_tokens}  '
                 f'image_tokens: {step_img_tokens}  '
+                f'num_imgs: {step_consumed_imgs}  '
                 f'tgs: {tgs}  data_time: {step_data_time:.2f}s  '
                 f'time: {step_time:.2f}s  '
                 f'eta: {eta}')
