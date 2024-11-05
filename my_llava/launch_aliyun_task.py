@@ -27,14 +27,15 @@ if __name__ == '__main__':
     if num_gpus >= 8:
         assert num_gpus % 8 == 0
         worker_count = num_gpus // 8
-        num_gpus = 8
+        _num_gpus = 8
     else:
         worker_count = 1
+        _num_gpus = num_gpus
     dlc_config_path = os.environ.get('DLC_CONFIG_PATH', '/root/.dlc/config')
-    worker_gpu = min(num_gpus, 8)
+    worker_gpu = min(_num_gpus, 8)
     worker_cpu = worker_gpu * 12
-    worker_memory = worker_gpu * 80
-    worker_shared_memory = worker_gpu * 20
+    worker_memory = min(num_gpus * 80, 800)
+    worker_shared_memory = min(num_gpus * 20, 200)
     worker_image = args.image
 
     dlc_command = [
