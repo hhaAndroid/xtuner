@@ -12,23 +12,22 @@ cp "$0" "${OUTPUT_DIR}/${SCRIPT_NAME}"
 
 # -m debugpy --connect 5688
 
-GPUS_PER_NODE=${GPUS_PER_NODE:-8}
+GPUS_PER_NODE=${GPUS_PER_NODE:-2}
 export PYTHONPATH="$(pwd):$(pwd)/../"
 
-MIRCO_BATCH_SIZE=${MIRCO_BATCH_SIZE:-2}
+MIRCO_BATCH_SIZE=${MIRCO_BATCH_SIZE:-4}
 ACCUMULATIVE_COUNTS=${ACCUMULATIVE_COUNTS:-2}
 
 # --group-by-modality-length \
-# --group-by-length \
-# --liger \
 # -m debugpy --connect 5680
-MAX_LENGHT = 32768
+MAX_LENGHT=32768
 HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 $ENV_PATH/bin/torchrun \
   --nproc-per-node=$GPUS_PER_NODE  \
   unify_qwenvl2_train.py \
   --model /cpfs01/shared/llm_razor/huanghaian/new_model/Qwen2-VL-2B-Instruct \
   --datasets data/qwenvl2_sft.json \
   --liger \
+  --freeze-vit \
   --num-workers 4 \
   --global-batch-size $((GPUS_PER_NODE*ACCUMULATIVE_COUNTS)) \
   --lr 2e-5 \
@@ -48,4 +47,3 @@ HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 $ENV_PATH/bin/torchrun \
   --concat-before-pack \
   --group-by-length \
   2>&1 | tee -a "${OUTPUT_DIR}/training_log.txt"
-

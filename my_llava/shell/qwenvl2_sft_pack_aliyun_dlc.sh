@@ -15,12 +15,10 @@ cp "$0" "${OUTPUT_DIR}/${SCRIPT_NAME}"
 GPUS_PER_NODE=${GPUS_PER_NODE:-8}
 export PYTHONPATH="$(pwd):$(pwd)/../"
 
-MIRCO_BATCH_SIZE=${MIRCO_BATCH_SIZE:-2}
+MIRCO_BATCH_SIZE=${MIRCO_BATCH_SIZE:-4}
 ACCUMULATIVE_COUNTS=${ACCUMULATIVE_COUNTS:-2}
 
 # --group-by-modality-length \
-# --group-by-length \
-# --liger \
 # -m debugpy --connect 5680
 MAX_LENGHT = 32768
 HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 $ENV_PATH/bin/torchrun \
@@ -33,6 +31,7 @@ HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 $ENV_PATH/bin/torchrun \
   --model /cpfs01/shared/llm_razor/huanghaian/new_model/Qwen2-VL-2B-Instruct \
   --datasets data/qwenvl2_sft.json \
   --liger \
+  --freeze-vit \
   --num-workers 4 \
   --global-batch-size $((WORLD_SIZE*GPUS_PER_NODE*ACCUMULATIVE_COUNTS)) \
   --lr 2e-5 \

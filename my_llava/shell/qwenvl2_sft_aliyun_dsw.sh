@@ -19,8 +19,6 @@ MIRCO_BATCH_SIZE=${MIRCO_BATCH_SIZE:-4}
 ACCUMULATIVE_COUNTS=${ACCUMULATIVE_COUNTS:-2}
 
 # --group-by-modality-length \
-# --group-by-length \
-# --liger \
 # -m debugpy --connect 5680
 MAX_LENGHT = 32768
 HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 $ENV_PATH/bin/torchrun \
@@ -29,6 +27,7 @@ HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 $ENV_PATH/bin/torchrun \
   --model /cpfs01/shared/llm_razor/huanghaian/new_model/Qwen2-VL-2B-Instruct \
   --datasets data/qwenvl2_sft.json \
   --liger \
+  --freeze-vit \
   --num-workers 4 \
   --mirco-batch-size $MIRCO_BATCH_SIZE \
   --global-batch-size $((MIRCO_BATCH_SIZE*GPUS*ACCUMULATIVE_COUNTS)) \

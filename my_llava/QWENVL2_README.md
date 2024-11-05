@@ -13,7 +13,7 @@
         "media_root": "xxx/data/docvqa/",
         "annotation": "xxx/docvqa_train_56k_wh.jsonl",
         "repeat_time": 5, # 重复次数，暂时设置为如果大于 1 则必须是整数
-        "max_pixels": 1073296
+        "max_pixels": 1073296 # 1036x1036=28x28x37x27=1369 个 输入到 llm 中的 img token，1369x4=5476 个输入到 vit 中的 token
       },
     "openhermes2_5_cleaned": {
         "media_root": "",
