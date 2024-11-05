@@ -121,6 +121,7 @@ def parse_args():
               '`datasets` are not set, the cached dataset in this dir will be '
               'loaded.'))
     data_args.add_argument('--dset-pack', action='store_true')
+    data_args.add_argument('--concat-before-pack', action='store_true')
     data_args.add_argument('--group-by-length', action='store_true')
     data_args.add_argument('--group-by-modality-length', action='store_true')
     data_args.add_argument(
@@ -254,6 +255,7 @@ class LazyQwenVLDataset(BaseOrigDataset):
         super().__init__(data_name, data, self.chat_template,
                          tokenizer=self.processor.tokenizer,
                          max_length=max_length,
+                         image_token_str=self.image_token_str,
                          group_by_length=group_by_length,
                          pack_data=pack_data,
                          pack_data_cache_dir=pack_data_cache_dir)
@@ -306,12 +308,12 @@ class LazyQwenVLDataset(BaseOrigDataset):
         print('Finished calculating the length of text data...')
         return group_length
 
-    def _pre_tokenize_fn_for_pack(self, data_item):
+    def pre_tokenize_fn_for_pack(self, data_item):
         if self._is_jsonl:
             data_item = json.loads(data_item)
         if 'image' in data_item and data_item['image'] is not None:
             if type(data_item['image']) == list and len(data_item['image']) > 1:
-                raise NotImplementedError
+                num_tokens = self.multi_modal_multi_image_get_item(data_item, pack_data=True)
             else:
                 num_tokens = self.multi_modal_get_item(data_item, pack_data=True)
         elif 'video' in data_item and data_item['video'] is not None and data_item['video'] != '':
@@ -345,7 +347,7 @@ class LazyQwenVLDataset(BaseOrigDataset):
             for size in image_size:
                 media_grid_thw.append(smart_get_thw(size, self.processor.image_processor))
             media_grid_thw = torch.tensor(media_grid_thw, dtype=torch.int).reshape(-1, 3)
-            sum_media_grid_thw = media_grid_thw.prod(dim=1) / self.merge_length
+            sum_media_grid_thw = media_grid_thw.prod(dim=1) // self.merge_length
             ret = self.process_text(data_item['conversations'], media_type='image', image_grids=sum_media_grid_thw)
             return len(ret['input_ids'])
 
@@ -359,7 +361,7 @@ class LazyQwenVLDataset(BaseOrigDataset):
         media_inputs = self.processor.image_processor(images=image, videos=None, return_tensors='pt')
         media_grid_thw = media_inputs['image_grid_thw']
 
-        sum_media_grid_thw = media_grid_thw.prod(dim=1) / self.merge_length
+        sum_media_grid_thw = media_grid_thw.prod(dim=1) // self.merge_length
         ret = self.process_text(data_item['conversations'], media_type='image', image_grids=sum_media_grid_thw)
         position_id = self.calc_position_id(ret['input_ids'], media_grid_thw)
 
@@ -394,7 +396,7 @@ class LazyQwenVLDataset(BaseOrigDataset):
             for size in image_size:
                 media_grid_thw.append(smart_get_thw(size, self.processor.image_processor))
             media_grid_thw = torch.tensor(media_grid_thw, dtype=torch.int).reshape(-1, 3)
-            sum_media_grid_thw = media_grid_thw.prod(dim=1) / self.merge_length
+            sum_media_grid_thw = media_grid_thw.prod(dim=1) // self.merge_length
             ret = self.process_text(data_item['conversations'], media_type='image', image_grids=sum_media_grid_thw)
             return len(ret['input_ids'])
 
@@ -406,7 +408,7 @@ class LazyQwenVLDataset(BaseOrigDataset):
             all_image.append(image)
         media_inputs = self.processor.image_processor(images=all_image, videos=None, return_tensors='pt')
         media_grid_thw = media_inputs['image_grid_thw']
-        sum_media_grid_thw = media_grid_thw.prod(dim=1) / self.merge_length
+        sum_media_grid_thw = media_grid_thw.prod(dim=1) // self.merge_length
         ret = self.process_text(data_item['conversations'], media_type='image', image_grids=sum_media_grid_thw)
         position_id = self.calc_position_id(ret['input_ids'], media_grid_thw)
 
@@ -502,7 +504,7 @@ class LazyQwenVLDataset(BaseOrigDataset):
                     data_item = json.loads(data_item)
                 if 'image' in data_item and data_item['image'] is not None:
                     if type(data_item['image']) == list and len(data_item['image']) > 1:
-                        raise NotImplementedError
+                        ret = self.multi_modal_multi_image_get_item(data_item)
                     else:
                         ret = self.multi_modal_get_item(data_item)
                 elif 'video' in data_item and data_item['video'] is not None and data_item['video'] != '':
@@ -511,7 +513,7 @@ class LazyQwenVLDataset(BaseOrigDataset):
                     ret = self.pure_text_get_item(data_item)
                 break
             except Exception as e:
-                logger.info(f'Exception: {e} of {self.data_name}')
+                print(f'Exception: {e} of {self.data_name}', flush=True)
                 i = random.randint(0, len(self.raw_data) - 1)
         return ret
 
@@ -798,6 +800,9 @@ def llava_train(args):
         if args.liger:
             logger.info('====== use liger kernel =====')
 
+    processor = AutoProcessor.from_pretrained(args.model)
+    tokenizer = processor.tokenizer
+
     for step in range(start_step, total_steps):
 
         epoch = step // per_epoch_steps
@@ -870,7 +875,7 @@ def llava_train(args):
 
         if is_interval(step, total_steps, checkpoint_interval):
             save_ckpt(args, step, total_steps, fsdp_model, rank0_model, warmup_scheduler, cosine_scheduler,
-                      optimizer, max_keep_ckpts, save_hf_ckpt_names, save_pt_ckpt_names)
+                      optimizer, max_keep_ckpts, save_hf_ckpt_names, save_pt_ckpt_names, tokenizer, processor)
 
     train_cost_time = time.time() - start_train_t
     m, s = divmod(train_cost_time, 60)

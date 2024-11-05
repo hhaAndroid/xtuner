@@ -1,6 +1,25 @@
 {
-    "llava_sft": {
-        "media_root": "/mnt/hwfile/xtuner/linzhihao/dataset/llava_data/llava_images",
-        "annotation": "/mnt/hwfile/xtuner/linzhihao/dataset/llava_data/LLaVA-Instruct-150K/llava_v1_5_mix665k.json"
-    }
+    "docvqa_train_56k": {
+        "media_root": "/cpfs01/shared/llm_razor/huanghaian/linzhihao/docvqa/train/",
+        "annotation": "/cpfs01/shared/llm_razor/huanghaian/data/phi3_official_internvl_v2/docvqa_train_56k_wh.jsonl",
+        "repeat_time": 5,
+        "max_pixels": 1073296
+      },
+    "openhermes2_5_cleaned": {
+        "media_root": "",
+        "annotation": "/cpfs01/shared/llm_razor/huanghaian/data/phi3_official_internvl/openhermes2_5_cleaned_openhermes2_5_cleaned_1.jsonl",
+        "repeat_time": 0.3
+      },
+    "llava150k_zh": {
+        "media_root": "/cpfs01/shared/llm_razor/huanghaian/linzhihao/",
+        "annotation": "/cpfs01/shared/llm_razor/huanghaian/data/phi3_official_internvl/llava_instruct_150k_zh_wh.jsonl"
+      },
+    "Spot_the_Difference": {
+        "media_root": "/cpfs01/shared/llm_razor/huanghaian/data/M4-Instruct-Data/",
+        "annotation": "/cpfs01/shared/llm_razor/huanghaian/data/M4-Instruct-Data/Spot_the_Difference_simple_wh.jsonl"
+      },
+    "Visual_Story_Telling": {
+        "media_root": "/cpfs01/shared/llm_razor/huanghaian/data/M4-Instruct-Data/",
+        "annotation": "/cpfs01/shared/llm_razor/huanghaian/data/M4-Instruct-Data/Visual_Story_Telling_simple_wh.jsonl"
+      }
 }
