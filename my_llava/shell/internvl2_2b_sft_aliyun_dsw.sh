@@ -20,16 +20,15 @@ ACCUMULATIVE_COUNTS=${ACCUMULATIVE_COUNTS:-2}
 
 # --group-by-modality-length \
 # -m debugpy --connect 5680
-MAX_LENGHT = 8192
 HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 $ENV_PATH/bin/torchrun \
   --nproc-per-node=$GPUS_PER_NODE  \
   unify_internvl2_train.py \
-  --model /cpfs01/shared/llm_razor/huanghaian/model/InternVL2-4B \
+  --model /cpfs01/shared/llm_razor/huanghaian/new_model/InternVL2-2B \
   --datasets data/qwenvl2_sft.json \
   --freeze-vit \
   --num-workers 4 \
   --mirco-batch-size $MIRCO_BATCH_SIZE \
-  --global-batch-size $((MIRCO_BATCH_SIZE*GPUS*ACCUMULATIVE_COUNTS)) \
+  --global-batch-size $((MIRCO_BATCH_SIZE*GPUS_PER_NODE*ACCUMULATIVE_COUNTS)) \
   --lr 2e-5 \
   --wd 0.0 \
   --warmup-ratio 0.03 \
@@ -39,7 +38,6 @@ HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 $ENV_PATH/bin/torchrun \
   --checkpoint-interval 2000 \
   --checkpoint-drop-optimizer \
   --shard-strategy 'zero2' \
-  --max-length $MAX_LENGHT \
   --group-by-length \
   2>&1 | tee -a "${OUTPUT_DIR}/training_log.txt"
 

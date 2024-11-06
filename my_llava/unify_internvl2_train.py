@@ -39,6 +39,7 @@ from xtuner._lite.internvl.dataset import (dynamic_preprocess, preprocess,
                                            preprocess_internlm, preprocess_mpt,
                                            preprocess_phi3, build_transform, preprocess_phi3_fast,
                                            dynamic_num_patch)
+from xtuner._lite.internvl.v1_5.modeling_intern_vit import InternVisionModel
 
 logger = get_logger()
 
@@ -208,7 +209,7 @@ class LazyInternVL2Dataset(BaseOrigDataset):
                  use_fast_tokenizer=False):
 
         _model_cfg = AutoConfig.from_pretrained(model_name, trust_remote_code=True)
-        architectures = _model_cfg['architectures'][0]
+        architectures = _model_cfg.llm_config.architectures[0]
         assert architectures in ['InternLM2ForCausalLM', 'Phi3ForCausalLM', 'LlamaForCausalLM']
 
         if architectures == 'InternLM2ForCausalLM':
@@ -232,7 +233,7 @@ class LazyInternVL2Dataset(BaseOrigDataset):
         tokenizer = AutoTokenizer.from_pretrained(model_name,
                                                   use_fast=use_fast_tokenizer,
                                                   trust_remote_code=True)
-        super().__init__(data_name, data, self.chat_template,
+        super().__init__(data_name, data, None,
                          tokenizer=tokenizer,
                          max_length=-1,
                          group_by_length=group_by_length,
@@ -555,7 +556,6 @@ def packing_collate(features, pack_batch=True, pad_id=0):
     num_tokens = []
     num_img_tokens = []
     num_imgs = []
-    image_grid_thws = []
     image_flags = []
 
     for data in features:
@@ -565,10 +565,8 @@ def packing_collate(features, pack_batch=True, pad_id=0):
         num_tokens.extend(data['num_tokens'])
         num_img_tokens.extend(data['num_img_tokens'])
         pixel_values.append(data['pixel_values'])
-        image_grid_thws.append(data['image_grid_thw'])
         num_imgs.append(data['num_imgs'])
 
-    attention_mask = [ids.ne(pad_id) for ids in input_ids]
     num_tokens = torch.IntTensor(num_tokens)
     num_img_tokens = torch.IntTensor(num_img_tokens)
     num_imgs = torch.IntTensor(num_imgs)
@@ -577,8 +575,6 @@ def packing_collate(features, pack_batch=True, pad_id=0):
         # packing
         input_ids = torch.cat(input_ids, dim=0).unsqueeze(0)
         labels = torch.cat(labels, dim=0).unsqueeze(0)
-        attention_mask = torch.cat(attention_mask, dim=0).unsqueeze(0)
-        image_grid_thws = torch.cat(image_grid_thws, dim=0)
         pixel_values = torch.cat(pixel_values, dim=0)
         image_flags = torch.cat(image_flags, dim=0)
     elif len(features) > 1 and not pack_batch:
@@ -586,8 +582,6 @@ def packing_collate(features, pack_batch=True, pad_id=0):
     else:
         input_ids = torch.stack(input_ids)
         labels = torch.stack(labels)
-        attention_mask = torch.stack(attention_mask)
-        image_grid_thws = torch.stack(image_grid_thws)
         pixel_values = torch.cat(pixel_values, dim=0)
         image_flags = image_flags[0]
 
@@ -596,7 +590,6 @@ def packing_collate(features, pack_batch=True, pad_id=0):
         'labels': labels,
         'pixel_values': pixel_values,
         'image_flags': image_flags,
-        'image_grid_thw': image_grid_thws,
         'num_tokens': num_tokens,
         'num_img_tokens': num_img_tokens,
         'num_imgs': num_imgs,
@@ -604,15 +597,21 @@ def packing_collate(features, pack_batch=True, pad_id=0):
 
     return data_dict
 
-
 def build_llava_model(args, dtype=torch.float32, device='cpu'):
     with torch.device(device):
         with LoadWoInit():
+            _cfg = AutoConfig.from_pretrained(args.model, trust_remote_code=True)
+            # 防止 fsdp 构建时候 dpr 报错
+            vision_model = InternVisionModel(_cfg.vision_config)
             internvl = AutoModel.from_pretrained(
                 args.model,
+                vision_model=vision_model,
                 use_flash_attn=True,
                 trust_remote_code=True,
                 torch_dtype=dtype)
+            tokenizer = AutoTokenizer.from_pretrained(args.model, trust_remote_code=True)
+            img_context_token_id = tokenizer.convert_tokens_to_ids('<IMG_CONTEXT>')
+            internvl.img_context_token_id = img_context_token_id
 
         internvl.to(dtype)
 
@@ -665,7 +664,7 @@ def build_fsdp_model(rank0_model, meta_model, dp_mesh, tp_mesh, dtype, args):
 
     num_layers = len(meta_model.language_model.model.layers)
     num_recompute_layers = int(num_layers * 1.0)
-    for i, block in enumerate(meta_model.model.layers):
+    for i, block in enumerate(meta_model.language_model.model.layers):
         block.apply(param_init_fn)
 
         fully_shard(
@@ -687,9 +686,9 @@ def build_fsdp_model(rank0_model, meta_model, dp_mesh, tp_mesh, dtype, args):
 
     meta_model.language_model.model.norm.apply(param_init_fn)
     try:
-        meta_model.model.output.apply(param_init_fn)
+        meta_model.language_model.output.apply(param_init_fn)
     except AttributeError:
-        meta_model.model.lm_head.apply(param_init_fn)
+        meta_model.language_model.lm_head.apply(param_init_fn)
 
     model = fully_shard(
         meta_model,

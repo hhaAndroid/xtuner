@@ -1,5 +1,6 @@
 # Copyright (c) OpenMMLab. All rights reserved.
 from typing import Optional, Tuple
+import inspect
 
 import os
 import torch
@@ -68,6 +69,14 @@ def rotate_half(x):
 def apply_rotary_pos_emb(q, k, cos, sin, position_ids=None, unsqueeze_dim=1):
     cos = cos.unsqueeze(unsqueeze_dim)
     sin = sin.unsqueeze(unsqueeze_dim)
+    q_embed = (q * cos) + (rotate_half(q) * sin)
+    k_embed = (k * cos) + (rotate_half(k) * sin)
+    return q_embed, k_embed
+
+def apply_rotary_pos_emb_old(q, k, cos, sin, position_ids, unsqueeze_dim=1):
+    """Applies Rotary Position Embedding to the query and key tensors."""
+    cos = cos[position_ids].unsqueeze(unsqueeze_dim)
+    sin = sin[position_ids].unsqueeze(unsqueeze_dim)
     q_embed = (q * cos) + (rotate_half(q) * sin)
     k_embed = (k * cos) + (rotate_half(k) * sin)
     return q_embed, k_embed
@@ -148,15 +157,18 @@ def _internlm2_varlen_attn_forward(
     key_states = key_states.transpose(1, 2)
     value_states = value_states.transpose(1, 2)
 
-    try:
+    signature = inspect.signature(self.rotary_emb.forward)
+    if 'seq_len' in signature.parameters:
+        # old
+        kv_seq_len = key_states.shape[-2]
+        if past_key_value is not None:
+            kv_seq_len += past_key_value[0].shape[-2]
+        cos, sin = self.rotary_emb(value_states, seq_len=kv_seq_len)
+        query_states, key_states = apply_rotary_pos_emb_old(query_states, key_states, cos, sin, position_ids)
+    else:
         cos, sin = self.rotary_emb(value_states, position_ids)
-    except RuntimeError:
-        raise RuntimeError(
-            'You are using the old version of InternLM2 model. The '
-            '`modeling_internlm2.py` is outdated. Please update the InternLM2 '
-            'model.')
-    query_states, key_states = apply_rotary_pos_emb(query_states, key_states,
-                                                    cos, sin)
+        query_states, key_states = apply_rotary_pos_emb(query_states, key_states,
+                                                        cos, sin)
 
     if past_key_value is not None:
         # sin and cos are specific to RoPE models;
