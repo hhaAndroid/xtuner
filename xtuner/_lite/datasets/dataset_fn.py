@@ -8,7 +8,7 @@ from collections import OrderedDict
 import shutil
 from ..parallel.new_setup import get_dp_mesh, get_world_mesh
 from .. import get_logger
-from ..parallel import LengthGroupedSampler, ParallelSampler
+from ..parallel.sampler import LengthGroupedSampler, ParallelSampler
 from torch.utils.data import ConcatDataset, DataLoader, Dataset
 import numpy as np
 import random

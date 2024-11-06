@@ -10,7 +10,7 @@ import copy
 from xtuner._lite.parallel.new_setup import get_sp_group
 import math
 import os
-from xtuner._lite.parallel import split_for_sequence_parallel
+from xtuner._lite.parallel.sequence import split_for_sequence_parallel
 
 
 def rescale_sp_loss(loss_per_sp_rank,
