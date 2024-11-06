@@ -802,7 +802,7 @@ def llava_train(args):
     if args.liger:
         raise NotImplementedError
 
-    setup_parallel(tp_size=args.tp_size, sp_size=args.sp_size)
+    setup_parallel(tp_size=args.tp_size, sp_size=args.sp_size, sp_ring_degree=args.ring_size)
     set_random_seed(args.seed)
 
     dp_mesh = get_dp_mesh()
@@ -923,6 +923,13 @@ def llava_train(args):
         max_keep_ckpts = 100000000
 
     if rank == 0:
+        if args.dset_pack:
+            logger.info(f'======= Using soft packing style. =========')
+        if args.sp_size > 1:
+            assert args.dset_pack, 'Only support soft packing with sp_size > 1.'
+            logger.info(
+                f'======= Using SP mode. sp_ulysess:{args.sp_size // args.ring_size}, sp_ring:{args.ring_size}======')
+
         logger.info('[Train] Begin Train Loop. The current GPU memory is '
                     f'{(max_memory / 1024 ** 3):.1f}GB')
         logger.info('The FSDP adopts a lazy design, so the first iteration will be slow.')
@@ -978,9 +985,10 @@ def llava_train(args):
                 avg_iter_loss.backward()
 
             step_loss += avg_iter_loss.item()
-            step_consumed_tokens += num_tokens.sum()
-            step_consumed_img_tokens += num_img_tokens.sum()
-            step_consumed_imgs += num_imgs.sum()
+
+            step_consumed_tokens += num_tokens.sum() / sp_size
+            step_consumed_img_tokens += num_img_tokens.sum() / sp_size
+            step_consumed_imgs += num_imgs.sum() / sp_size
 
         grad_norm = clip_grad_norm_(requried_grad_params, fsdp_mesh, args.max_grad_norm)
         optimizer.step()
