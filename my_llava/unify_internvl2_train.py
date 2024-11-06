@@ -208,7 +208,7 @@ class LazyInternVL2Dataset(BaseOrigDataset):
                  pack_data=False, pack_data_cache_dir=None,
                  use_fast_tokenizer=False,
                  min_num_frames=8,  # video
-                 max_num_frames=16,  # video
+                 max_num_frames=8,  # video
                  sampling_method='middle',  # video
                  local_num_frames=8):  # video
 
@@ -276,8 +276,12 @@ class LazyInternVL2Dataset(BaseOrigDataset):
                     token_length = self.tokenizer(
                         conversations, return_tensors='pt', padding=False, truncation=False,
                     ).input_ids.size(1)
-                    conv2length[str_length] = token_length + self.num_image_token * (
-                            self.max_dynamic_patch + self.use_thumbnail)
+                    if 'video' in data_item and data_item['video'] is not None:
+                        # TODO: 暂时写死
+                        token_length += self.num_image_token * self.max_num_frames
+                    else:
+                        conv2length[str_length] = token_length + self.num_image_token * (
+                                self.max_dynamic_patch + self.use_thumbnail)
                 else:
                     token_length = conv2length[str_length]
 
@@ -514,9 +518,12 @@ class LazyInternVL2Dataset(BaseOrigDataset):
         video_path = os.path.join(self.root, video_file)
 
         if pack_data:
+            # 暂时写死，估计取 8 帧
             assert 'duration' in data_item, data_item
-            duration = data_item['duration']
-            num_frames = self._get_num_frames_by_duration(duration)
+            # duration = data_item['duration']
+            # num_frames = self._get_num_frames_by_duration(duration)
+            assert self.max_num_frames == self.min_num_frames
+            num_frames = self.min_num_frames
             image_list = [0] * num_frames
         else:
             image_list = read_frames_decord(
@@ -687,6 +694,7 @@ def packing_collate(features, pack_batch=True, pad_id=0):
     }
 
     return data_dict
+
 
 def build_llava_model(args, dtype=torch.float32, device='cpu'):
     with torch.device(device):

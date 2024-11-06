@@ -24,6 +24,6 @@
       },
       "videochat_sft_11k": {
         "media_root": "/cpfs01/shared/llm_razor/huanghaian/data/video/videochat_sft/WebVid10M/",
-        "annotation": "/cpfs01/shared/llm_razor/huanghaian/data/video/videochat_sft/videochat_instruct_11k_llava.json"
+        "annotation": "/cpfs01/shared/llm_razor/huanghaian/data/video/videochat_sft/videochat_instruct_11k_llava.jsonl"
       }
 }

@@ -25,7 +25,7 @@ HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 $ENV_PATH/bin/torchrun \
   --nproc-per-node=$GPUS_PER_NODE  \
   unify_internvl2_train.py \
   --model /cpfs01/shared/llm_razor/huanghaian/model/InternVL2-4B \
-  --datasets data/qwenvl2_sft.json \
+  --datasets data/internvl2_sft.json \
   --freeze-vit \
   --num-workers 4 \
   --global-batch-size $((GPUS_PER_NODE*ACCUMULATIVE_COUNTS)) \
