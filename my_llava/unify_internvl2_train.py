@@ -519,7 +519,7 @@ class LazyInternVL2Dataset(BaseOrigDataset):
 
         if pack_data:
             # 暂时写死，估计取 8 帧
-            assert 'duration' in data_item, data_item
+            # assert 'duration' in data_item, data_item
             # duration = data_item['duration']
             # num_frames = self._get_num_frames_by_duration(duration)
             assert self.max_num_frames == self.min_num_frames

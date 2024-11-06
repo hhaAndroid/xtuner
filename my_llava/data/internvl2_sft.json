@@ -2,8 +2,7 @@
     "docvqa_train_56k": {
         "media_root": "/cpfs01/shared/llm_razor/huanghaian/linzhihao/docvqa/train/",
         "annotation": "/cpfs01/shared/llm_razor/huanghaian/data/phi3_official_internvl_v2/docvqa_train_56k_wh.jsonl",
-        "repeat_time": 5,
-        "max_pixels": 1073296
+        "repeat_time": 5
       },
     "openhermes2_5_cleaned": {
         "media_root": "",

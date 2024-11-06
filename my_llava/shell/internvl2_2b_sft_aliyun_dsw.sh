@@ -12,7 +12,7 @@ cp "$0" "${OUTPUT_DIR}/${SCRIPT_NAME}"
 
 # -m debugpy --connect 5688
 
-GPUS_PER_NODE=${GPUS_PER_NODE:-8}
+GPUS_PER_NODE=${GPUS_PER_NODE:-2}
 export PYTHONPATH="$(pwd):$(pwd)/../"
 
 MIRCO_BATCH_SIZE=${MIRCO_BATCH_SIZE:-4}
