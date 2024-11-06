@@ -665,9 +665,9 @@ def preprocess_phi3_fast(
         input_ids = input_ids[:tokenizer.model_max_length]
         labels = labels[:tokenizer.model_max_length]
 
-        if not text_only:
-            if input_ids.count(32013) != num_image_token_list[0]:
-                print(f'WARNING: IMG_CONTEXT_TOKEN is broken. {input_ids.count(32013)} vs. {num_image_token_list[0]}')
+        # if not text_only:
+        #     if input_ids.count(32013) != num_image_token_list[0]:
+        #         print(f'WARNING: IMG_CONTEXT_TOKEN is broken. {input_ids.count(32013)} vs. {num_image_token_list[0]}')
 
     input_ids = torch.tensor(input_ids, dtype=torch.long)[None]
     labels = torch.tensor(labels, dtype=torch.long)[None]
