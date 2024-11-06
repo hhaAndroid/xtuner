@@ -38,7 +38,7 @@ from xtuner._lite.checkpoint import checkpoint
 from xtuner._lite.internvl.dataset import (dynamic_preprocess, preprocess,
                                            preprocess_internlm, preprocess_mpt,
                                            preprocess_phi3, build_transform, preprocess_phi3_fast,
-                                           dynamic_num_patch)
+                                           dynamic_num_patch, read_frames_decord)
 from xtuner._lite.internvl.v1_5.modeling_intern_vit import InternVisionModel
 
 logger = get_logger()
@@ -206,7 +206,11 @@ class LazyInternVL2Dataset(BaseOrigDataset):
                  max_length=8192,
                  group_by_length=False,
                  pack_data=False, pack_data_cache_dir=None,
-                 use_fast_tokenizer=False):
+                 use_fast_tokenizer=False,
+                 min_num_frames=8,  # video
+                 max_num_frames=16,  # video
+                 sampling_method='middle',  # video
+                 local_num_frames=8):  # video
 
         _model_cfg = AutoConfig.from_pretrained(model_name, trust_remote_code=True)
         architectures = _model_cfg.llm_config.architectures[0]
@@ -233,6 +237,13 @@ class LazyInternVL2Dataset(BaseOrigDataset):
         tokenizer = AutoTokenizer.from_pretrained(model_name,
                                                   use_fast=use_fast_tokenizer,
                                                   trust_remote_code=True)
+
+        # video
+        self.min_num_frames = min_num_frames
+        self.max_num_frames = max_num_frames
+        self.local_num_frames = local_num_frames
+        self.sampling_method = sampling_method
+
         super().__init__(data_name, data, None,
                          tokenizer=tokenizer,
                          max_length=-1,
@@ -475,10 +486,94 @@ class LazyInternVL2Dataset(BaseOrigDataset):
         )
         return ret
 
+    def _get_num_frames_by_duration(self, duration):
+        if self.local_num_frames != -1:
+            num_segments = int(duration // self.local_num_frames)
+            if num_segments == 0:
+                num_frames = self.local_num_frames
+            else:
+                num_frames = self.local_num_frames * num_segments
+        else:
+            num_frames = max(1, int(duration))
+
+        num_frames = min(self.max_num_frames, num_frames)
+        num_frames = max(self.min_num_frames, num_frames)
+
+        return num_frames
+
     def video_get_item(self, data_item, pack_data=False):
-        raise NotImplementedError
+        # Build transformation function
+        transform = self._get_transform()
+
+        # Ensure the first conversation contains a video placeholder
+        if '<video>' not in data_item['conversations'][0]['value']:
+            data_item['conversations'][0]['value'] = '<video>\n' + data_item['conversations'][0]['value']
+
+        # Get the video file path
+        video_file = data_item['video']
+        video_path = os.path.join(self.root, video_file)
+
+        if pack_data:
+            assert 'duration' in data_item, data_item
+            duration = data_item['duration']
+            num_frames = self._get_num_frames_by_duration(duration)
+            image_list = [0] * num_frames
+        else:
+            image_list = read_frames_decord(
+                video_path,
+                num_frames=self.max_num_frames,
+                min_num_frames=self.min_num_frames,
+                sample=self.sampling_method,
+                clip=data_item.get('clip', None))
+
+        # Generate special tokens for each video frame
+        special_tokens = '\n'.join(['Frame{}: <image>'.format(i + 1) for i in range(len(image_list))])
+        data_item['conversations'][0]['value'] = data_item['conversations'][0]['value'].replace(
+            '<video>\n', special_tokens)
+
+        # Select the appropriate preprocessing function based on the template name
+        preprocess_function = self._get_preprocess_function()
+
+        if pack_data:
+            num_image_tokens = [self.num_image_token] * len(image_list)
+            ret = preprocess_function(self.template_name, [deepcopy(data_item['conversations'])],
+                                      self.tokenizer, num_image_tokens, group_by_length=True,
+                                      ds_name=self.data_name, num_image=len(image_list))
+            return len(ret['input_ids'][0])
+
+        # Transform each frame image and stack them into a tensor
+        pixel_values = [transform(image) for image in image_list]
+        pixel_values = torch.stack(pixel_values)
+        num_patches = pixel_values.size(0)
+
+        # Preprocess the conversations and generate the return dictionary
+        num_image_tokens = [self.num_image_token] * num_patches
+        ret = preprocess_function(self.template_name, [deepcopy(data_item['conversations'])],
+                                  self.tokenizer, num_image_tokens, group_by_length=True,
+                                  ds_name=self.data_name, num_image=num_patches)
+        ret = dict(
+            input_ids=ret['input_ids'][0],
+            labels=ret['labels'][0],
+            pixel_values=pixel_values,
+            image_flags=torch.tensor([1] * num_patches, dtype=torch.long),
+            num_tokens=[len(ret['input_ids'][0])],
+            num_img_tokens=num_image_tokens,
+            num_imgs=[num_patches]
+        )
+        return ret
 
     def pure_text_get_item(self, data_item, pack_data=False):
+        preprocess_function = self._get_preprocess_function()
+
+        if pack_data:
+            # Preprocess the conversations and generate the return dictionary
+            ret = preprocess_function(self.template_name, [deepcopy(data_item['conversations'])],
+                                      self.tokenizer, [0],
+                                      text_only=True,
+                                      group_by_length=True, ds_name=self.data_name)
+
+            return len(ret['input_ids'][0])
+
         # Build transformation function
         transform = self._get_transform()
 
@@ -497,15 +592,11 @@ class LazyInternVL2Dataset(BaseOrigDataset):
         # Ensure there is only one patch
         assert num_patches == 1, f'The number of patches should be 1, but got {num_patches}.'
 
-        # Select the appropriate preprocessing function based on the template name
-        preprocess_function = self._get_preprocess_function()
-
         # Preprocess the conversations and generate the return dictionary
         ret = preprocess_function(self.template_name, [deepcopy(data_item['conversations'])],
                                   self.tokenizer, [self.num_image_token * num_patches],
                                   text_only=True,
                                   group_by_length=True, ds_name=self.data_name)
-
         # Create the final return dictionary
         ret = dict(
             input_ids=ret['input_ids'][0],

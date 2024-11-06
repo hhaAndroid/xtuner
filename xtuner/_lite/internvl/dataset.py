@@ -29,6 +29,11 @@ except ImportError as E:
     print('petrel_client is not installed. If you read data locally instead of from ceph, ignore it.')
 import sys
 
+try:
+    from decord import VideoReader
+except ImportError as E:
+    print('decord is not installed. If you read non video data, ignore it.')
+
 
 def get_frame_indices(num_frames, vlen, sample='rand', fix_start=None, input_fps=1, max_num_frames=-1):
     if sample in ['rand', 'middle']: # uniform sampling
@@ -977,3 +982,34 @@ def concat_pad_data_collator_dpo(features, pad_id=0):
         })
     batch = concat_pad_data_collator(double_features, pad_id=pad_id)
     return batch
+
+
+def read_frames_decord(
+        video_path, num_frames, sample='rand', fix_start=None,
+        client=None, clip=None, min_num_frames=4
+):
+    if 's3://' in video_path:
+        raise NotImplementedError
+    else:
+        video_reader = VideoReader(video_path, num_threads=1)
+    vlen = len(video_reader)
+    fps = video_reader.get_avg_fps()
+    duration = vlen / float(fps)
+    if clip:
+        start, end = clip
+        duration = end - start
+        vlen = int(duration * fps)
+        start_index = int(start * fps)
+
+    # t_num_frames = min(max(int(duration * sample_fps), min_num_frames), num_frames)
+    t_num_frames = np.random.randint(min_num_frames, num_frames + 1)
+
+    frame_indices = get_frame_indices(
+        t_num_frames, vlen, sample=sample, fix_start=fix_start,
+        input_fps=fps
+    )
+    if clip:
+        frame_indices = [f + start_index for f in frame_indices]
+    frames = video_reader.get_batch(frame_indices).asnumpy()  # (T, H, W, C), np.uint8
+    frames = [Image.fromarray(frames[i]) for i in range(frames.shape[0])]
+    return frames
