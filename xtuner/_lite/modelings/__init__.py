@@ -52,7 +52,7 @@ def lce_forward(
     image_grid_thw: Optional[torch.LongTensor] = None,
     video_grid_thw: Optional[torch.LongTensor] = None,
     rope_deltas: Optional[torch.LongTensor] = None,
-) -> Union[Tuple, Qwen2VLCausalLMOutputWithPast]:
+):
     r"""
     Copy paste Qwen2VL's forward but replace torch cross entropy with liger fused linear cross entropy
 
