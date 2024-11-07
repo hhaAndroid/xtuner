@@ -639,7 +639,7 @@ class LazyInternVL2Dataset(BaseOrigDataset):
         return ret
 
 
-def packing_collate(features, pack_batch=True, pad_id=0):
+def packing_collate(features, pack_batch=True, pad_id=0, sp_size=1):
     _features = []
     for ins in features:
         if isinstance(ins, list):
@@ -682,6 +682,19 @@ def packing_collate(features, pack_batch=True, pad_id=0):
         labels = torch.stack(labels)
         pixel_values = torch.cat(pixel_values, dim=0)
         image_flags = image_flags[0]
+
+    if sp_size > 1:
+        if input_ids.shape[1] % sp_size != 0:
+            pad_len = sp_size - input_ids.shape[1] % sp_size
+            input_ids = torch.cat([input_ids,
+                                   torch.full((1, pad_len), pad_id, dtype=torch.long)], dim=1)
+            labels = torch.cat([labels,
+                                torch.full((1, pad_len), -100, dtype=torch.long)], dim=1)
+            num_tokens = torch.cat([num_tokens,
+                                    torch.full((1,), pad_len, dtype=torch.int)], dim=0)
+        else:
+            num_tokens = torch.cat([num_tokens,
+                                    torch.full((1,), 0, dtype=torch.int)], dim=0)
 
     data_dict = {
         'input_ids': input_ids,
@@ -819,6 +832,14 @@ def llava_train(args):
 
     check_args(args)
     set_logger_envs(args)
+    tokenizer = AutoTokenizer.from_pretrained(args.model,
+                                              use_fast=args.use_fast_tokenizer,
+                                              trust_remote_code=True)
+    try:
+        pad_token_id = tokenizer.pad_token_id
+    except Exception as e:
+        logger.warning('Tokenizer does not have pad_token_id attribute. Use 0 instead.')
+        pad_token_id = 0
 
     with profile_time_and_memory('[Dataset & Dataloader]'):
         ds_collections = json.loads(open(args.datasets).read())
@@ -835,7 +856,8 @@ def llava_train(args):
             _datasets.append(_dataset)
         train_dataset = build_dataset(args, _datasets)
         logger.warning(f'{dist.get_rank()} ===== End of all dataset =====')
-        train_dataloader = build_train_dataloader(args, train_dataset, packing_collate)
+        packing_collate_partial = partial(packing_collate, pad_id=pad_token_id, sp_size=sp_size)
+        train_dataloader = build_train_dataloader(args, train_dataset, packing_collate_partial)
 
     args.dtype = 'bf16'
     dtype = torch.bfloat16
@@ -937,7 +959,6 @@ def llava_train(args):
             logger.info('====== use liger kernel =====')
 
     processor = None
-    tokenizer = None
 
     for step in range(start_step, total_steps):
 
@@ -985,8 +1006,10 @@ def llava_train(args):
                 avg_iter_loss.backward()
 
             step_loss += avg_iter_loss.item()
-
-            step_consumed_tokens += num_tokens.sum() / sp_size
+            if sp_size > 1:
+                step_consumed_tokens += num_tokens[:-1].sum() / sp_size
+            else:
+                step_consumed_tokens += num_tokens.sum() / sp_size
             step_consumed_img_tokens += num_img_tokens.sum() / sp_size
             step_consumed_imgs += num_imgs.sum() / sp_size
 

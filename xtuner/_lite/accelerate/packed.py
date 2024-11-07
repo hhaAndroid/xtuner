@@ -2,11 +2,8 @@ from contextlib import contextmanager
 
 import torch
 
-from xtuner._lite.parallel import get_sp_group, split_for_sequence_parallel
-
-
 @contextmanager
-def packed_sequence(num_tokens, enable=False, sp_size=1,skip_position_ids=False):
+def packed_sequence(num_tokens, enable=False, sp_size=1, skip_position_ids=False):
     from mmengine import MessageHub
     ctx = MessageHub.get_instance('packed_sequence')
 

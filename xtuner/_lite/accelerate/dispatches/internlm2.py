@@ -10,8 +10,7 @@ from transformers.cache_utils import StaticCache
 
 from ._attention import SUPPORT_FLASH2, flash_attn_wo_mask, varlen_flash_attn
 from xtuner._lite.yunchang import llama3_varlen_attention_sp_ulysses_ring
-from xtuner._lite.parallel import get_ring_group, get_ring_world_size,get_sp_world_size, get_ulysess_group
-
+from xtuner._lite.parallel.new_setup import get_ring_group, get_ring_world_size,get_sp_world_size, get_ulysess_group
 
 class InternLM2RotaryEmbedding(torch.nn.Module):
 
@@ -163,7 +162,7 @@ def _internlm2_varlen_attn_forward(
         kv_seq_len = key_states.shape[-2]
         if past_key_value is not None:
             kv_seq_len += past_key_value[0].shape[-2]
-        cos, sin = self.rotary_emb(value_states, seq_len=kv_seq_len)
+        cos, sin = self.rotary_emb(value_states, seq_len=position_ids.max() + 1)
         query_states, key_states = apply_rotary_pos_emb_old(query_states, key_states, cos, sin, position_ids)
     else:
         cos, sin = self.rotary_emb(value_states, position_ids)

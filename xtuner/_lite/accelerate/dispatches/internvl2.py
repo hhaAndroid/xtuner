@@ -155,7 +155,7 @@ def internvl2_forward(
 
         assert position_ids.size(1) == input_embeds.shape[1] == labels.shape[1], \
             f'{position_ids.size(1)} {input_embeds.shape[1]} {labels.shape[1]}'
-
+        assert position_ids.size(1) % sp_size == 0
         # `dim` is 1 as the shape of tensor is (bs, seq_len)
         position_ids = split_for_sequence_parallel(
             position_ids, dim=1, sp_group=sp_group)
@@ -163,7 +163,6 @@ def internvl2_forward(
             input_embeds, dim=1, sp_group=sp_group)
         labels = split_for_sequence_parallel(
             labels, dim=1, sp_group=sp_group)
-
         attention_mask = None  # 不需要
         attn_context.update_info('position_ids', position_ids)
 

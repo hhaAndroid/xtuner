@@ -17,6 +17,9 @@ _SP_ULYESS_MESH = None
 _SP_RING_MESH = None
 _SP_ULYESS_GROUP = None
 _SP_RING_GROUP = None
+_SP_WORLD_SIZE = None
+_SP_ULYESS_WORLD_SIZE = None
+_SP_RING_WORLD_SIZE = None
 
 
 def get_device():
