@@ -212,7 +212,7 @@ class LazyLLaVAOVDataset(BaseOrigDataset):
         chat_template = dict(system="",
                              user='<|im_start|>user {user}<|im_end|><|im_start|>assistant\n',
                              assistant='{assistant}<|im_end|>\n')
-        self.num_image_token = self.processor.num_image_token  # 729
+        self.num_image_token = self.processor.num_image_tokens  # 729
         # video
         self.min_num_frames = min_num_frames
         self.max_num_frames = max_num_frames
@@ -700,10 +700,21 @@ def build_fsdp_model(rank0_model, meta_model, dp_mesh, tp_mesh, dtype, args):
             checkpoint(block)
 
     meta_model.multi_modal_projector.apply(param_init_fn)
-    meta_model.image_newline.apply(param_init_fn)
     meta_model.language_model.model.embed_tokens.apply(param_init_fn)
     meta_model.language_model.model.norm.apply(param_init_fn)
     meta_model.language_model.lm_head.apply(param_init_fn)
+
+    # TODO : check 不支持
+    #meta_model.image_newline.apply(param_init_fn)
+    device = get_torch_device_module().current_device()
+    dtype = meta_model.image_newline.dtype
+    if dp_mesh.get_rank() == 0:
+        rank0_params = rank0_model.image_newline
+        rank0_param = rank0_params.to(device).to(dtype)
+    else:
+        rank0_param = torch.zeros(full_shape, dtype=dtype, device=device)
+    dist.broadcast(rank0_param, src=0)
+    meta_model.image_newline = rank0_param
 
     model = fully_shard(
         meta_model,
@@ -735,9 +746,7 @@ def llava_train(args):
 
     check_args(args)
     set_logger_envs(args)
-    tokenizer = AutoTokenizer.from_pretrained(args.model,
-                                              use_fast=args.use_fast_tokenizer,
-                                              trust_remote_code=True)
+    tokenizer = AutoTokenizer.from_pretrained(args.model)
     try:
         pad_token_id = tokenizer.pad_token_id
     except Exception as e:

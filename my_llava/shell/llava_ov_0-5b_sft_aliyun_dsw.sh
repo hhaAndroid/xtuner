@@ -21,8 +21,8 @@ ACCUMULATIVE_COUNTS=${ACCUMULATIVE_COUNTS:-2}
 # --group-by-modality-length \
 # -m debugpy --connect 5680
 HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 $ENV_PATH/bin/torchrun \
-  --nproc-per-node=$GPUS_PER_NODE  \
-  unify_internvl2_train.py \
+  --nproc-per-node=$GPUS_PER_NODE -m debugpy --connect 5680  \
+  unify_llava_ov_train.py \
   --model /cpfs01/shared/llm_razor/huanghaian/new_model/llava-onevision-qwen2-0.5b-ov-hf \
   --datasets data/internvl2_sft.json \
   --freeze-vit \
@@ -38,6 +38,5 @@ HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 $ENV_PATH/bin/torchrun \
   --checkpoint-interval 2000 \
   --checkpoint-drop-optimizer \
   --shard-strategy 'zero2' \
-  --group-by-length \
   2>&1 | tee -a "${OUTPUT_DIR}/training_log.txt"
 
