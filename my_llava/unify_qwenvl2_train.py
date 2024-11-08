@@ -747,7 +747,7 @@ def llava_train(args):
         logger.info(f'[Optimizer] {requried_grad_name}')
 
     optimizer = AdamW(
-        requried_grad_params, lr=args.lr, weight_decay=args.wd, fused=True)
+        requried_grad_params, lr=args.lr, weight_decay=args.wd, fused=False)
 
     max_memory = get_torch_device_module().max_memory_allocated()
     logger.info('[Train] Begin Train Loop. The current GPU memory is '
