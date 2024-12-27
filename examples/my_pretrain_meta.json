@@ -1,0 +1,100 @@
+{
+    "coco_caption_570k": {
+        "root": "/mnt/hwfile/xtuner/huanghaian/data/coco_caption/",
+        "annotation": "/mnt/hwfile/xtuner/huanghaian/data/coco_caption/coco_karpathy_train_val_llava.jsonl",
+        "data_augment": false,
+        "repeat_time": 1,
+        "length": 571747
+    },
+    "allava_laion_980k": {
+        "root": "/mnt/hwfile/openmmlab/zhaoxiangyu/datasets--FreedomIntelligence--ALLaVA-4V/snapshots/624bd4c5fedc2209cf952eedf75712413d8d912c/",
+        "annotation": "/mnt/hwfile/xtuner/huanghaian/data/ALLaVA-4V/allava_laion/ALLaVA-Caption-LAION-4V_llava.jsonl",
+        "data_augment": false,
+        "repeat_time": 2,
+        "length": 489042
+    },
+    "allava_vf_400k": {
+        "root": "/mnt/hwfile/openmmlab/zhaoxiangyu/",
+        "annotation": "/mnt/hwfile/xtuner/huanghaian/data/ALLaVA-4V/allava_vflan/ALLaVA-Caption-VFLAN-4V_llava.jsonl",
+        "data_augment": false,
+        "repeat_time": 2,
+        "length": 202541
+    },
+    "sharegpt4v_caption_1247k": {
+        "root": "/mnt/hwfile/xtuner/linzhihao/dataset/sharegpt4v/data/",
+        "annotation": "/mnt/hwfile/xtuner/huanghaian/data/sharegpt4v/share-captioner_coco_lcs_sam_1246k_1107_llava.jsonl",
+        "data_augment": false,
+        "repeat_time": 1,
+        "length": 1246901
+    },
+    "textcap_130k": {
+        "root": "/mnt/hwfile/xtuner/huanghaian/data/TextCaps/",
+        "annotation": "/mnt/hwfile/xtuner/huanghaian/data/TextCaps/TextCaps_0.1_train_val_llava.jsonl",
+        "data_augment": false,
+        "repeat_time": 1,
+        "length": 125595
+    },
+    "densecap_430k": {
+        "root": "/mnt/hwfile/xtuner/huanghaian/data/Detailed_Caption/",
+        "annotation": "/mnt/hwfile/xtuner/huanghaian/data/Detailed_Caption/densecap_llava_clear.jsonl",
+        "data_augment": false,
+        "repeat_time": 1,
+        "length": 426998
+    },
+    "screen2word_40k": {
+      "root": "/mnt/hwfile/xtuner/huanghaian/data/Screen2Words/RICO-Screen2Words/",
+      "annotation": "/mnt/hwfile/xtuner/huanghaian/data/Screen2Words/RICO-Screen2Words/Screen2Words_llava_clear.json",
+      "data_augment": false,
+      "repeat_time": 2,
+      "length": 22417
+    },
+    "llava_pretrain_558k": {
+      "root": "/mnt/petrelfs/share_data/huanghaian/llava_data/LLaVA-Pretrain/images/",
+      "annotation": "/mnt/hwfile/xtuner/huanghaian/data/phi3_official_internvl_pretrain/blip_laion_cc_sbu_558k.jsonl",
+      "data_augment": false,
+      "repeat_time": 1,
+      "length": 558000
+    },
+    "localized_narratives_200k": {
+      "root": "s3://xtuner/datasets/xtuner-vldata-v1/data/the_cauldron/",
+      "annotation": "/mnt/hwfile/xtuner/huanghaian/data/phi3_official_internvl_pretrain/localized_narratives.jsonl",
+      "data_augment": false,
+      "repeat_time": 1,
+      "length": 199998
+    },
+    "TextOCR_25k": {
+      "root": "/mnt/hwfile/xtuner/huanghaian/data/TextOCR/",
+      "annotation": "/mnt/hwfile/xtuner/huanghaian/data/TextOCR/TextOCR_0.1_train_val_llava.jsonl",
+      "data_augment": false,
+      "repeat_time": 1,
+      "length": 24902
+    },
+    "synthdog_500k": {
+      "root": "s3://xtuner/datasets/xtuner-vldata-v1/data/the_cauldron/",
+      "annotation": "/mnt/hwfile/xtuner/huanghaian/data/phi3_official_internvl_pretrain/synthdog_en.jsonl",
+      "data_augment": false,
+      "repeat_time": 1,
+      "length": 500000
+    },
+    "lain_coco_ocr_9m": {
+      "root": "public:s3://public-dataset/laion-coco/images/",
+      "annotation": "/mnt/hwfile/xtuner/huanghaian/data/phi3_official_internvl_pretrain/rand_select_laion_coco_ocr_9m.jsonl",
+      "data_augment": false,
+      "repeat_time": 1,
+      "length": 9000000
+    },
+     "bunny_laion_2m": {
+      "root": "/mnt/hwfile/xtuner/huanghaian/data/Bunny-v1_0-data/pretrain/images/",
+      "annotation": "/mnt/hwfile/xtuner/huanghaian/data/Bunny-v1_0-data/pretrain/bunny_pretrain_laion_2m_llava.jsonl",
+      "data_augment": false,
+      "repeat_time": 1,
+      "length": 2000000
+    },
+     "laion_coco_10m": {
+      "root": "public:s3://public-dataset/laion-coco/images/",
+      "annotation": "/mnt/hwfile/xtuner/huanghaian/data/phi3_official_internvl_pretrain/rand_select_laion_coco_10m.jsonl",
+      "data_augment": false,
+      "repeat_time": 1,
+      "length": 10000000
+    }
+}
