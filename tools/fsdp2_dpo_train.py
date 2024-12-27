@@ -56,6 +56,7 @@ from xtuner._lite.datasets.utils import move_data_to_device
 from xtuner._lite import get_repo_git_info
 from xtuner._lite.accelerate import dispatch_hf_code
 from xtuner._lite.modelings.dpo_utils import RunningMoments
+from xtuner._lite.modelings import register_remote_code
 
 try:
     from liger_kernel.chunked_loss import LigerFusedLinearPackDPOLoss
@@ -98,6 +99,7 @@ def parse_args():
         default=0.0,
         type=float,
         help='')
+    parser.add_argument('--compile', action='store_true')
     parser.add_argument('--use-liger', action='store_true')
     parser.add_argument('--use-hsdp', action='store_true')
     parser.add_argument('--tensorboard', action='store_true')
@@ -955,6 +957,13 @@ class DPOWrapper:
         labels = data.pop('labels')
 
         if self.use_liger:
+            cumulative_lengths = ctx.get_info('cumulative_lengths')
+            max_seqlen = ctx.get_info('max_seqlen')
+            position_ids = ctx.get_info('position_ids')
+            data['cumulative_lengths'] = cumulative_lengths
+            data['max_seqlen'] = max_seqlen
+            data['position_ids'] = position_ids
+
             all_hidden_states = self.model(**data, use_cache=False).logits
             with torch.no_grad():
                 all_ref_hidden_states = self.model_ref(**data, use_cache=False).logits
@@ -1170,7 +1179,6 @@ def build_model(args, dtype=torch.float32, device='cpu'):
             llm = AutoModelForCausalLM.from_pretrained(
                 args.model,
                 attn_implementation='flash_attention_2',
-                trust_remote_code=True,
                 torch_dtype=dtype)
 
         llm.to(dtype)
@@ -1181,6 +1189,12 @@ def build_model(args, dtype=torch.float32, device='cpu'):
                 param_fp32 = torch.nn.Parameter(param.to(dtype=torch.float32))
                 setattr(module, p_name, param_fp32)
     return llm
+
+
+def apply_compile(model):
+    for idx, layer in enumerate(model.model.layers):
+        layer = torch.compile(layer, fullgraph=True)
+        model.model.layers[idx] = layer
 
 
 def vlm_train(args):
@@ -1203,7 +1217,8 @@ def vlm_train(args):
     set_logger_envs(args)
     check_args(args)
 
-    tokenizer = AutoTokenizer.from_pretrained(args.model, trust_remote_code=True)
+    register_remote_code()
+    tokenizer = AutoTokenizer.from_pretrained(args.model)
 
     try:
         pad_token_id = tokenizer.pad_token_id
@@ -1259,12 +1274,18 @@ def vlm_train(args):
 
     args.dtype = 'bf16'
     dtype = torch.bfloat16
+
     with profile_time_and_memory('[Model]'):
         fsdp_model = build_model(args, dtype=dtype, device='meta')
-        dispatch_hf_code(fsdp_model)
+        if not args.compile:
+            # compile 情况下不需要 dispatch, 因为模型全部重写了
+            dispatch_hf_code(fsdp_model)
 
         if dist.get_rank() == 0:
             logger.info(fsdp_model)
+
+        if args.compile:
+            apply_compile(fsdp_model)
 
         timeout = timedelta(
             minutes=int(os.getenv('XTUNER_DATASET_TIMEOUT', default=45)))
@@ -1272,6 +1293,8 @@ def vlm_train(args):
         if rank == 0:
             logger.info(f'=====[Build CPU Model]=======')
             rank0_model = build_model(args, dtype=dtype, device='cpu')
+            if args.compile:
+                apply_compile(rank0_model)
         else:
             rank0_model = None
         dist.monitored_barrier(group=group, timeout=timeout)
@@ -1288,7 +1311,10 @@ def vlm_train(args):
             logger.info(fsdp_model)
     with profile_time_and_memory('[Ref Model]'):
         fsdp_ref_model = build_model(args, dtype=dtype, device='meta')
-        dispatch_hf_code(fsdp_ref_model)
+        if args.compile:
+            apply_compile(fsdp_ref_model)
+        else:
+            dispatch_hf_code(fsdp_ref_model)
 
         fsdp_ref_model.eval()
         fsdp_ref_model.requires_grad_(False)
@@ -1488,6 +1514,7 @@ def vlm_train(args):
             packed_ctx = packed_sequence(num_tokens, enable=True, sp_mesh=sp_mesh)
 
             with packed_ctx:
+
                 outputs = dpo_model(data, chosen_grad_nums=chosen_grad_nums / dp_size)
                 if args.use_liger:
                     dpo_losses = outputs['dpo_losses'] / per_step_iters
