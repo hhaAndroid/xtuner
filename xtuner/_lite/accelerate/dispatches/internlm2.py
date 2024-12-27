@@ -467,7 +467,8 @@ Optional[Tuple[torch.Tensor]]]:
                                                                                  position_ids,
                                                                                  past_key_value,
                                                                                  output_attentions,
-                                                                                 use_cache)
+                                                                                 use_cache,
+                                                                                 cache_position)
         return attn_output, attn_weights, past_key_value
     return _internlm2_varlen_attn_forward(self, hidden_states, attention_mask,
                                           position_ids, past_key_value,
