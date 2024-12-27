@@ -794,6 +794,12 @@ class DPOWrapper:
                 use_ref_model=True
             )
 
+            self.model_name = 'qwen'
+            try:
+                lm_head = self.model.lm_head
+            except Exception as e:
+                self.model_name = 'internlm'
+
     def _gather_masked_logits(self, logits, labels, mask):
         logits = torch.gather(
             logits.log_softmax(-1), dim=2,
@@ -953,14 +959,21 @@ class DPOWrapper:
             with torch.no_grad():
                 all_ref_hidden_states = self.model_ref(**data, use_cache=False).logits
 
+            if self.model_name == 'qwen':
+                lm_head = self.model.lm_head
+                ref_lm_head = self.model_ref.lm_head
+            else:
+                lm_head = self.model.output
+                ref_lm_head = self.model_ref.output
+
             loss, chosen_rewards, rejected_rewards, reward_margin, reward_acc, policy_nll_loss, bco_pair_rewards_batch = self.liger_dpo_loss(
-                self.model.lm_head.weight,
+                lm_head.weight,
                 all_hidden_states,
                 labels,
-                self.model.lm_head.bias,
+                lm_head.bias,
                 all_ref_hidden_states,
-                self.model_ref.lm_head.weight,
-                self.model_ref.lm_head.bias,
+                ref_lm_head.weight,
+                ref_lm_head.bias,
                 num_tokens,
                 chosen_grad_nums,
                 torch.tensor(self.running.mean) if "bco_pair" in self.loss_types else None
@@ -980,7 +993,6 @@ class DPOWrapper:
                 self.running.update(bco_pair_rewards_batch)
 
             return loss_dict
-
 
         if sp_size > 1 and self.use_sft_loss:
             chosen_masks = torch.ones(num_tokens.sum(), dtype=torch.bool, device=labels.device)
@@ -1476,30 +1488,42 @@ def vlm_train(args):
             packed_ctx = packed_sequence(num_tokens, enable=True, sp_mesh=sp_mesh)
 
             with packed_ctx:
-                outputs = dpo_model(data)
+                outputs = dpo_model(data, chosen_grad_nums=chosen_grad_nums / dp_size)
+                if args.use_liger:
+                    dpo_losses = outputs['dpo_losses'] / per_step_iters
+                    policy_nll_loss = outputs['policy_nll_loss']  # 外面不能乘以 dp_size 会导致梯度内外不一致
+                    avg_iter_loss = dpo_losses + policy_nll_loss
 
-                # Gradient Accumulation Loss Correction
-                bs = outputs['dpo_losses'].size(0)
-                dpo_losses = outputs['dpo_losses'].sum() / (per_step_iters * bs)
-                avg_iter_loss = dpo_losses
-                if args.rpo_alpha > 0:
-                    policy_nll_loss = outputs['policy_nll_loss'] / chosen_grad_nums * dp_size
-                    avg_iter_loss += policy_nll_loss
+                    avg_iter_loss.backward()
 
-                # if args.gradient_sync_after_accumulate and per_step_iters > 1:
-                #     is_accumulating = i < per_step_iters - 1
-                #     fsdp_model.set_is_last_backward(not is_accumulating)
-                #     fsdp_model.set_requires_gradient_sync(not is_accumulating)
-
-                avg_iter_loss.backward()
-
-                if args.rpo_alpha > 0:
                     nll_loss += policy_nll_loss.item()
+                    reward_acc += outputs['reward_acc'].item() / per_step_iters
+                    reward_margin += outputs['reward_margin'].item() / per_step_iters
+                    chosen_rewards += outputs['chosen_rewards'].item() / per_step_iters
+                    rejected_rewards += outputs['rejected_rewards'].item() / per_step_iters
+                else:
+                    # Gradient Accumulation Loss Correction
+                    bs = outputs['dpo_losses'].size(0)
+                    dpo_losses = outputs['dpo_losses'].sum() / (per_step_iters * bs)
+                    avg_iter_loss = dpo_losses
+                    if args.rpo_alpha > 0:
+                        policy_nll_loss = outputs['policy_nll_loss'] / chosen_grad_nums * dp_size
+                        avg_iter_loss += policy_nll_loss
 
-                reward_acc += outputs['reward_acc'].sum().item() / (per_step_iters * bs)
-                reward_margin += outputs['reward_margin'].sum().item() / (per_step_iters * bs)
-                chosen_rewards += outputs['chosen_rewards'].sum().item() / (per_step_iters * bs)
-                rejected_rewards += outputs['rejected_rewards'].sum().item() / (per_step_iters * bs)
+                    # if args.gradient_sync_after_accumulate and per_step_iters > 1:
+                    #     is_accumulating = i < per_step_iters - 1
+                    #     fsdp_model.set_is_last_backward(not is_accumulating)
+                    #     fsdp_model.set_requires_gradient_sync(not is_accumulating)
+
+                    avg_iter_loss.backward()
+
+                    if args.rpo_alpha > 0:
+                        nll_loss += policy_nll_loss.item()
+
+                    reward_acc += outputs['reward_acc'].sum().item() / (per_step_iters * bs)
+                    reward_margin += outputs['reward_margin'].sum().item() / (per_step_iters * bs)
+                    chosen_rewards += outputs['chosen_rewards'].sum().item() / (per_step_iters * bs)
+                    rejected_rewards += outputs['rejected_rewards'].sum().item() / (per_step_iters * bs)
 
             step_loss += avg_iter_loss.item()
             if sp_size > 1:
