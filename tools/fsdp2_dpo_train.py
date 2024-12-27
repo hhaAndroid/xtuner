@@ -783,6 +783,7 @@ class DPOWrapper:
         self.beta = args.beta
         self.label_smoothing = args.label_smoothing
         self._count = 0
+        self._compile = args.compile
 
         self.use_liger = args.use_liger
         if self.use_liger:
@@ -957,12 +958,13 @@ class DPOWrapper:
         labels = data.pop('labels')
 
         if self.use_liger:
-            cumulative_lengths = ctx.get_info('cumulative_lengths')
-            max_seqlen = ctx.get_info('max_seqlen')
-            position_ids = ctx.get_info('position_ids')
-            data['cumulative_lengths'] = cumulative_lengths
-            data['max_seqlen'] = max_seqlen
-            data['position_ids'] = position_ids
+            if self._compile:
+                cumulative_lengths = ctx.get_info('cumulative_lengths')
+                max_seqlen = ctx.get_info('max_seqlen')
+                position_ids = ctx.get_info('position_ids')
+                data['cumulative_lengths'] = cumulative_lengths
+                data['max_seqlen'] = max_seqlen
+                data['position_ids'] = position_ids
 
             all_hidden_states = self.model(**data, use_cache=False).logits
             with torch.no_grad():
@@ -1176,10 +1178,17 @@ class DPOJsonlDataset(JsonlDataset):
 def build_model(args, dtype=torch.float32, device='cpu'):
     with torch.device(device):
         with LoadWoInit():
-            llm = AutoModelForCausalLM.from_pretrained(
-                args.model,
-                attn_implementation='flash_attention_2',
-                torch_dtype=dtype)
+            if args.compile:
+                llm = AutoModelForCausalLM.from_pretrained(
+                    args.model,
+                    attn_implementation='flash_attention_2',
+                    torch_dtype=dtype)
+            else:
+                llm = AutoModelForCausalLM.from_pretrained(
+                    args.model,
+                    attn_implementation='flash_attention_2',
+                    torch_dtype=dtype,
+                    trust_remote_code=True)
 
         llm.to(dtype)
 
@@ -1217,8 +1226,12 @@ def vlm_train(args):
     set_logger_envs(args)
     check_args(args)
 
-    register_remote_code()
-    tokenizer = AutoTokenizer.from_pretrained(args.model)
+    # 为了简单避免冲突，compile 下走自定义 model，否则还是之前那一套
+    if args.compile:
+        register_remote_code()
+        tokenizer = AutoTokenizer.from_pretrained(args.model)
+    else:
+        tokenizer = AutoTokenizer.from_pretrained(args.model, trust_remote_code=True)
 
     try:
         pad_token_id = tokenizer.pad_token_id
