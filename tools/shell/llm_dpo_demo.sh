@@ -29,6 +29,7 @@ ACCUMULATIVE_COUNTS=${ACCUMULATIVE_COUNTS:-1}
 # --use-liger
 # export PYTHONPATH="$(pwd):$(pwd)/../:/cpfs01/shared/llm_razor/huanghaian/code/Liger-Kernel/src/"
 
+# --compile
 MAX_LENGHT=16384
 HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 $ENV_PATH/bin/torchrun \
   --nproc-per-node=$GPUS_PER_NODE\
@@ -36,6 +37,7 @@ HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 $ENV_PATH/bin/torchrun \
   --model /cpfs01/shared/llm_razor/huanghaian/new_model/Qwen2.5-1.5B-Instruct \
   --datasets /cpfs01/shared/llm_razor/huanghaian/data/ultrafeedback-binarized-preferences-cleaned/data/ultrafeedback_xpuyu.jsonl::1.0 \
   --dset-cache-dir ./ultrafeedback_xpuyu_cache \
+  --use-liger \
   --loss-type sigmoid,bco_pair \
   --loss-weight '0.8,0.2' \
   --rpo-alpha 1.0 \

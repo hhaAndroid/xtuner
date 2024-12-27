@@ -16,7 +16,10 @@ from concurrent.futures import wait
 import time
 from datetime import timedelta
 
+
 import torch
+torch._dynamo.utils.maybe_enable_compiled_autograd(True)  # 可要可不要
+
 import sys
 from collections import OrderedDict
 import shutil
@@ -963,7 +966,7 @@ class DPOWrapper:
                 max_seqlen = ctx.get_info('max_seqlen')
                 position_ids = ctx.get_info('position_ids')
                 data['cumulative_lengths'] = cumulative_lengths
-                data['max_seqlen'] = max_seqlen
+                data['max_seqlen'] = max_seqlen.item()
                 data['position_ids'] = position_ids
 
             all_hidden_states = self.model(**data, use_cache=False).logits
@@ -1668,6 +1671,8 @@ def vlm_train(args):
     dist.destroy_process_group()
 
 
+# compile 模式下，flash 需要是新的，例如 2.7.1
 if __name__ == '__main__':
     args = parse_args()
     vlm_train(args)
+
