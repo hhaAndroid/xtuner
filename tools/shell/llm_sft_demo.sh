@@ -1,7 +1,7 @@
 set -x
 
 export HOME='/cpfs01/shared/llm_razor/huanghaian/'
-export ENV_PATH="/cpfs01/shared/llm_razor/huanghaian/miniconda3/envs/xtuner_25"
+export ENV_PATH="/cpfs01/shared/llm_razor/huanghaian/miniconda3/envs/torchtitan"
 export TRITON_CACHE_DIR="/tmp/triton"
 
 OUTPUT_DIR='work_dirs/xpuyu_sft'
@@ -22,7 +22,6 @@ HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 $ENV_PATH/bin/torchrun \
   --llm /cpfs01/shared/llm_razor/huanghaian/model/internlm2_5-1_8b-chat \
   --chat-template internlm2 \
   --datasets /cpfs01/shared/llm_razor/huanghaian/data/llm_sft_data/xpuyu_sft \
-  --dset-formats processed \
   --dset-cache-dir /cpfs01/shared/llm_razor/huanghaian/data/llm_sft_data/xpuyu_sft_internlm2_1_8b_cache \
   --num-workers 4 \
   --dset-pack-level soft \
