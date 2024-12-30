@@ -629,7 +629,11 @@ def internlm2_causal_forward(
         if use_liger:
             logits = hidden_states
         else:
-            logits = self.output(hidden_states)
+            # 在 pp 场景下，可能 output 是 none
+            if self.output:
+                logits = self.output(hidden_states)
+            else:
+                logits = hidden_states
     else:
 
         if liger_kernel_is_available():

@@ -4,32 +4,34 @@ export HOME='/cpfs01/shared/llm_razor/huanghaian/'
 export ENV_PATH="/cpfs01/shared/llm_razor/huanghaian/miniconda3/envs/torchtitan"
 export TRITON_CACHE_DIR="/tmp/triton"
 
-OUTPUT_DIR='work_dirs/xpuyu_sft'
+OUTPUT_DIR='work_dirs/xpuyu_sft_pp'
 if [ ! -d "$OUTPUT_DIR" ]; then
   mkdir -p "$OUTPUT_DIR"
 fi
 SCRIPT_NAME=$(basename "$0")
 cp "$0" "${OUTPUT_DIR}/${SCRIPT_NAME}"
 
-GPUS_PER_NODE=${GPUS_PER_NODE:-8}
+GPUS_PER_NODE=${GPUS_PER_NODE:-4}
 export PYTHONPATH="$(pwd):$(pwd)/../"
 
-ACCUMULATIVE_COUNTS=${ACCUMULATIVE_COUNTS:-2}
+ACCUMULATIVE_COUNTS=${ACCUMULATIVE_COUNTS:-1}
 
 HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 $ENV_PATH/bin/torchrun \
-  --nproc-per-node=$GPUS_PER_NODE  \
+  --nproc-per-node=$GPUS_PER_NODE \
   fsdp_sft.py \
   --llm /cpfs01/shared/llm_razor/huanghaian/model/internlm2_5-1_8b-chat \
   --chat-template internlm2 \
   --datasets /cpfs01/shared/llm_razor/huanghaian/data/llm_sft_data/xpuyu_sft \
   --dset-cache-dir /cpfs01/shared/llm_razor/huanghaian/data/llm_sft_data/xpuyu_sft_internlm2_1_8b_cache \
+  --debug \
   --pp-size 2 \
-  --num-workers 4 \
+  --pp-mb 1 \
+  --num-workers 0 \
   --dset-pack-level soft \
   --global-pack \
-  --max-length 16384 \
+  --max-length 8192 \
   --group-by-length \
-  --global-batch-size $((GPUS_PER_NODE*ACCUMULATIVE_COUNTS)) \
+  --global-batch-size 4 \
   --lr 2e-6 \
   --wd 0.0 \
   --warmup-ratio 0.03 \

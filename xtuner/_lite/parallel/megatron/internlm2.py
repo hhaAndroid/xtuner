@@ -205,26 +205,22 @@ def generate_split_points(pp_schedule, pp_dim, num_layers):
             else:
                 current_layer += base_interval
         splits.append("layers." + str(current_layer))
-    logger.info(
-        f"No 'pipeline_parallel_split_points' so the generated splits are: {splits} \
-This may be sub-optimal as the number of layers per stage may be unbalanced."
-    )
     return splits
 
 
 def stage_ids_this_rank(
-    pp_rank: int, pp_size: int, num_stages: int, style: str = "loop"
+        pp_rank: int, pp_size: int, num_stages: int, style: str = "loop"
 ):
     """Compute the stage ids for the stages that will run on this pp rank for either a looped or V style schedule"""
     assert (
-        num_stages % pp_size == 0
+            num_stages % pp_size == 0
     ), f"num_stages {num_stages} must be evenly divisible by pp_size {pp_size}"
     stages_per_rank = num_stages // pp_size
     if style == "loop":
         return tuple(pp_rank + s * pp_size for s in range(stages_per_rank))
     elif style == "v":
         assert (
-            stages_per_rank == 2
+                stages_per_rank == 2
         ), f"v schedules assume 2 stages per rank, got {stages_per_rank}"
         stage_v_pairs = list(
             zip(range(pp_size), range(num_stages - 1, pp_size - 1, -1))
@@ -233,14 +229,14 @@ def stage_ids_this_rank(
 
 
 def pipeline_manual_split(
-    whole_model: nn.Module,
-    pp_mesh,
-    device,
-    pp_schedule,
+        whole_model: nn.Module,
+        pp_mesh,
+        device,
+        pp_schedule,
 ):
     pp_rank = pp_mesh.get_local_rank()
     pp_size = pp_mesh.size()
-    splits = generate_split_points(pp_schedule, pp_size, len(whole_model.layers))
+    splits = generate_split_points(pp_schedule, pp_size, len(whole_model.model.layers))  # [layers.12]
 
     def _build_stage(stage_idx, start_layer, stop_layer, is_first=False, is_last=False):
         model = copy.deepcopy(whole_model)
@@ -248,14 +244,20 @@ def pipeline_manual_split(
             model.model.tok_embeddings = None
 
         drop_layers = start_layer is not None
-        for name in list(model.model.layers.keys()):
+
+        need_del_models = []
+        for name in list(range(0, len(model.model.layers))):
             # we keep layers in a contiguous region between start (inclusive) and stop (exclusive)
             if f"layers.{name}" == start_layer:
                 drop_layers = False
             if f"layers.{name}" == stop_layer:
                 drop_layers = True
             if drop_layers:
-                del model.model.layers[name]
+                need_del_models.append(int(name))
+
+        for i in range(len(need_del_models) - 1, -1, -1):
+            del model.model.layers[need_del_models[i]]
+        del need_del_models
 
         if not is_last:
             model.model.norm = None
@@ -300,7 +302,7 @@ def build_pipeline_schedule(pp_mb, pp_schedule, pp_size, stages, loss_fn):
         f"Using pipeline schedule {pp_schedule}"
     )
     n_microbatches = pp_mb
-    if n_microbatches is None:
+    if n_microbatches == -1:
         n_microbatches = pp_size
 
     schedule = schedule_class(
@@ -340,7 +342,7 @@ def megatron_internlm2_casual(model,
         model.apply(param_init_fn)
 
         stages, model_parts = pipeline_manual_split(
-            model, pp_mesh,  'torch.cuda', pp_schedule,
+            model, pp_mesh, 'cuda', pp_schedule,
         )
         pp_schedule = build_pipeline_schedule(pp_mb, pp_schedule, pp_size, stages, loss_fn)
 
@@ -349,7 +351,7 @@ def megatron_internlm2_casual(model,
         from torch.distributed._composable.fsdp import fully_shard
 
         for model_part in model_parts:
-            num_layers = len(model_part.layers)
+            num_layers = len(model_part.model.layers)
             num_recompute_layers = int(num_layers * recompute_ratio)
 
             for i, block in enumerate(model_part.model.layers):

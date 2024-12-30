@@ -1015,7 +1015,10 @@ class InternLM2Model(InternLM2PreTrainedModel):
             use_cache = False
 
         if inputs_embeds is None:
-            inputs_embeds = self.tok_embeddings(input_ids)
+            if self.tok_embeddings:
+                inputs_embeds = self.tok_embeddings(input_ids)
+            else:
+                inputs_embeds = input_ids
 
         return_legacy_cache = False
         if use_cache and not isinstance(
@@ -1081,7 +1084,8 @@ class InternLM2Model(InternLM2PreTrainedModel):
             if output_attentions:
                 all_self_attns += (layer_outputs[1], )
 
-        hidden_states = self.norm(hidden_states)
+        if self.norm:
+            hidden_states = self.norm(hidden_states)
 
         # add hidden states from the last decoder layer
         if output_hidden_states:

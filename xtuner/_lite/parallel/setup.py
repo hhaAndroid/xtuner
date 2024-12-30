@@ -38,7 +38,7 @@ def setup_parallel(sp_size=1, tp_size=1, ep_size=1, pp_size=1):
         device, (dp_size, pp_size * sp_size * tp_size), mesh_dim_names=('dp', 'same_data'))
 
     model_mesh = init_device_mesh(
-        device, (dp_size * pp_size* sp_size, tp_size), mesh_dim_names=('fsdp', 'tp'))
+        device, (dp_size * sp_size, pp_size * tp_size), mesh_dim_names=('fsdp', 'tp'))
 
     world_mesh = init_device_mesh(
         device, (world_size, ), mesh_dim_names=('world', ))

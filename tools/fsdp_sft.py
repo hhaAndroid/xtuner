@@ -45,7 +45,7 @@ from torch.optim.lr_scheduler import CosineAnnealingLR, LambdaLR
 from torch.utils.data import ConcatDataset, DataLoader
 from transformers import AutoConfig, AutoModelForCausalLM
 from transformers.utils.import_utils import is_flash_attn_2_available
-
+from xtuner._lite.modelings import register_remote_code
 from xtuner._lite import (AutoTokenizer, get_device, get_logger,
                           get_torch_device_module)
 from xtuner._lite.accelerate import (LORA_TARGET_MAP, dispatch_hf_code, LoadWoInit,
@@ -338,8 +338,7 @@ def map_meta_modules(model, meta_model):
 def build_llm_model(args, config, world_size, dtype=torch.float32):
     with LoadWoInit():
         llm = AutoModelForCausalLM.from_pretrained(
-            args.llm, config=config, attn_implementation='flash_attention_2',
-            trust_remote_code=True)
+            args.llm, config=config, attn_implementation='flash_attention_2')
 
     # Ensure all numerical values in the optimizer are fp32.
     # FSDP will use low precision during forward.
@@ -466,6 +465,8 @@ def sft(args):
     tp_size = tp_mesh.size()
     sp_size = sp_mesh.size()
     world_size = world_mesh.size()
+
+    register_remote_code()
 
     cpu_comm_timeout = timedelta(minutes=60)
     gloo_group = dist.new_group(backend='gloo', timeout=cpu_comm_timeout)
@@ -664,7 +665,7 @@ def sft(args):
         raise RuntimeError('`dtype` only supports `fp16`, `bf16` or `auto`, '
                            f'but found {args.dtype}.')
 
-    llm_cfg = AutoConfig.from_pretrained(args.llm, trust_remote_code=True)
+    llm_cfg = AutoConfig.from_pretrained(args.llm)
     if is_flash_attn_2_available():
         llm_cfg.attn_implementation = 'flash_attention_2'
 
@@ -697,7 +698,7 @@ def sft(args):
     mp_policy = MixedPrecisionPolicy(param_dtype=dtype, reduce_dtype=dtype)
 
     def loss_fn(pred, shift_labels):
-        shift_logits = pred.logits
+        shift_logits = pred[0]  # model 输出是 tuple
         shift_logits = shift_logits.view(-1, vocab_size)
         shift_labels = shift_labels.view(-1)
         shift_labels = shift_labels.to(shift_logits.device)
@@ -717,13 +718,15 @@ def sft(args):
             pp_mesh=pp_mesh,
             mp_policy=mp_policy,
             recompute_ratio=args.selective_recompute,
-            reshard_after_forward= False if pp_size>1 else True,
+            reshard_after_forward=False if pp_size > 1 else True,  # 防止 all-gather
             pp_mb=args.pp_mb,
             pp_schedule=args.pp_schedule,
             loss_fn=loss_fn)
 
         for part in model_parts:
             part.train()
+
+        logger.info(model_parts)
 
     dist.barrier()
     gc.collect()
@@ -904,6 +907,24 @@ def sft(args):
             else:
                 num_tokens[-1] = num_tokens[-1] - 1
 
+            # pp 只能如此，强制 shape 为固定值
+            dim = 1
+            pad_num = args.max_length - labels.shape[1]
+            pad_shape = (*input_ids.shape[:dim], pad_num,
+                         *input_ids.shape[dim + 1:]) if dim != -1 else (
+                *input_ids.shape[:dim], pad_num)
+            pad = torch.full(pad_shape, 0, dtype=input_ids.dtype, device=input_ids.device)
+            input_ids = torch.cat([input_ids, pad], dim=dim)
+
+            pad_shape = (*labels.shape[:dim], pad_num,
+                         *labels.shape[dim + 1:]) if dim != -1 else (
+                *labels.shape[:dim], pad_num)
+            pad = torch.full(pad_shape, -100, dtype=labels.dtype, device=labels.device)
+            labels = torch.cat([labels, pad], dim=dim)
+
+            if pad_num > 0:
+                num_tokens = torch.cat([num_tokens, torch.IntTensor([pad_num]).to(DEVICE)], dim=-1)
+
             if sp_size > 1:
                 # `dim` is 1 as the shape of tensor is (bs, seq_len, ...)
                 input_ids = pad_for_sequence_parallel(input_ids, 0, sp_mesh, dim=1)
@@ -926,21 +947,13 @@ def sft(args):
                 is_last_stage = pp_mesh.get_local_rank() == pp_mesh.size() - 1
 
                 if pp_mesh.get_local_rank() == 0:
-                    pp_schedule.step(input_ids, use_cache=False)
+                    # 必须要返回 tuple，否则 pp 不支持自定义对象
+                    pp_schedule.step(input_ids, use_cache=False, return_dict=False)
                 elif is_last_stage:
                     losses = []
-                    pp_schedule.step(target=labels, losses=losses)
+                    pp_schedule.step(target=labels, losses=losses, return_dict=False)
                 else:
-                    pp_schedule.step()
-
-                # loss = llm(input_ids=input_ids, labels=labels, label_shifted=True, use_cache=False).loss
-                #
-                # loss = loss * (labels >= 0).sum() / global_grad_tokens * dp_size
-                #
-                # if scaler and args.use_lora:
-                #     scaler.scale(loss).backward()
-                # else:
-                #     loss.backward()
+                    pp_schedule.step(return_dict=False)
 
                 loss = (
                     torch.mean(torch.stack(losses))
@@ -958,7 +971,7 @@ def sft(args):
         # grad_norm = clip_grad_norm_(
         #     requried_grad_params, fsdp_mesh, args.max_grad_norm)
         # TODO: 暂时写死
-        grad_norm = torch.Tensor([0.0]).to(DEVICE)
+        grad_norm = torch.tensor(0.0).to(DEVICE)
 
         if grad_norm.isnan() or grad_norm.isinf():
             train_state.found_nan()
