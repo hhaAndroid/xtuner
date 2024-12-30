@@ -4,6 +4,7 @@ from torch.distributed.device_mesh import init_device_mesh
 
 from xtuner._lite import get_device
 
+_PP_MESH = None
 _SP_MESH = None
 _DP_MESH = None
 _SAME_DATA_MESH = None
@@ -15,7 +16,7 @@ _EP_MESH = None
 _EXPERTS_FSDP_MESH = None
 
 
-def setup_parallel(sp_size=1, tp_size=1, ep_size=1):
+def setup_parallel(sp_size=1, tp_size=1, ep_size=1, pp_size=1):
 
     if not dist.is_initialized():
         dist_launcher = infer_launcher()
@@ -26,17 +27,18 @@ def setup_parallel(sp_size=1, tp_size=1, ep_size=1):
     world_size = dist.get_world_size()
     assert world_size % sp_size == 0
     assert world_size % sp_size % tp_size == 0
+    assert world_size % sp_size % tp_size % pp_size == 0
     assert tp_size <= 8
 
-    dp_size = world_size // sp_size // tp_size
+    dp_size = world_size // sp_size // tp_size // pp_size
     data_mesh = init_device_mesh(
-        device, (dp_size, sp_size, tp_size), mesh_dim_names=('dp', 'sp', 'tp'))
+        device, (dp_size, pp_size, sp_size, tp_size), mesh_dim_names=('dp', 'pp', 'sp', 'tp'))
 
     same_data_mesh = init_device_mesh(
-        device, (dp_size, sp_size * tp_size), mesh_dim_names=('dp', 'same_data'))
+        device, (dp_size, pp_size * sp_size * tp_size), mesh_dim_names=('dp', 'same_data'))
 
     model_mesh = init_device_mesh(
-        device, (dp_size * sp_size, tp_size), mesh_dim_names=('fsdp', 'tp'))
+        device, (dp_size * pp_size* sp_size, tp_size), mesh_dim_names=('fsdp', 'tp'))
 
     world_mesh = init_device_mesh(
         device, (world_size, ), mesh_dim_names=('world', ))
@@ -45,6 +47,11 @@ def setup_parallel(sp_size=1, tp_size=1, ep_size=1):
     _DP_MESH = data_mesh['dp']
     _DP_GROUP = data_mesh['dp'].get_group()
     _DP_WORLD_SIZE = data_mesh['dp'].size()
+
+    global _PP_MESH, _PP_GROUP, _PP_WORLD_SIZE
+    _PP_MESH = data_mesh['pp']
+    _PP_GROUP = data_mesh['pp'].get_group()
+    _PP_WORLD_SIZE = data_mesh['pp'].size()
 
     global _SP_MESH, _SP_GROUP, _SP_WORLD_SIZE
     _SP_MESH = data_mesh['sp']
@@ -106,5 +113,11 @@ def get_sp_mesh():
 def get_tp_mesh():
     return _TP_MESH
 
+
 def get_same_data_mesh():
     return _SAME_DATA_MESH
+
+
+def get_pp_mesh():
+    return _PP_MESH
+

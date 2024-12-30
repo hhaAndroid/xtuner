@@ -162,6 +162,155 @@ def megatron_internlm2(model,
         reshard_after_forward=reshard_after_forward)
 
 
+import copy
+from torch.distributed.pipelining.schedules import (
+    _PipelineScheduleRuntime,
+    get_schedule_class,
+    PipelineScheduleMulti,
+    PipelineScheduleSingle,
+)
+from torch.distributed.pipelining import PipelineStage
+import os
+
+def generate_split_points(pp_schedule, pp_dim, num_layers):
+    schedule_class = get_schedule_class(pp_schedule)
+    if issubclass(schedule_class, PipelineScheduleSingle):
+        num_stages_per_rank = 1
+    elif issubclass(schedule_class, PipelineScheduleMulti):
+        # Multi-stage schedules support more than 2 stages per rank, but this is the default if
+        # no pipeline split is specified
+        num_stages_per_rank = 2
+    else:
+        raise ValueError(
+            f"Unsupported pipeline schedule: {pp_schedule}"
+        )
+    total_stages = pp_dim * num_stages_per_rank
+
+    if total_stages > num_layers:
+        raise ValueError("Total stages cannot be greater than the number of layers")
+
+    base_interval = num_layers // total_stages
+    extra_layers = num_layers % total_stages
+
+    splits = []
+    current_layer = 0
+    for i in range(total_stages - 1):
+        if i == 0:
+            current_layer += base_interval
+        else:
+            # Middle stages get an extra layer if there are any remaining
+            if extra_layers > 0:
+                current_layer += base_interval + 1
+                extra_layers -= 1
+            else:
+                current_layer += base_interval
+        splits.append("layers." + str(current_layer))
+    logger.info(
+        f"No 'pipeline_parallel_split_points' so the generated splits are: {splits} \
+This may be sub-optimal as the number of layers per stage may be unbalanced."
+    )
+    return splits
+
+
+def stage_ids_this_rank(
+    pp_rank: int, pp_size: int, num_stages: int, style: str = "loop"
+):
+    """Compute the stage ids for the stages that will run on this pp rank for either a looped or V style schedule"""
+    assert (
+        num_stages % pp_size == 0
+    ), f"num_stages {num_stages} must be evenly divisible by pp_size {pp_size}"
+    stages_per_rank = num_stages // pp_size
+    if style == "loop":
+        return tuple(pp_rank + s * pp_size for s in range(stages_per_rank))
+    elif style == "v":
+        assert (
+            stages_per_rank == 2
+        ), f"v schedules assume 2 stages per rank, got {stages_per_rank}"
+        stage_v_pairs = list(
+            zip(range(pp_size), range(num_stages - 1, pp_size - 1, -1))
+        )
+        return stage_v_pairs[pp_rank]
+
+
+def pipeline_manual_split(
+    whole_model: nn.Module,
+    pp_mesh,
+    device,
+    pp_schedule,
+):
+    pp_rank = pp_mesh.get_local_rank()
+    pp_size = pp_mesh.size()
+    splits = generate_split_points(pp_schedule, pp_size, len(whole_model.layers))
+
+    def _build_stage(stage_idx, start_layer, stop_layer, is_first=False, is_last=False):
+        model = copy.deepcopy(whole_model)
+        if not is_first:
+            model.model.tok_embeddings = None
+
+        drop_layers = start_layer is not None
+        for name in list(model.model.layers.keys()):
+            # we keep layers in a contiguous region between start (inclusive) and stop (exclusive)
+            if f"layers.{name}" == start_layer:
+                drop_layers = False
+            if f"layers.{name}" == stop_layer:
+                drop_layers = True
+            if drop_layers:
+                del model.model.layers[name]
+
+        if not is_last:
+            model.model.norm = None
+            model.output = None
+
+        stage = PipelineStage(
+            model,
+            stage_idx,
+            num_stages,
+            device,
+            group=pp_mesh.get_group(),
+        )
+        return stage, model
+
+    num_stages = len(splits) + 1
+
+    stages = []
+    models = []
+    for stage_idx in stage_ids_this_rank(pp_rank, pp_size, num_stages, style="loop"):
+        start_layer = splits[stage_idx - 1] if stage_idx > 0 else None
+        stop_layer = splits[stage_idx] if stage_idx < num_stages - 1 else None
+        stage, model_chunk = _build_stage(
+            stage_idx,
+            start_layer,
+            stop_layer,
+            is_first=stage_idx == 0,
+            is_last=stage_idx == num_stages - 1,
+        )
+        logger.info(
+            f"PP rank {pp_rank} is building stage_idx {stage_idx}"
+            f" with start_layer {start_layer}, stop_layer {stop_layer}: model chunk \n{model_chunk}"
+        )
+        stages.append(stage)
+        models.append(model_chunk)
+    return stages, models
+
+
+def build_pipeline_schedule(pp_mb, pp_schedule, pp_size, stages, loss_fn):
+    schedule_class = get_schedule_class(pp_schedule)
+    looped_schedule = issubclass(schedule_class, PipelineScheduleMulti)
+    logger.info(
+        f"Using pipeline schedule {pp_schedule}"
+    )
+    n_microbatches = pp_mb
+    if n_microbatches is None:
+        n_microbatches = pp_size
+
+    schedule = schedule_class(
+        stages if looped_schedule else stages[0],
+        n_microbatches=n_microbatches,
+        loss_fn=loss_fn,
+    )
+    return schedule
+
+
 def megatron_internlm2_casual(model,
                               rank0_model,
                               dp_mesh,
@@ -169,44 +318,102 @@ def megatron_internlm2_casual(model,
                               pp_mesh=None,
                               mp_policy=None,
                               recompute_ratio=1.0,
-                              reshard_after_forward=True):
-    megatron_internlm2(
-        model.model,
-        rank0_model.model if dp_mesh.get_rank() == 0 else None,
-        dp_mesh,
-        tp_mesh=tp_mesh,
-        pp_mesh=pp_mesh,
-        mp_policy=mp_policy,
-        recompute_ratio=recompute_ratio,
-        reshard_after_forward=reshard_after_forward)
+                              reshard_after_forward=True,
+                              pp_mb=-1,
+                              pp_schedule=None,
+                              loss_fn=None):
+    # 先利用 pp 切分模型，然后在对每个 pp 内部的模型进行 fsdp 包装
+    pp_size = pp_mesh.size()
+    if pp_size > 1:
+        # TODO： 为了代码简单暂时先对 meta model 进行初始化，这样会找出显存浪费
+        # 对每个 model_part 进行 fsdp 包装
+        if dp_mesh.get_rank() == 0:
+            rank0_map = map_rank0_modules(model, rank0_model)
+        else:
+            rank0_map = None
+        param_init_fn = partial(
+            lazy_init_megatron,
+            rank0_map=rank0_map,
+            dp_mesh=dp_mesh,
+            tp_mesh=tp_mesh,
+        )
+        model.apply(param_init_fn)
 
-    if tp_mesh and tp_mesh.size() > 1:
-        model = parallelize_module(
-            module=model,
-            device_mesh=tp_mesh,
-            parallelize_plan={
-                'output': ColwiseParallel(output_layouts=Replicate(), ),
-            })
+        stages, model_parts = pipeline_manual_split(
+            model, pp_mesh,  'torch.cuda', pp_schedule,
+        )
+        pp_schedule = build_pipeline_schedule(pp_mb, pp_schedule, pp_size, stages, loss_fn)
 
-    if dp_mesh.get_rank() == 0:
-        rank0_map = map_rank0_modules(model, rank0_model)
+        # 进行 fsdp 切分
+        from torch.distributed._composable import checkpoint
+        from torch.distributed._composable.fsdp import fully_shard
+
+        for model_part in model_parts:
+            num_layers = len(model_part.layers)
+            num_recompute_layers = int(num_layers * recompute_ratio)
+
+            for i, block in enumerate(model_part.model.layers):
+                fully_shard(
+                    block,
+                    mesh=dp_mesh,
+                    mp_policy=mp_policy,
+                    reshard_after_forward=reshard_after_forward,
+                )
+                if i < num_recompute_layers:
+                    checkpoint(block)
+
+            if version.parse(torch.__version__) >= version.parse("2.5.0"):
+                for layer_cur, layer_next in zip(model_part.model.layers[:-1], model_part.model.layers[1:]):
+                    layer_cur.set_modules_to_forward_prefetch([layer_next])
+
+            fully_shard(
+                model_part,
+                mesh=dp_mesh,
+                mp_policy=mp_policy,
+                reshard_after_forward=reshard_after_forward)
+
+        return pp_schedule, model_parts
+
     else:
-        rank0_map = None
+        megatron_internlm2(
+            model.model,
+            rank0_model.model if dp_mesh.get_rank() == 0 else None,
+            dp_mesh,
+            tp_mesh=tp_mesh,
+            pp_mesh=pp_mesh,
+            mp_policy=mp_policy,
+            recompute_ratio=recompute_ratio,
+            reshard_after_forward=reshard_after_forward)
 
-    param_init_fn = partial(
-        lazy_init_megatron,
-        rank0_map=rank0_map,
-        dp_mesh=dp_mesh,
-        tp_mesh=tp_mesh,
-    )
-    model.output.apply(param_init_fn)
+        if tp_mesh and tp_mesh.size() > 1:
+            model = parallelize_module(
+                module=model,
+                device_mesh=tp_mesh,
+                parallelize_plan={
+                    'output': ColwiseParallel(output_layouts=Replicate(), ),
+                })
 
-    from torch.distributed._composable.fsdp import fully_shard
-    fully_shard(
-        model,
-        mesh=dp_mesh,
-        mp_policy=mp_policy,
-        reshard_after_forward=reshard_after_forward)
+        if dp_mesh.get_rank() == 0:
+            rank0_map = map_rank0_modules(model, rank0_model)
+        else:
+            rank0_map = None
+
+        param_init_fn = partial(
+            lazy_init_megatron,
+            rank0_map=rank0_map,
+            dp_mesh=dp_mesh,
+            tp_mesh=tp_mesh,
+        )
+        model.output.apply(param_init_fn)
+
+        from torch.distributed._composable.fsdp import fully_shard
+        fully_shard(
+            model,
+            mesh=dp_mesh,
+            mp_policy=mp_policy,
+            reshard_after_forward=reshard_after_forward)
+
+        return model
 
 
 def megatron_internlm2_reward(model,

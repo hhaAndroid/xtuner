@@ -37,7 +37,7 @@ def megatron_parallelize(model,
 
     parallel_fn = MEGATRON_MAP[cls_name]
 
-    model = parallel_fn(
+    pp_schedule, model_parts = parallel_fn(
         model,
         rank0_model,
         dp_mesh,
@@ -48,4 +48,4 @@ def megatron_parallelize(model,
         reshard_after_forward=reshard_after_forward,
         **kwargs)
 
-    return model
+    return pp_schedule, model_parts

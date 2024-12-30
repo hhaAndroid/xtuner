@@ -63,7 +63,7 @@ from xtuner._lite.parallel import (LengthGroupedSampler, ParallelSampler,
 from xtuner._lite.parallel import (ParallelSampler, get_dp_mesh, get_fsdp_mesh,
                                    get_sp_mesh, get_tp_mesh, get_world_mesh, get_same_data_mesh,
                                    pad_for_sequence_parallel, setup_parallel,
-                                   reduce_sequence_parallel_loss,
+                                   reduce_sequence_parallel_loss, get_pp_mesh,
                                    split_for_sequence_parallel)
 from xtuner._lite.parallel.megatron import megatron_parallelize
 from xtuner._lite.parallel.fsdp import clip_grad_norm_
@@ -76,8 +76,8 @@ DEVICE_MODULE = get_torch_device_module()
 
 SUPPORT_DATA_FORMATS = OPENAI_CONVERT_MAP.keys()
 
-def log_format(rank, debug=False):
 
+def log_format(rank, debug=False):
     sp_rank = get_sp_mesh().get_local_rank()
     dp_rank = get_dp_mesh().get_local_rank()
     tp_rank = get_tp_mesh().get_local_rank()
@@ -94,15 +94,15 @@ def log_format(rank, debug=False):
     formatter += ' <level>{message}</level>'
     return formatter
 
-def send_to_feishu(web_hook, msg):
 
+def send_to_feishu(web_hook, msg):
     header = {
-        "Content-Type" : "application/json;charset=UTF-8"
+        "Content-Type": "application/json;charset=UTF-8"
     }
 
     body = {
-        "msg_type" : "text",
-        "content" : { "text" : f"<at user_id=\"all\">所有人</at>{msg}"}
+        "msg_type": "text",
+        "content": {"text": f"<at user_id=\"all\">所有人</at>{msg}"}
     }
 
     try:
@@ -172,6 +172,13 @@ def parse_args():
         help=('The sharding strategy to be used for distributed training.'))
     model_args.add_argument('--cpu-offload', action='store_true', help=(''))
     model_args.add_argument('--sp-size', type=int, default=1, help='')
+
+    model_args.add_argument('--pp-size', type=int, default=1, help='')
+    model_args.add_argument('--pp-mb', type=int, default=-1, help='')
+    model_args.add_argument('--pp-schedule', type=str, default='GPipe',
+                            choices=['GPipe', '1F1B'],
+                            help='')
+
     data_args = parser.add_argument_group('data', 'Dataset Related Settings')
     data_args.add_argument(
         '--datasets',
@@ -331,7 +338,7 @@ def map_meta_modules(model, meta_model):
 def build_llm_model(args, config, world_size, dtype=torch.float32):
     with LoadWoInit():
         llm = AutoModelForCausalLM.from_pretrained(
-            args.llm, config=config, attn_implementation='flash_attention_2', 
+            args.llm, config=config, attn_implementation='flash_attention_2',
             trust_remote_code=True)
 
     # Ensure all numerical values in the optimizer are fp32.
@@ -375,8 +382,8 @@ class TrainState(Stateful):
 
     def state_dict(self):
         return {
-            'seed': self.seed, 'current_step': self.cur_step, 
-            'total_steps': self.total_steps, 
+            'seed': self.seed, 'current_step': self.cur_step,
+            'total_steps': self.total_steps,
             'if_nan_skip_steps': self.if_nan_skip_steps
         }
 
@@ -394,7 +401,7 @@ def find_latest_timestamp(work_dir):
     # Iterate over all files and directories in the specified directory
     for entry in os.listdir(work_dir):
         full_path = os.path.join(work_dir, entry)
-        
+
         # Check if the entry is a directory
         if os.path.isdir(full_path):
             try:
@@ -407,39 +414,36 @@ def find_latest_timestamp(work_dir):
             except ValueError:
                 # If conversion fails, skip this entry
                 continue
-    
+
     if latest_timestamp is not None:
-        latest_timestamp = latest_timestamp.strftime( '%Y%m%d%H%M%S')
+        latest_timestamp = latest_timestamp.strftime('%Y%m%d%H%M%S')
 
     return latest_timestamp
 
 
 def find_checkpoints(directory, prefix='ckpt'):
-
     if prefix == 'ckpt':
         pattern = r'^ckpt-(\d+)$'
     elif prefix == 'hf':
         pattern = r'^hf-(\d+)$'
     else:
         raise ValueError
-    
+
     latest_step = -1
     latest_checkpoint = None
 
     all_folders = [d for d in os.listdir(directory) if os.path.isdir(os.path.join(directory, d))]
-    
+
     checkpoints = []
     for folder in all_folders:
         match = re.match(pattern, folder)
         if match:
             # 将文件夹名和匹配到的数字转换为整数并存储为元组
             checkpoints.append((folder, int(match.group(1))))
-    
+
     checkpoints.sort(key=lambda x: x[1])
 
     return [os.path.join(directory, folder[0]) for folder in checkpoints]
-
-
 
 
 # @logger.catch
@@ -447,16 +451,18 @@ def sft(args):
     ###########################################################################
     #                           1. Environment                                #
     ###########################################################################
-    setup_parallel(sp_size=args.sp_size, tp_size=1)
+    setup_parallel(sp_size=args.sp_size, tp_size=1, pp_size=args.pp_size)
     set_random_seed(args.seed)
 
     dp_mesh = get_dp_mesh()
+    pp_mesh = get_pp_mesh()
     tp_mesh = get_tp_mesh()
     sp_mesh = get_sp_mesh()
     fsdp_mesh = get_fsdp_mesh()  # dp_size * sp_size
     world_mesh = get_world_mesh()  # dp_size * sp_size * tp_size
-    
+
     dp_size = dp_mesh.size()
+    pp_size = pp_mesh.size()
     tp_size = tp_mesh.size()
     sp_size = sp_mesh.size()
     world_size = world_mesh.size()
@@ -479,7 +485,7 @@ def sft(args):
     if args.resume:
         mkdir_or_exist(args.work_dir)
         timestamp = find_latest_timestamp(args.work_dir)
-        
+
         if timestamp is None:
             timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
     else:
@@ -664,8 +670,7 @@ def sft(args):
 
     llm_cfg.use_cache = False
     llm_cfg.torch_dtype = dtype
-    
-    
+    vocab_size = llm_cfg.vocab_size
 
     # Only load parameters on rank 0 to avoid each rank repeatedly loading the
     # same model into the CPU, wasting memory
@@ -691,17 +696,34 @@ def sft(args):
 
     mp_policy = MixedPrecisionPolicy(param_dtype=dtype, reduce_dtype=dtype)
 
+    def loss_fn(pred, shift_labels):
+        shift_logits = pred.logits
+        shift_logits = shift_logits.view(-1, vocab_size)
+        shift_labels = shift_labels.view(-1)
+        shift_labels = shift_labels.to(shift_logits.device)
+
+        loss_fct = torch.nn.CrossEntropyLoss()
+        loss = loss_fct(shift_logits, shift_labels)
+        # loss = loss * (shift_labels >= 0).sum() / global_grad_tokens * dp_size
+        loss = loss.mean()
+        return loss
+
     with profile_time_and_memory('[Parallelize LLM]'):
-        megatron_parallelize(
+        pp_schedule, model_parts = megatron_parallelize(
             llm,
             rank0_llm,
             dp_mesh=fsdp_mesh,
             tp_mesh=tp_mesh,
+            pp_mesh=pp_mesh,
             mp_policy=mp_policy,
             recompute_ratio=args.selective_recompute,
-            reshard_after_forward=True)
-        
-        llm.train()
+            reshard_after_forward= False if pp_size>1 else True,
+            pp_mb=args.pp_mb,
+            pp_schedule=args.pp_schedule,
+            loss_fn=loss_fn)
+
+        for part in model_parts:
+            part.train()
 
     dist.barrier()
     gc.collect()
@@ -710,14 +732,17 @@ def sft(args):
     ###########################################################################
     #                      4. Optimizer & Scheduler                           #
     ###########################################################################
-    requried_grad_params = [
-        param for param in llm.parameters() if param.requires_grad
-    ]
-    optimizer = AdamW(
-        requried_grad_params,
-        lr=args.lr,
-        weight_decay=args.wd,
-        betas=(0.9, 0.95))
+    optimizers = []
+    for model in model_parts:
+        requried_grad_params = [
+            param for param in model.parameters() if param.requires_grad
+        ]
+        optimizer = AdamW(
+            requried_grad_params,
+            lr=args.lr,
+            weight_decay=args.wd,
+            betas=(0.9, 0.95))
+        optimizers.append(optimizer)
 
     global_batch_size = args.global_batch_size
     mirco_batch_size = args.mirco_batch_size
@@ -746,10 +771,12 @@ def sft(args):
     def warmup_fn(x):
         return x / warmup_steps if x < warmup_steps else 1
 
-    warmup_scheduler = LambdaLR(optimizer, warmup_fn)
-
-    cosine_scheduler = CosineAnnealingLR(
-        optimizer, T_max=total_steps - warmup_steps, eta_min=args.lr_min)
+    warmup_schedulers = []
+    cosine_schedulers = []
+    for optimizer in optimizers:
+        warmup_schedulers.append(LambdaLR(optimizer, warmup_fn))
+        cosine_schedulers.append(CosineAnnealingLR(
+            optimizer, T_max=total_steps - warmup_steps, eta_min=args.lr_min))
 
     start_step = 0
     gc.collect()
@@ -759,7 +786,6 @@ def sft(args):
     #                      5. (Optional) Resume                               #
     ###########################################################################
     if args.resume:
-        
 
         _checkpoints = find_checkpoints(args.work_dir)
 
@@ -776,7 +802,7 @@ def sft(args):
                 _options = StateDictOptions(
                     cpu_offload=True, ignore_frozen_params=True)
                 (shard_model_state_dict,
-                shard_optimizer_state_dict) = get_state_dict(
+                 shard_optimizer_state_dict) = get_state_dict(
                     llm, optimizer, options=_options)
                 state_dict = {
                     'model': shard_model_state_dict,
@@ -803,7 +829,7 @@ def sft(args):
                 )
 
             start_step = train_state.cur_step + 1
-        
+
         else:
             logger.warning(f'There is no checkpoint available for resuming training in {args.work_dir}.')
 
@@ -816,7 +842,7 @@ def sft(args):
     DEVICE_MODULE.reset_peak_memory_stats()
     max_memory = DEVICE_MODULE.max_memory_allocated()
     logger.info('[Train] Begin Train Loop. The current GPU memory is '
-                f'{(max_memory / 1024**3):.1f}GB')
+                f'{(max_memory / 1024 ** 3):.1f}GB')
 
     for step in range(start_step, total_steps):
 
@@ -830,17 +856,19 @@ def sft(args):
             # readjusted.
             # Or after resuming, for the first step, the dataloader needs to
             # be adjusted to the position before resume.
-            train_dataloader.sampler.set_epoch(epoch, epoch_inner_step * iters_per_step )
+            train_dataloader.sampler.set_epoch(epoch, epoch_inner_step * iters_per_step)
             data_iterator = iter(train_dataloader)
 
         train_state.step()
 
         if step <= warmup_steps:
-            warmup_scheduler.step()
-            cur_lr = warmup_scheduler.get_last_lr()[0]
+            for warmup_scheduler in warmup_schedulers:
+                warmup_scheduler.step()
+            cur_lr = warmup_schedulers[0].get_last_lr()[0]
         else:
-            cosine_scheduler.step()
-            cur_lr = cosine_scheduler.get_last_lr()[0]
+            for cosine_scheduler in cosine_schedulers:
+                cosine_scheduler.step()
+            cur_lr = cosine_schedulers[0].get_last_lr()[0]
 
         DEVICE_MODULE.reset_peak_memory_stats()
 
@@ -859,13 +887,12 @@ def sft(args):
             rank_grad_tokens += (_iter_labels >= 0).sum()
         rank_grad_tokens = rank_grad_tokens.to(DEVICE)
         dist.all_reduce(rank_grad_tokens)
-        global_grad_tokens = rank_grad_tokens  / sp_size / tp_size
+        global_grad_tokens = rank_grad_tokens / sp_size / tp_size
 
-        
         step_data_time = time.time() - _data_start_t
 
         for _iter in range(iters_per_step):
-            
+
             data = step_data_list[_iter]
             input_ids = data['input_ids'][:, :-1].to(DEVICE)
 
@@ -888,35 +915,55 @@ def sft(args):
                 input_ids = split_for_sequence_parallel(
                     input_ids, dim=1, sp_mesh=sp_mesh)
 
-                labels = pad_for_sequence_parallel(labels, -100,sp_mesh, dim=1)
+                labels = pad_for_sequence_parallel(labels, -100, sp_mesh, dim=1)
                 labels = split_for_sequence_parallel(
                     labels, dim=1, sp_mesh=sp_mesh)
 
             packed_ctx = packed_sequence(num_tokens, sp_mesh=sp_mesh)
 
             with packed_ctx, autocast if args.use_lora else nullcontext():
-                loss = llm(input_ids=input_ids, labels=labels, label_shifted=True, use_cache=False).loss
-                
-                loss = loss * (labels >= 0).sum() / global_grad_tokens * dp_size 
-               
-                if scaler and args.use_lora:
-                    scaler.scale(loss).backward()
+
+                is_last_stage = pp_mesh.get_local_rank() == pp_mesh.size() - 1
+
+                if pp_mesh.get_local_rank() == 0:
+                    pp_schedule.step(input_ids, use_cache=False)
+                elif is_last_stage:
+                    losses = []
+                    pp_schedule.step(target=labels, losses=losses)
                 else:
-                    loss.backward()
+                    pp_schedule.step()
+
+                # loss = llm(input_ids=input_ids, labels=labels, label_shifted=True, use_cache=False).loss
+                #
+                # loss = loss * (labels >= 0).sum() / global_grad_tokens * dp_size
+                #
+                # if scaler and args.use_lora:
+                #     scaler.scale(loss).backward()
+                # else:
+                #     loss.backward()
+
+                loss = (
+                    torch.mean(torch.stack(losses))
+                    if is_last_stage
+                    else torch.Tensor([-1.0])
+                )
 
             step_loss += loss.item()
-            step_consumed_tokens += num_tokens.sum() / sp_size / tp_size
+            step_consumed_tokens += num_tokens.sum() / sp_size / tp_size / pp_size
 
         step_reduced_loss = torch.Tensor([step_loss]).to(DEVICE)
         dist.all_reduce(step_reduced_loss)
         step_reduced_loss = step_reduced_loss.item() / world_size
 
-        grad_norm = clip_grad_norm_(
-            requried_grad_params, fsdp_mesh, args.max_grad_norm)
+        # grad_norm = clip_grad_norm_(
+        #     requried_grad_params, fsdp_mesh, args.max_grad_norm)
+        # TODO: 暂时写死
+        grad_norm = torch.Tensor([0.0]).to(DEVICE)
 
         if grad_norm.isnan() or grad_norm.isinf():
             train_state.found_nan()
-            logger.warning(f"[Step {step}] The grad norm is NaN or Inf, skip this step. Skipped {train_state.if_nan_skip_steps} steps in total.")
+            logger.warning(
+                f"[Step {step}] The grad norm is NaN or Inf, skip this step. Skipped {train_state.if_nan_skip_steps} steps in total.")
             optimizer.zero_grad()
         else:
             optimizer.step()
@@ -934,7 +981,7 @@ def sft(args):
                         f'loss(reduced): {step_reduced_loss:.3f}  '
                         f'grad_norm: {grad_norm:.2f}  '
                         f'if_nan_skip: {train_state.if_nan_skip_steps}  '
-                        f'max_memory: {(max_memory / 1024**3):.1f}GB  '
+                        f'max_memory: {(max_memory / 1024 ** 3):.1f}GB  '
                         f'text_tokens: {step_consumed_tokens}  '
                         f'tgs: {tgs}  data_time: {step_data_time:.2f}s  '
                         f'time: {step_time:.2f}s  '
@@ -944,44 +991,43 @@ def sft(args):
             logger.trace(f'Step {step}/{total_steps}, loss {step_loss:.3f}, tgs {tgs}')
 
         if is_interval(step, total_steps, checkpoint_interval):
-            
+
             num_digits = len(str(abs(total_steps)))
             work_dir = args.work_dir
-            ckpt_dir = os.path.join(work_dir, f'ckpt-{step+1:0{num_digits}}')
-            hf_dir = os.path.join(work_dir, f'hf-{step+1:0{num_digits}}')
-            
+            ckpt_dir = os.path.join(work_dir, f'ckpt-{step + 1:0{num_digits}}')
+            hf_dir = os.path.join(work_dir, f'hf-{step + 1:0{num_digits}}')
+
             with profile_time_and_memory('[HF Checkpoint]'):
-            
+
                 from torch.distributed._tensor import DTensor
 
                 if rank == 0:
                     llm_state_dict = {}
-                
+
                 for name, param in llm.state_dict().items():
                     if isinstance(param, DTensor):
                         with torch.no_grad():
                             full_param = param.full_tensor().cpu()
                     else:
                         full_param = param.cpu()
-                    
+
                     if rank == 0:
                         llm_state_dict[name] = full_param
-                
+
                 if rank == 0:
                     rank0_llm.load_state_dict(llm_state_dict)
                     rank0_llm.save_pretrained(hf_dir)
                     tokenizer.save_pretrained(hf_dir)
-                
+
                 dist.barrier()
 
             saved_hf_checkpoints = find_checkpoints(args.work_dir, prefix='hf')
-                
+
             if len(saved_hf_checkpoints) > args.checkpoint_max_keep:
                 for _ckpt in saved_hf_checkpoints[:-args.checkpoint_max_keep]:
                     if rank == 0:
                         shutil.rmtree(_ckpt)
                         logger.info('[HF Checkpoint] Delete the oldest checkpoint.')
-
 
             if args.checkpoint_drop_optimizer:
                 logger.warning('The saved checkpoint cannot be resumed. '
@@ -989,7 +1035,7 @@ def sft(args):
                                'please remove `--checkpoint-drop-optimizer` '
                                'from the command.')
             else:
-                
+
                 with profile_time_and_memory('[PT Checkpoint]'):
                     if ckpt_handle is not None:
                         wait([ckpt_handle])
@@ -999,7 +1045,7 @@ def sft(args):
                     _options = StateDictOptions(
                         cpu_offload=True, ignore_frozen_params=True)
                     (shard_model_state_dict,
-                    shard_optimizer_state_dict) = get_state_dict(
+                     shard_optimizer_state_dict) = get_state_dict(
                         llm, optimizer, options=_options)
 
                     state_dict = {
@@ -1014,7 +1060,7 @@ def sft(args):
                     ckpt_handle = dcp.async_save(state_dict, checkpoint_id=ckpt_dir, process_group=gloo_group)
 
                 saved_checkpoints = find_checkpoints(args.work_dir)
-                
+
                 if len(saved_checkpoints) > args.checkpoint_max_keep:
                     for _ckpt in saved_checkpoints[:-args.checkpoint_max_keep]:
                         if rank == 0:
@@ -1030,7 +1076,7 @@ def sft(args):
     logger.info(f'[Train] Cost {timedelta(seconds=int(train_cost_time))}')
     # ------------------------    Training  End  ---------------------------- #
 
-if __name__ == '__main__':
 
+if __name__ == '__main__':
     args = parse_args()
     sft(args)
