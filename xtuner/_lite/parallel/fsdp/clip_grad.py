@@ -14,7 +14,8 @@ from torch.utils._foreach_utils import (
 def clip_grad_norm_(
     parameters,
     fsdp_mesh,
-    max_norm: float,
+    pp_mesh = None,
+    max_norm: float= 1.0,
     norm_type: float = 2.0,
     error_if_nonfinite: bool = False,
     foreach= None,
@@ -55,6 +56,8 @@ def clip_grad_norm_(
     if norm_type == 2:
         total_norm = local_sharded_norm**norm_type
         dist.all_reduce(total_norm, group=fsdp_mesh.get_group(mesh_dim=0))
+        if pp_mesh is not None:
+            dist.all_reduce(total_norm, group=pp_mesh.get_group())
         total_norm = total_norm ** (1 / norm_type)
     else:
         raise NotImplementedError

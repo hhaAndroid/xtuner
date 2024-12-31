@@ -968,10 +968,11 @@ def sft(args):
         dist.all_reduce(step_reduced_loss)
         step_reduced_loss = step_reduced_loss.item() / world_size
 
-        # grad_norm = clip_grad_norm_(
-        #     requried_grad_params, fsdp_mesh, args.max_grad_norm)
-        # TODO: 暂时写死
-        grad_norm = torch.tensor(0.0).to(DEVICE)
+        grad_norm = clip_grad_norm_(
+            requried_grad_params, fsdp_mesh, pp_mesh, args.max_grad_norm)
+        # print(grad_norm)
+        # requried_grad_params = [{n:p.mean()} for m in model_parts for n, p in m.named_parameters() if p.requires_grad]
+        # logger.info(requried_grad_params)
 
         if grad_norm.isnan() or grad_norm.isinf():
             train_state.found_nan()
