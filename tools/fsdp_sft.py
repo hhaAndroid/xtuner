@@ -713,8 +713,7 @@ def sft(args):
 
         loss_fct = torch.nn.CrossEntropyLoss()
         loss = loss_fct(shift_logits, shift_labels)
-        # loss = loss * (shift_labels >= 0).sum() / global_grad_tokens * dp_size
-        loss = loss.mean()
+        loss = loss * (shift_labels >= 0).sum() / global_grad_tokens * dp_size
         return loss
 
     with profile_time_and_memory('[Parallelize LLM]'):
