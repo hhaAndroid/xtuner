@@ -23,6 +23,21 @@ class SftTokenizeFunction():
         return tokenized
 
 
+def pad_to_max_length(tensor, max_length, padding_value, dim=-1):
+    length = tensor.shape[dim]
+    pad_num = max_length - length
+    if pad_num == 0:
+        return tensor
+
+    pad_shape = (*tensor.shape[:dim], pad_num,
+                 *tensor.shape[dim + 1:]) if dim != -1 else (
+        *tensor.shape[:dim], pad_num)
+    pad = torch.full(
+        pad_shape, padding_value, dtype=tensor.dtype, device=tensor.device)
+    tensor = torch.cat([tensor, pad], dim=dim)
+    return tensor
+
+
 class SftCollator():
 
     def __init__(self, pad_token_id=0, ignore_id=-100, pack_batch=False, max_length=None):
@@ -33,77 +48,60 @@ class SftCollator():
 
     def __call__(self, instances):
 
-        _instances = []
-        for ins in instances:
-            if isinstance(ins, list):
-                _instances.extend(ins)
-            else:
-                _instances.append(ins)
+        batch_input_ids = []
+        batch_labels = []
+        batch_num_tokens = []
 
-        instances = _instances
+        for _instances in instances:
+            if not isinstance(_instances, list):
+                _instances = [_instances]
 
-        input_ids = []
-        labels = []
-        num_tokens = []
+            input_ids = []
+            labels = []
+            num_tokens = []
+            for _instance in _instances:
+                _input_ids = _instance['input_ids']
+                _labels = _instance['labels']
+                _num_tokens = _instance['num_tokens']
 
-        for data in instances:
-            
-            _input_ids = data['input_ids']
-            _labels = data['labels']
-            _num_tokens = data['num_tokens']
+                # TODO remove list
+                if isinstance(_num_tokens, list):
+                    assert len(_num_tokens) == 1
+                    _num_tokens = _num_tokens[0]
 
-            # TODO remove list
-            if isinstance(_num_tokens, list):
-                assert len(_num_tokens) == 1
-                _num_tokens = _num_tokens[0]
-            
-            assert isinstance(_num_tokens, int)
+                assert isinstance(_num_tokens, int)
 
-            if self.max_length:
-                _input_ids = _input_ids[:self.max_length]
-                _labels = _labels[:self.max_length]
-                _num_tokens = min(_num_tokens, self.max_length)
+                if len(_input_ids) > self.max_length:
+                    _input_ids = _input_ids[:self.max_length]
+                    _labels = _labels[:self.max_length]
+                    _num_tokens = min(_num_tokens, self.max_length)
 
-            input_ids.append(torch.LongTensor(_input_ids))
-            labels.append(torch.LongTensor(_labels))
-            num_tokens.append(_num_tokens)
-
-        attention_mask = [torch.ones_like(ids) for ids in input_ids]
-        num_tokens = torch.IntTensor(num_tokens)
-
-        if len(instances) > 1 and self.pack_batch:
+                input_ids.append(torch.LongTensor(_input_ids))
+                labels.append(torch.LongTensor(_labels))
+                num_tokens.append(_num_tokens)
 
             input_ids = torch.cat(input_ids, dim=0).unsqueeze(0)
             labels = torch.cat(labels, dim=0).unsqueeze(0)
-            attention_mask = torch.cat(attention_mask, dim=0).unsqueeze(0)
 
-        elif len(instances) > 1 and not self.pack_batch:
+            # padding 到 max_length
+            pad_num = self.max_length - labels.shape[1]
+            if pad_num > 0:
+                input_ids = pad_to_max_length(input_ids, self.max_length, 0, dim=1)
+                labels = pad_to_max_length(labels, self.max_length, -100, dim=1)
+                num_tokens.append(pad_num)
 
-            input_ids = pad_sequence(
-                input_ids, batch_first=True, padding_value=self.pad_token_id)
-            labels = pad_sequence(
-                labels, batch_first=True, padding_value=self.ignore_id)
-            attention_mask = pad_sequence(
-                attention_mask, batch_first=True, padding_value=0)
-        else:
-            input_ids = torch.stack(input_ids)
-            labels = torch.stack(labels)
-            attention_mask = torch.stack(attention_mask)
+            batch_input_ids.append(input_ids)
+            batch_labels.append(labels)
+            batch_num_tokens.append(torch.IntTensor(num_tokens))
 
-        if input_ids.shape != labels.shape:
-            logger.error(f'[instances] {instances}')
-            logger.error(f'[num_tokens] {num_tokens}')
-            logger.error(f'[input_ids] {input_ids}')
-            logger.error(f'[labels] {labels}')
-            raise RuntimeError('The shape of input_ids and labels must be '
-                               f'equal, but  found {input_ids.shape} and '
-                               f'{labels.shape}.')
+        input_ids = torch.cat(batch_input_ids, dim=0)
+        labels = torch.cat(batch_labels, dim=0)
+
+        assert input_ids.shape[1] == self.max_length
 
         data_dict = {
             'input_ids': input_ids,
             'labels': labels,
-            'num_tokens': num_tokens,
-            'attention_mask': attention_mask.bool()
+            'num_tokens': batch_num_tokens
         }
-
         return data_dict

@@ -14,7 +14,7 @@ from contextlib import nullcontext
 from concurrent.futures import wait
 from datetime import datetime, timedelta
 from functools import partial
-
+from mmengine import MessageHub
 import torch
 import torch.distributed as dist
 from torch.nn import functional as F
@@ -467,6 +467,10 @@ def sft(args):
     sp_size = sp_mesh.size()
     world_size = world_mesh.size()
 
+    # pp 下必须要自己修改 model，因为有不少限制：
+    # 1. 切分后可能某个子模块是 none，不处理会报错
+    # 2. batch 的 num_token 无法处理，因为不同 pp 策略和 micro_bs 下，batch 维度切分诡异多变，自己无法处理只能交给 pp
+    # 3. torch.compile 也要求模型重写
     register_remote_code()
 
     cpu_comm_timeout = timedelta(minutes=60)
@@ -688,7 +692,10 @@ def sft(args):
         # Ensure all numerical values in the optimizer are fp32.
         # FSDP will use low precision during forward.
         llm = build_llm_model(args, llm_cfg, world_size, dtype)
-        dispatch_hf_code(llm)
+
+        # 如果是 compile 模式，则不能使用 fuse rmsnorm
+        dispatch_hf_code(llm, exclude_cls=('InternLM2ForCausalLM', 'InternLM2FlashAttention2'))
+
         for module in llm.modules():
             for p_name, param in module.named_parameters(recurse=False):
                 if param.requires_grad:
@@ -699,7 +706,7 @@ def sft(args):
     mp_policy = MixedPrecisionPolicy(param_dtype=dtype, reduce_dtype=dtype)
 
     def loss_fn(pred, shift_labels):
-        shift_logits = pred[0]  # model 输出是 tuple
+        shift_logits = pred[0].float()  # model 输出是 tuple
         shift_logits = shift_logits.view(-1, vocab_size)
         shift_labels = shift_labels.view(-1)
         shift_labels = shift_labels.to(shift_logits.device)
@@ -901,30 +908,15 @@ def sft(args):
             input_ids = data['input_ids'][:, :-1].to(DEVICE)
 
             labels = data['labels'][:, 1:].to(DEVICE)
-            num_tokens = data['num_tokens'].to(DEVICE)
+            batch_num_tokens = data['num_tokens']
 
-            if num_tokens[-1] == 1:
-                num_tokens = num_tokens[:-1]
-            else:
-                num_tokens[-1] = num_tokens[-1] - 1
-
-            # pp 只能如此，强制 shape 为固定值
-            dim = 1
-            pad_num = args.max_length - labels.shape[1]
-            pad_shape = (*input_ids.shape[:dim], pad_num,
-                         *input_ids.shape[dim + 1:]) if dim != -1 else (
-                *input_ids.shape[:dim], pad_num)
-            pad = torch.full(pad_shape, 0, dtype=input_ids.dtype, device=input_ids.device)
-            input_ids = torch.cat([input_ids, pad], dim=dim)
-
-            pad_shape = (*labels.shape[:dim], pad_num,
-                         *labels.shape[dim + 1:]) if dim != -1 else (
-                *labels.shape[:dim], pad_num)
-            pad = torch.full(pad_shape, -100, dtype=labels.dtype, device=labels.device)
-            labels = torch.cat([labels, pad], dim=dim)
-
-            if pad_num > 0:
-                num_tokens = torch.cat([num_tokens, torch.IntTensor([pad_num]).to(DEVICE)], dim=-1)
+            for _i in range(len(batch_num_tokens)):
+                num_tokens = batch_num_tokens[_i].to(DEVICE)
+                if num_tokens[-1] == 1:
+                    num_tokens = num_tokens[:-1]
+                else:
+                    num_tokens[-1] = num_tokens[-1] - 1
+                batch_num_tokens[_i] = num_tokens
 
             if sp_size > 1:
                 # `dim` is 1 as the shape of tensor is (bs, seq_len, ...)
@@ -941,15 +933,20 @@ def sft(args):
                 labels = split_for_sequence_parallel(
                     labels, dim=1, sp_mesh=sp_mesh)
 
-            packed_ctx = packed_sequence(num_tokens, sp_mesh=sp_mesh)
+            packed_ctx = packed_sequence(batch_num_tokens, sp_mesh=sp_mesh)
 
             with packed_ctx, autocast if args.use_lora else nullcontext():
-
                 is_last_stage = pp_mesh.get_local_rank() == pp_mesh.size() - 1
 
                 if pp_mesh.get_local_rank() == 0:
+                    ctx = MessageHub.get_instance('packed_sequence')
+                    cumulative_lengths = ctx.get_info('cumulative_lengths')
+                    max_seqlen = ctx.get_info('max_seqlen')
+                    position_ids = ctx.get_info('position_ids')
+                    data = {'input_ids': input_ids, 'position_ids': position_ids,
+                            'max_seqlen': max_seqlen, 'cumulative_lengths': cumulative_lengths}
                     # 必须要返回 tuple，否则 pp 不支持自定义对象
-                    pp_schedule.step(input_ids, use_cache=False, return_dict=False)
+                    pp_schedule.step(**data, use_cache=False, return_dict=False)
                 elif is_last_stage:
                     losses = []
                     pp_schedule.step(target=labels, losses=losses, return_dict=False)

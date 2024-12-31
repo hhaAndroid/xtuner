@@ -53,6 +53,7 @@ try:
                                          unpad_input)
 except:
     pass
+from xtuner._lite.accelerate.dispatches._attention import varlen_flash_attn
 
 logger = logging.get_logger(__name__)
 
@@ -430,6 +431,8 @@ class InternLM2FlashAttention2(InternLM2Attention):
         output_attentions: bool = False,
         use_cache: bool = False,
         cache_position: Optional[torch.LongTensor] = None,
+        cumulative_lengths=None,
+        max_seqlen=None,
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor],
                Optional[Tuple[torch.Tensor]]]:
         if isinstance(past_key_value, StaticCache):
@@ -509,13 +512,23 @@ class InternLM2FlashAttention2(InternLM2Attention):
             key_states = key_states.to(target_dtype)
             value_states = value_states.to(target_dtype)
 
-        attn_output = self._flash_attention_forward(
+        attn_output = varlen_flash_attn(
             query_states,
             key_states,
             value_states,
-            attention_mask,
-            q_len,
-            dropout=dropout_rate)
+            cumulative_lengths,
+            max_seqlen,
+            causal=self.is_causal,
+            dropout_p=dropout_rate,
+            training=self.training)
+
+        # attn_output = self._flash_attention_forward(
+        #     query_states,
+        #     key_states,
+        #     value_states,
+        #     attention_mask,
+        #     q_len,
+        #     dropout=dropout_rate)
 
         attn_output = attn_output.reshape(bsz, q_len,
                                           self.hidden_size).contiguous()
@@ -781,6 +794,8 @@ class InternLM2DecoderLayer(nn.Module):
         output_attentions: Optional[bool] = False,
         use_cache: Optional[bool] = False,
         cache_position: Optional[torch.LongTensor] = None,
+        cumulative_lengths=None,
+        max_seqlen=None,
     ) -> Tuple[torch.FloatTensor, Optional[Tuple[torch.FloatTensor,
                                                  torch.FloatTensor]]]:
         """
@@ -810,6 +825,8 @@ class InternLM2DecoderLayer(nn.Module):
             output_attentions=output_attentions,
             use_cache=use_cache,
             cache_position=cache_position,
+            cumulative_lengths=cumulative_lengths,
+            max_seqlen=max_seqlen,
         )
         hidden_states = residual + hidden_states
 
@@ -995,6 +1012,8 @@ class InternLM2Model(InternLM2PreTrainedModel):
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
         cache_position: Optional[torch.LongTensor] = None,
+        cumulative_lengths=None,
+        max_seqlen=None,
     ) -> Union[Tuple, BaseModelOutputWithPast]:
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
         output_hidden_states = (
@@ -1063,6 +1082,8 @@ class InternLM2Model(InternLM2PreTrainedModel):
                     output_attentions,
                     use_cache,
                     cache_position,
+                    cumulative_lengths=cumulative_lengths,
+                    max_seqlen=max_seqlen,
                 )
             else:
                 layer_outputs = decoder_layer(
@@ -1073,6 +1094,8 @@ class InternLM2Model(InternLM2PreTrainedModel):
                     output_attentions=output_attentions,
                     use_cache=use_cache,
                     cache_position=cache_position,
+                    cumulative_lengths=cumulative_lengths,
+                    max_seqlen=max_seqlen,
                 )
 
             hidden_states = layer_outputs[0]
@@ -1251,6 +1274,8 @@ class InternLM2ForCausalLM(InternLM2PreTrainedModel):
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
         cache_position: Optional[torch.LongTensor] = None,
+        cumulative_lengths=None,
+        max_seqlen=None,
     ) -> Union[Tuple, CausalLMOutputWithPast]:
         r"""
         Args:
@@ -1290,6 +1315,8 @@ class InternLM2ForCausalLM(InternLM2PreTrainedModel):
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
             cache_position=cache_position,
+            cumulative_lengths=cumulative_lengths,
+            max_seqlen=max_seqlen,
         )
 
         hidden_states = outputs[0]
@@ -1302,8 +1329,11 @@ class InternLM2ForCausalLM(InternLM2PreTrainedModel):
             ]
             logits = torch.cat(logits, dim=-1)
         else:
-            logits = self.output(hidden_states)
-        logits = logits.float()
+            if self.output:
+                logits = self.output(hidden_states)
+                # logits = logits.float() # 移到计算 loss 部分更合理
+            else:
+                logits = hidden_states
 
         loss = None
         if labels is not None:

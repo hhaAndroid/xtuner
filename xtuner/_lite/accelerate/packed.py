@@ -38,23 +38,33 @@ def packed_sequence(num_tokens, enable=True, sp_mesh=None):
 
     device = get_device()
     if enable:
-        num_tokens = num_tokens.to(device)
-        device = num_tokens.device
-        _zero_length = torch.zeros(1, device=device)
-        _pad_length = torch.cat([_zero_length, num_tokens]).int()
-        cumulative_lengths = torch.cumsum(_pad_length, 0).int()
-        position_ids = [torch.arange(num.item()) for num in num_tokens]
-        position_ids = torch.cat(position_ids, dim=0).to(device)
-        position_ids = position_ids.unsqueeze(0)
-        if sp_mesh:
-            # `dim` is 1 as the shape of tensor is (bs, seq_len)
-            position_ids = split_for_sequence_parallel(
-                position_ids, dim=1, sp_mesh=sp_mesh)
+        batch_position_ids = []
+        batch_cumulative_lengths = []
+
+        for _num_tokens in num_tokens:
+            _num_tokens = _num_tokens.to(device)
+            device = _num_tokens.device
+            _zero_length = torch.zeros(1, device=device)
+            _pad_length = torch.cat([_zero_length, _num_tokens]).int()
+            cumulative_lengths = torch.cumsum(_pad_length, 0).int()
+            position_ids = [torch.arange(num.item()) for num in _num_tokens]
+            position_ids = torch.cat(position_ids, dim=0).to(device)
+            position_ids = position_ids.unsqueeze(0)
+            batch_position_ids.append(position_ids)
+            batch_cumulative_lengths.append(cumulative_lengths)
+            # if sp_mesh:
+            #     # `dim` is 1 as the shape of tensor is (bs, seq_len)
+            #     position_ids = split_for_sequence_parallel(
+            #         position_ids, dim=1, sp_mesh=sp_mesh)
+
+        position_ids = torch.cat(batch_position_ids, dim=0)
 
         # ctx.update_info('num_tokens', num_tokens)
+        assert position_ids.shape[0] == len(num_tokens) == len(batch_cumulative_lengths)
+
         ctx.update_info('position_ids', position_ids)
-        ctx.update_info('cumulative_lengths', cumulative_lengths)
-        ctx.update_info('max_seqlen', num_tokens.max())
+        ctx.update_info('cumulative_lengths', batch_cumulative_lengths)
+        ctx.update_info('max_seqlen', [_num_tokens.max() for _num_tokens in num_tokens])
         ctx.update_info('sp_mesh', sp_mesh)
 
     else:
