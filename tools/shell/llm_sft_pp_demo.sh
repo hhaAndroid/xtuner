@@ -15,7 +15,7 @@ GPUS_PER_NODE=${GPUS_PER_NODE:-4}
 export PYTHONPATH="$(pwd):$(pwd)/../"
 
 ACCUMULATIVE_COUNTS=${ACCUMULATIVE_COUNTS:-1}
-
+# -m debugpy --connect 5680
 HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 $ENV_PATH/bin/torchrun \
   --nproc-per-node=$GPUS_PER_NODE \
   fsdp_sft.py \
@@ -26,7 +26,8 @@ HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 $ENV_PATH/bin/torchrun \
   --debug \
   --pp-size 2 \
   --pp-mb 1 \
-  --num-workers 0 \
+  --mirco-batch-size 2 \
+  --num-workers 4 \
   --dset-pack-level soft \
   --global-pack \
   --max-length 8192 \

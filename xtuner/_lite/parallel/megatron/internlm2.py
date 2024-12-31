@@ -294,6 +294,12 @@ def pipeline_manual_split(
     return stages, models
 
 
+def split_list(lst, m):
+    n = len(lst)
+    length = n // m
+    return [lst[i * length:(i + 1) * length] for i in range(m)]
+
+
 def split_args_kwargs_into_chunks(
         args: Tuple[Any, ...],
         kwargs: Optional[Dict[str, Any]],
@@ -303,8 +309,8 @@ def split_args_kwargs_into_chunks(
 ) -> Tuple[List[Tuple], List[Dict]]:
     # TODO: 直接 hard code 写死，后续可以考虑更通用
     assert len(args) == 0
-    args_split = [()] * chunks
-    kwargs_split = [{}] * chunks
+    args_split = [() for _ in range(chunks)]
+    kwargs_split = [{} for _ in range(chunks)]
     copy_keys = ['use_cache', 'return_dict']
     for key in copy_keys:
         if key in kwargs:
@@ -324,8 +330,9 @@ def split_args_kwargs_into_chunks(
     for key in split_seq:
         if key in kwargs:
             data = kwargs[key]
-            assert len(data) == chunks
-            for i, chunk_tensor in enumerate(data):
+            assert len(data) % chunks == 0
+            result = split_list(data, chunks)
+            for i, chunk_tensor in enumerate(result):
                 kwargs_split[i][key] = chunk_tensor
 
     return args_split, kwargs_split

@@ -512,6 +512,27 @@ class InternLM2FlashAttention2(InternLM2Attention):
             key_states = key_states.to(target_dtype)
             value_states = value_states.to(target_dtype)
 
+        # print(max_seqlen,cumulative_lengths, 'xxxxxxxx')
+        if isinstance(max_seqlen, list):
+            # TODO: 是否可以优化为只算一遍？
+            query_states = query_states.flatten(0, 1)[None]
+            key_states = key_states.flatten(0, 1)[None]
+            value_states = value_states.flatten(0, 1)[None]
+
+            # TODO: 可以考虑在这个地方移除 padding 来加速计算
+            max_seqlen = max(seqlen.max() for seqlen in max_seqlen)
+            new_cumulative_lengths = [cumulative_lengths[0]]
+            sum_cum_max = cumulative_lengths[0][-1]
+
+            for _cumulative_lengths in cumulative_lengths[1:]:
+                # 排除第一个 0
+                # TODO: 小心这个 clone，否则数据会 inplace 改变，从而下一次迭代时候出错
+                _cumulative_lengths = _cumulative_lengths[1:].clone()
+                _cumulative_lengths += sum_cum_max
+                new_cumulative_lengths.append(_cumulative_lengths)
+                sum_cum_max = _cumulative_lengths[-1]
+            cumulative_lengths = torch.cat(new_cumulative_lengths)
+
         attn_output = varlen_flash_attn(
             query_states,
             key_states,
