@@ -14,6 +14,16 @@ from xtuner._lite import get_logger
 from ..fsdp.lazy import lazy_init_megatron
 from .utils import map_rank0_modules
 
+import copy
+from torch.distributed.pipelining.schedules import (
+    _PipelineScheduleRuntime,
+    get_schedule_class,
+    PipelineScheduleMulti,
+    PipelineScheduleSingle,
+)
+from torch.distributed.pipelining import PipelineStage
+from typing import Any, Dict, Optional, Tuple, List
+
 logger = get_logger()
 
 
@@ -161,17 +171,6 @@ def megatron_internlm2(model,
         mp_policy=mp_policy,
         reshard_after_forward=reshard_after_forward)
 
-
-import copy
-from torch.distributed.pipelining.schedules import (
-    _PipelineScheduleRuntime,
-    get_schedule_class,
-    PipelineScheduleMulti,
-    PipelineScheduleSingle,
-)
-from torch.distributed.pipelining import PipelineStage
-import os
-
 def generate_split_points(pp_schedule, pp_dim, num_layers):
     schedule_class = get_schedule_class(pp_schedule)
     if issubclass(schedule_class, PipelineScheduleSingle):
@@ -295,6 +294,61 @@ def pipeline_manual_split(
     return stages, models
 
 
+def split_args_kwargs_into_chunks(
+        args: Tuple[Any, ...],
+        kwargs: Optional[Dict[str, Any]],
+        chunks: int,
+        args_chunk_spec=None,
+        kwargs_chunk_spec=None,
+) -> Tuple[List[Tuple], List[Dict]]:
+    # TODO: 直接 hard code 写死，后续可以考虑更通用
+    assert len(args) == 0
+    args_split = [()] * chunks
+    kwargs_split = [{}] * chunks
+    copy_keys = ['use_cache', 'return_dict']
+    for key in copy_keys:
+        if key in kwargs:
+            for i in range(chunks):
+                kwargs_split[i][key] = kwargs[key]
+
+    spilt_keys = ['input_ids', 'position_ids', 'target', 'losses']
+    for key in spilt_keys:
+        if key in kwargs:
+            data = kwargs[key]
+            chunk_tensors = torch.tensor_split(data, chunks)
+            assert len(chunk_tensors) == chunks
+            for i, chunk_tensor in enumerate(chunk_tensors):
+                kwargs_split[i][key] = chunk_tensor
+
+    split_seq = ['max_seqlen', 'cumulative_lengths']
+    for key in split_seq:
+        if key in kwargs:
+            data = kwargs[key]
+            assert len(data) == chunks
+            for i, chunk_tensor in enumerate(data):
+                kwargs_split[i][key] = chunk_tensor
+
+    return args_split, kwargs_split
+
+
+def _new_split_inputs(self,
+                      args: Tuple[Any, ...],
+                      kwargs: Optional[Dict[str, Any]] = None):
+    if args or kwargs:
+        args_split, kwargs_split = split_args_kwargs_into_chunks(
+            args,
+            kwargs,
+            self._n_microbatches,
+            self._args_chunk_spec,
+            self._kwargs_chunk_spec,
+        )
+        return args_split, kwargs_split
+    else:
+        # Empty inputs (e.g. when called on middle stages)
+        # Return a list of empty tuples/dicts with matching length as chunks
+        return [()] * self._n_microbatches, [{}] * self._n_microbatches
+
+
 def build_pipeline_schedule(pp_mb, pp_schedule, pp_size, stages, loss_fn):
     schedule_class = get_schedule_class(pp_schedule)
     looped_schedule = issubclass(schedule_class, PipelineScheduleMulti)
@@ -310,6 +364,7 @@ def build_pipeline_schedule(pp_mb, pp_schedule, pp_size, stages, loss_fn):
         n_microbatches=n_microbatches,
         loss_fn=loss_fn,
     )
+    schedule._split_inputs = _new_split_inputs.__get__(schedule)
     return schedule
 
 

@@ -938,20 +938,26 @@ def sft(args):
             with packed_ctx, autocast if args.use_lora else nullcontext():
                 is_last_stage = pp_mesh.get_local_rank() == pp_mesh.size() - 1
 
+                ctx = MessageHub.get_instance('packed_sequence')
+                cumulative_lengths = ctx.get_info('cumulative_lengths')
+                max_seqlen = ctx.get_info('max_seqlen')
+                position_ids = ctx.get_info('position_ids')
+
+                data = {'max_seqlen': max_seqlen,
+                        'cumulative_lengths': cumulative_lengths,
+                        'position_ids': position_ids,
+                        'return_dict': False,
+                        'use_cache': False}
+
                 if pp_mesh.get_local_rank() == 0:
-                    ctx = MessageHub.get_instance('packed_sequence')
-                    cumulative_lengths = ctx.get_info('cumulative_lengths')
-                    max_seqlen = ctx.get_info('max_seqlen')
-                    position_ids = ctx.get_info('position_ids')
-                    data = {'input_ids': input_ids, 'position_ids': position_ids,
-                            'max_seqlen': max_seqlen, 'cumulative_lengths': cumulative_lengths}
+                    data['input_ids'] = input_ids
                     # 必须要返回 tuple，否则 pp 不支持自定义对象
-                    pp_schedule.step(**data, use_cache=False, return_dict=False)
+                    pp_schedule.step(**data)
                 elif is_last_stage:
                     losses = []
-                    pp_schedule.step(target=labels, losses=losses, return_dict=False)
+                    pp_schedule.step(**data, target=labels, losses=losses)
                 else:
-                    pp_schedule.step(return_dict=False)
+                    pp_schedule.step(**data)
 
                 loss = (
                     torch.mean(torch.stack(losses))

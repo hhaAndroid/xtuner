@@ -826,7 +826,7 @@ class InternLM2DecoderLayer(nn.Module):
             use_cache=use_cache,
             cache_position=cache_position,
             cumulative_lengths=cumulative_lengths,
-            max_seqlen=max_seqlen,
+            max_seqlen=max_seqlen
         )
         hidden_states = residual + hidden_states
 
