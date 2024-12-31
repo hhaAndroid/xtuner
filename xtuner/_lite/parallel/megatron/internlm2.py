@@ -327,8 +327,8 @@ def megatron_internlm2_casual(model,
     # 先利用 pp 切分模型，然后在对每个 pp 内部的模型进行 fsdp 包装
     pp_size = pp_mesh.size()
     if pp_size > 1:
-        # TODO： 为了代码简单暂时先对 meta model 进行初始化，这样会找出显存浪费
-        # 对每个 model_part 进行 fsdp 包装
+        # TODO： 为了代码简单暂时先对 meta model 进行初始化，这样会找出显存浪费。
+        # 由于只有 rank0 model 不太好处理, 合理逻辑应该是 rank_model 进行 pp 切分，然后将非 pp rank0 的 model 广播到其他 pp rank
         if dp_mesh.get_rank() == 0:
             rank0_map = map_rank0_modules(model, rank0_model)
         else:
