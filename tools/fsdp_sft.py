@@ -451,6 +451,7 @@ def sft(args):
     #                           1. Environment                                #
     ###########################################################################
     setup_parallel(sp_size=args.sp_size, tp_size=1, pp_size=args.pp_size)
+    # TODO: 在开启 pp 时候，不同 pp_rank 的 seed 应该不一样
     set_random_seed(args.seed)
 
     dp_mesh = get_dp_mesh()
