@@ -176,7 +176,7 @@ def parse_args():
     model_args.add_argument('--pp-size', type=int, default=1, help='')
     model_args.add_argument('--pp-mb', type=int, default=-1, help='')
     model_args.add_argument('--pp-schedule', type=str, default='GPipe',
-                            choices=['GPipe', '1F1B', 'Interleaved1F1B'],
+                            choices=['GPipe', '1F1B', 'Interleaved1F1B', 'LoopedBFS'],
                             help='')
 
     data_args = parser.add_argument_group('data', 'Dataset Related Settings')
