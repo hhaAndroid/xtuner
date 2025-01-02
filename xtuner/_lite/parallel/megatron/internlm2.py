@@ -3,6 +3,7 @@ from packaging import version
 
 import torch
 from torch import nn
+import torch.distributed as dist
 from torch.distributed._tensor import Replicate, distribute_tensor
 from torch.distributed.tensor.parallel import (ColwiseParallel,
                                                PrepareModuleInput,
@@ -381,6 +382,10 @@ def build_pipeline_schedule(pp_mb, pp_schedule, pp_size, stages, loss_fn):
         loss_fn=loss_fn,
     )
     schedule._split_inputs = _new_split_inputs.__get__(schedule)
+
+    if hasattr(schedule, '_dump_csv') and dist.get_rank()==0:
+        schedule._dump_csv(f'{pp_schedule}_pipeline_order.csv')
+
     return schedule
 
 
