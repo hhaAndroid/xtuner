@@ -176,7 +176,7 @@ def parse_args():
     model_args.add_argument('--pp-size', type=int, default=1, help='')
     model_args.add_argument('--pp-mb', type=int, default=-1, help='')
     model_args.add_argument('--pp-schedule', type=str, default='GPipe',
-                            choices=['GPipe', '1F1B'],
+                            choices=['GPipe', '1F1B', 'Interleaved1F1B'],
                             help='')
 
     data_args = parser.add_argument_group('data', 'Dataset Related Settings')
@@ -949,9 +949,12 @@ def sft(args):
                         'use_cache': False}
 
                 if pp_mesh.get_local_rank() == 0:
-                    data['input_ids'] = input_ids
-                    # 必须要返回 tuple，否则 pp 不支持自定义对象
-                    pp_schedule.step(**data)
+                    # 在复杂场景例如交错 pp 情况下， args 和 kwargs 会有冲突而出现参数重复报错
+                    # 因此可变的对象一定不能用 kwargs 代替，而必须用 args
+                    # data['input_ids'] = input_ids
+
+                    # 必须要返回 tuple,且理论上应该是返回长度是 1，否则 pp 在一个 stage forward 时候可能会有问题
+                    pp_schedule.step(input_ids, **data)
                 elif is_last_stage:
                     losses = []
                     pp_schedule.step(**data, target=labels, losses=losses)

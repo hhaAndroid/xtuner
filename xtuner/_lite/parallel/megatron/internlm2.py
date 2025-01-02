@@ -308,8 +308,17 @@ def split_args_kwargs_into_chunks(
         kwargs_chunk_spec=None,
 ) -> Tuple[List[Tuple], List[Dict]]:
     # TODO: 直接 hard code 写死，后续可以考虑更通用
-    assert len(args) == 0
+    # assert len(args) == 0
     args_split = [() for _ in range(chunks)]
+    if len(args) == 1:
+        # 必然是 input_ids
+        input_ids = args[0]
+        chunk_tensors = torch.tensor_split(input_ids, chunks)
+        for i, chunk_tensor in enumerate(chunk_tensors):
+            args_split[i] = (chunk_tensor,)
+    else:
+        assert len(args) == 0
+
     kwargs_split = [{} for _ in range(chunks)]
     copy_keys = ['use_cache', 'return_dict']
     for key in copy_keys:
@@ -317,7 +326,7 @@ def split_args_kwargs_into_chunks(
             for i in range(chunks):
                 kwargs_split[i][key] = kwargs[key]
 
-    spilt_keys = ['input_ids', 'position_ids', 'target', 'losses']
+    spilt_keys = ['position_ids', 'target', 'losses']
     for key in spilt_keys:
         if key in kwargs:
             data = kwargs[key]
