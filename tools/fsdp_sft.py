@@ -78,12 +78,16 @@ SUPPORT_DATA_FORMATS = OPENAI_CONVERT_MAP.keys()
 
 
 def log_format(rank, debug=False):
+    pp_rank = get_pp_mesh().get_local_rank()
     sp_rank = get_sp_mesh().get_local_rank()
     dp_rank = get_dp_mesh().get_local_rank()
     tp_rank = get_tp_mesh().get_local_rank()
     fsdp_rank = get_fsdp_mesh().get_local_rank()
+    formatter = f'[XTuner][RANK {rank}][DP {dp_rank}]'
 
-    formatter = f'[XTuner][RANK {rank}][DP {dp_rank}][SP {sp_rank}][TP {tp_rank}]'
+    if get_pp_mesh().size() > 1:
+        formatter += f'[PP {pp_rank}]'
+
     formatter += '[{time:YYYY-MM-DD HH:mm:ss}][<level>{level}</level>]'
 
     if debug:
@@ -912,6 +916,7 @@ def sft(args):
             labels = data['labels'][:, 1:].to(DEVICE)
             batch_num_tokens = data['num_tokens']
 
+            total_num_tokens = torch.tensor(0).to(DEVICE)
             for _i in range(len(batch_num_tokens)):
                 num_tokens = batch_num_tokens[_i].to(DEVICE)
                 if num_tokens[-1] == 1:
@@ -919,6 +924,7 @@ def sft(args):
                 else:
                     num_tokens[-1] = num_tokens[-1] - 1
                 batch_num_tokens[_i] = num_tokens
+                total_num_tokens += num_tokens.sum()
 
             if sp_size > 1:
                 # `dim` is 1 as the shape of tensor is (bs, seq_len, ...)
@@ -975,7 +981,7 @@ def sft(args):
                 )
 
             step_loss += loss.item()
-            step_consumed_tokens += num_tokens.sum() / sp_size / tp_size / pp_size
+            step_consumed_tokens += total_num_tokens / sp_size / tp_size / pp_size
 
         step_reduced_loss = torch.Tensor([step_loss]).to(DEVICE)
         dist.all_reduce(step_reduced_loss)

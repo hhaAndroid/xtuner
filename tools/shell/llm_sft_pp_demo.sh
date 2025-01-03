@@ -11,7 +11,7 @@ fi
 SCRIPT_NAME=$(basename "$0")
 cp "$0" "${OUTPUT_DIR}/${SCRIPT_NAME}"
 
-GPUS_PER_NODE=${GPUS_PER_NODE:-4}
+GPUS_PER_NODE=${GPUS_PER_NODE:-8}
 export PYTHONPATH="$(pwd):$(pwd)/../"
 
 ACCUMULATIVE_COUNTS=${ACCUMULATIVE_COUNTS:-1}
@@ -23,16 +23,16 @@ HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 $ENV_PATH/bin/torchrun \
   --chat-template internlm2 \
   --datasets /cpfs01/shared/llm_razor/huanghaian/data/llm_sft_data/xpuyu_sft \
   --dset-cache-dir /cpfs01/shared/llm_razor/huanghaian/data/llm_sft_data/xpuyu_sft_internlm2_1_8b_cache \
-  --debug \
   --pp-size 2 \
-  --pp-mb 1 \
-  --mirco-batch-size 2 \
+  --pp-mb 4 \
+  --mirco-batch-size 8 \
+  --pp-schedule Interleaved1F1B \
   --num-workers 4 \
   --dset-pack-level soft \
   --global-pack \
   --max-length 8192 \
   --group-by-length \
-  --global-batch-size 4 \
+  --global-batch-size 32 \
   --lr 2e-6 \
   --wd 0.0 \
   --warmup-ratio 0.03 \
