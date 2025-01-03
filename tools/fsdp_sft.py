@@ -175,8 +175,11 @@ def parse_args():
 
     model_args.add_argument('--pp-size', type=int, default=1, help='')
     model_args.add_argument('--pp-mb', type=int, default=-1, help='')
+    # TODO 'ZBVZeroBubble' 暂时不支持，没有解决
+    # TODO InterleavedZeroBubble 虽然能跑通但是 tgs 非常低，torchtitan 也一样问题
     model_args.add_argument('--pp-schedule', type=str, default='GPipe',
-                            choices=['GPipe', '1F1B', 'Interleaved1F1B', 'LoopedBFS'],
+                            choices=['GPipe', '1F1B', 'Interleaved1F1B', 'LoopedBFS',
+                                     'InterleavedZeroBubble'],
                             help='')
 
     data_args = parser.add_argument_group('data', 'Dataset Related Settings')
@@ -942,12 +945,16 @@ def sft(args):
                 max_seqlen = ctx.get_info('max_seqlen')
                 position_ids = ctx.get_info('position_ids')
 
+                # 必须外面传入，否则复杂多阶段 pp 你无法知道输入对象的切割和运行方式
                 data = {'max_seqlen': max_seqlen,
                         'cumulative_lengths': cumulative_lengths,
                         'position_ids': position_ids,
                         'return_dict': False,
                         'use_cache': False}
 
+                # TODO ZeroBubble 系列： torch pp 输入参数必须是 tensor 并且是 require_grad=True, 否则 backward 时候会报错
+                # 暂时解决办法是强行修改源码，把不计算梯度的输入去掉。
+                # 而且发现如果替换后 checkpoint 函数依然会出现重计算时候报错，因此需要用最新的 checkpoint 包装器
                 if pp_mesh.get_local_rank() == 0:
                     # 在复杂场景例如交错 pp 情况下， args 和 kwargs 会有冲突而出现参数重复报错
                     # 因此可变的对象一定不能用 kwargs 代替，而必须用 args

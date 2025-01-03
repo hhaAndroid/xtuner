@@ -16,6 +16,7 @@ export PYTHONPATH="$(pwd):$(pwd)/../"
 
 ACCUMULATIVE_COUNTS=${ACCUMULATIVE_COUNTS:-1}
 # -m debugpy --connect 5680
+# InterleavedZeroBubble
 HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1 $ENV_PATH/bin/torchrun \
   --nproc-per-node=$GPUS_PER_NODE \
   fsdp_sft.py \

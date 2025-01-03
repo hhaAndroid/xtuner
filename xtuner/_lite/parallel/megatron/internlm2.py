@@ -383,10 +383,15 @@ def build_pipeline_schedule(pp_mb, pp_schedule, pp_size, stages, loss_fn):
     )
     schedule._split_inputs = _new_split_inputs.__get__(schedule)
 
-    if hasattr(schedule, '_dump_csv') and dist.get_rank()==0:
+    # dump csv
+    if hasattr(schedule, '_dump_csv') and dist.get_rank() == 0:
         schedule._dump_csv(f'{pp_schedule}_pipeline_order.csv')
-
     return schedule
+
+
+from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
+    checkpoint_wrapper as ptd_checkpoint_wrapper,
+)
 
 
 def megatron_internlm2_casual(model,
@@ -430,6 +435,13 @@ def megatron_internlm2_casual(model,
             num_layers = len(model_part.model.layers)
             num_recompute_layers = int(num_layers * recompute_ratio)
 
+            # TODO 必须换成这个写法，否则 zerobuble 会出现重计算参数错误
+            # 并且暂时和 SAC 不兼容
+            for i, block in enumerate(model_part.model.layers):
+                if i < num_recompute_layers:
+                    _block = ptd_checkpoint_wrapper(block, preserve_rng_state=False)
+                    model_part.model.layers[i] = _block
+
             for i, block in enumerate(model_part.model.layers):
                 fully_shard(
                     block,
@@ -437,8 +449,7 @@ def megatron_internlm2_casual(model,
                     mp_policy=mp_policy,
                     reshard_after_forward=reshard_after_forward,
                 )
-                if i < num_recompute_layers:
-                    checkpoint(block)
+
 
             if version.parse(torch.__version__) >= version.parse("2.5.0"):
                 for layer_cur, layer_next in zip(model_part.model.layers[:-1], model_part.model.layers[1:]):
