@@ -1,6 +1,7 @@
 # Copyright (c) OpenMMLab. All rights reserved.
 from typing import List, Optional, Tuple, Union
 import inspect
+import os
 
 import torch
 from einops import rearrange
@@ -624,9 +625,12 @@ def internlm2_causal_forward(
 
     loss = None
     if labels is None:
-        logits = self.output(hidden_states)
+        use_liger = os.environ.get('XTUNER_USE_LIGER')
+        if use_liger:
+            logits = hidden_states
+        else:
+            logits = self.output(hidden_states)
     else:
-
         if liger_kernel_is_available():
             # unable to return logits when using Liger Kernel
             logits = None

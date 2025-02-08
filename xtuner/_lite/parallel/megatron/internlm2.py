@@ -133,10 +133,10 @@ def megatron_internlm2(model,
 
         # # As an optimization, do not reshard after forward for the last
         # # transformer block since FSDP would prefetch it immediately
-        # if i < num_layers - 1:
-        #     _reshard = reshard_after_forward
-        # else:
-        #     _reshard = False
+        if i < num_layers - 1:
+            _reshard = reshard_after_forward
+        else:
+            _reshard = False
 
         fully_shard(
             block,
@@ -145,7 +145,7 @@ def megatron_internlm2(model,
             reshard_after_forward=reshard_after_forward,
         )
 
-        if i < num_recompute_layers:
+        if i < num_recompute_layers - 1:
             checkpoint(block)
 
     if version.parse(torch.__version__) >= version.parse("2.5.0"):
@@ -153,13 +153,18 @@ def megatron_internlm2(model,
             layer_cur.set_modules_to_forward_prefetch([layer_next])
 
     model.tok_embeddings.apply(param_init_fn)
-    model.norm.apply(param_init_fn)
-
     fully_shard(
-        model,
+        model.tok_embeddings,
         mesh=dp_mesh,
         mp_policy=mp_policy,
         reshard_after_forward=reshard_after_forward)
+
+    # model.norm.apply(param_init_fn)
+    # fully_shard(
+    #     model.norm,
+    #     mesh=dp_mesh,
+    #     mp_policy=mp_policy,
+    #     reshard_after_forward=reshard_after_forward)
 
 
 def megatron_internlm2_casual(model,
@@ -199,9 +204,17 @@ def megatron_internlm2_casual(model,
         dp_mesh=dp_mesh,
         tp_mesh=tp_mesh,
     )
-    model.output.apply(param_init_fn)
 
     from torch.distributed._composable.fsdp import fully_shard
+
+    model.output.apply(param_init_fn)
+    model.model.norm.apply(param_init_fn)
+    fully_shard(
+        [model.model.norm, model.output],  # fix liger
+        mesh=dp_mesh,
+        mp_policy=mp_policy,
+        reshard_after_forward=reshard_after_forward)
+
     fully_shard(
         model,
         mesh=dp_mesh,
@@ -228,7 +241,6 @@ def megatron_internlm2_reward(model,
         reshard_after_forward=reshard_after_forward)
 
     if tp_mesh and tp_mesh.size() > 1:
-
         head_0 = model.v_head[0]
         dist_head_0 = nn.Parameter(
             distribute_tensor(head_0.weight, tp_mesh, [Replicate()]))
@@ -247,7 +259,6 @@ def megatron_internlm2_reward(model,
             distribute_tensor(head_1.weight, tp_mesh, [Replicate()]))
         head_1.register_parameter('weight', dist_head_1)
 
-        
         parallelize_module(
             module=model,
             device_mesh=tp_mesh,
@@ -279,7 +290,7 @@ def megatron_internlm2_reward(model,
                     desired_output_layouts=(Replicate(),),
                     use_local_output=True
                 ),
-                
+
             })
 
     if dp_mesh.get_rank() == 0:
