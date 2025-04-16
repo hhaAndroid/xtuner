@@ -331,6 +331,7 @@ class FSDPConfig:
     torch_compile: bool = False
     max_length: Optional[int] = None
     mesh_prefix: str = "default"
+    sharded_embedding_alone: bool = False
 
 
 @dataclass
