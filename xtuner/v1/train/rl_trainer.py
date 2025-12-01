@@ -34,7 +34,6 @@ from xtuner.v1.utils.env_check import get_rollout_engine_version
 
 from .trainer import ExpHistory, ExpInfo, GitInfo, XTunerMeta
 
-
 # TODO: Move DEVICE to `xtuner.utils.device`
 DEVICE = get_device()
 DEVICE_MODULE = get_torch_device_module()
@@ -391,26 +390,33 @@ class RLTrainer:
             self._save_trajectories(eval_data_groups, trajectory_save_path)
             self.logger.info(f"Initial rollout evaluate scores {scores} and start training")
         for rollout_idx in range(1, self._rollout_steps + 1):
+            memory_status_dict = {}
             timer_log_str = f"Rollout {rollout_idx} start \n"
             step_timer_dict = {}
+
             # 1. Rollout
             with timer("generation", step_timer_dict):
                 ray.get(self._rollout_env_controller.check_active_workers.remote())
                 data_groups, multimodal_train_infos = ray.get(self._rollout_dataflow.run.remote())
+            memory_status_dict["generation"] = self._get_memory_status()
+
             # 2. Offload rollout models and save trajectories
             with timer("offload_and_dump", step_timer_dict):
                 ray.get(self._rollout_env_controller.offload.remote())
                 trajectory_save_path = self.exp_dir / f"rollout_idx_{rollout_idx}_trajectory.jsonl"
                 self._save_trajectories(data_groups, trajectory_save_path)
                 self.logger.info(f"Rollout_idx {rollout_idx} finished, saved trajectories to {trajectory_save_path}")
+            memory_status_dict["offload_and_dump"] = self._get_memory_status()
 
             # 3. Onload training models and prepare data
             with timer("onload_and_prepare_data", step_timer_dict):
                 ray.get(self._train_controller.onload.remote(target="all"))
+                memory_status_dict["train_onload"] = self._get_memory_status()
                 self.logger.info("Training controller loaded")
                 data_batches, data_info = self._prepare_train_data(
                     data_groups, self._train_worker_cfg.pack_max_length, multimodal_train_infos
                 )
+                memory_status_dict["prepare_train_data"] = self._get_memory_status()
                 self.logger.info(f"Prepared {len(data_batches)} training data batches")
                 self._log_data_info(rollout_idx, data_info)
 
@@ -421,24 +427,37 @@ class RLTrainer:
                         data_batches, pack_max_length=self._train_worker_cfg.pack_max_length, rollout_idx=rollout_idx
                     )
                 )
+            memory_status_dict["train_fit"] = self._get_memory_status()
 
             # 5. Saving and sync weights
             with timer("saving and sync_weight", step_timer_dict):
                 ray.get(self._train_controller.offload.remote(target="optimizer"))
+                memory_status_dict["train_offload"] = self._get_memory_status()
+
                 self._maybe_save_hf()
                 bind_train_rollout(
                     train_controller=self._train_controller, env_controller=self._rollout_env_controller
                 )
+                memory_status_dict["bind_train_rollout"] = self._get_memory_status()
+
                 ray.get(self._rollout_env_controller.onload_weights.remote())
+                memory_status_dict["onload_weights"] = self._get_memory_status()
+
                 ray.get(self._train_controller.update_weights.remote())
+                memory_status_dict["update_weights"] = self._get_memory_status()
+
                 self.logger.info("Model weights synchronized successfully.")
                 ray.get(self._train_controller.offload.remote(target="model"))
+                memory_status_dict["train_offload"] = self._get_memory_status()
+
                 ray.get(self._rollout_env_controller.onload_kvcache.remote())
+                memory_status_dict["onload_kvcache"] = self._get_memory_status()
 
             timer_log_str = f"Rollout {rollout_idx} training finished and timing listed: \n"
             timer_log_str += timer_logger(step_timer_dict)
 
             self.logger.info(timer_log_str)
+            self._log_memory_usage(rollout_idx, memory_status_dict)
 
             # evaluate
             if self._enable_evaluate and self._evaluator and rollout_idx % self._eval_step == 0:
@@ -447,6 +466,59 @@ class RLTrainer:
                 self._save_trajectories(eval_data_groups, trajectory_save_path)
                 self.logger.info(f"Evaluate idx {rollout_idx} scores {scores}")
             self._cur_step += 1
+
+    def _get_memory_status(self) -> dict:
+        """Gets the current CPU and GPU memory usage stats."""
+        stats = {}
+        # GPU Memory
+        if torch.cuda.is_available():
+            stats["gpu"] = {}
+            for i in range(torch.cuda.device_count()):
+                free_mem, total_mem = torch.cuda.mem_get_info(i)
+                used_mem = total_mem - free_mem
+                stats["gpu"][str(i)] = {
+                    "used_gb": used_mem / (1024 ** 3),
+                    "total_gb": total_mem / (1024 ** 3),
+                    "percent": (used_mem / total_mem) * 100 if total_mem > 0 else 0,
+                    "list_gpu_processes": torch.cuda.memory.list_gpu_processes(i),
+                }
+        return stats
+
+    def _log_memory_usage(self, rollout_idx: int, memory_stats: dict):
+        """Logs CPU and GPU memory usage across all stages for a rollout."""
+        if get_rank() != 0:
+            return
+
+        log_msg = f"Rollout {rollout_idx} Memory Usage Summary: "
+
+        rl_training_stats = memory_stats.get("RL_training")
+        if rl_training_stats:
+            cpu_usage = rl_training_stats.get("cpu", {}).get("used_gb", 0.0)
+            avg_gpu_usage = 0.0
+            gpu_stats = rl_training_stats.get("gpu")
+            if gpu_stats and len(gpu_stats) > 0:
+                total_gpu_usage = sum(stat.get("used_gb", 0.0) for stat in gpu_stats.values())
+                avg_gpu_usage = total_gpu_usage / len(gpu_stats)
+
+            log_msg += f"Avg CPU Usage: {cpu_usage:.2f} GB, Avg GPU Usage: {avg_gpu_usage:.2f} GB"
+
+        for stage, stats in memory_stats.items():
+            log_msg += f"\n[Stage: {stage}]"
+            if "cpu" in stats:
+                cpu_stat = stats["cpu"]
+                log_msg += (
+                    f"\n  - CPU Memory: Used {cpu_stat['used_gb']:.2f} GB / "
+                    f"Total {cpu_stat['total_gb']:.2f} GB ({cpu_stat['percent']}%)"
+                )
+
+            if "gpu" in stats:
+                log_msg += "\n  - GPU Memory:"
+                for i, gpu_stat in stats["gpu"].items():
+                    log_msg += (
+                        f"\n    - Rank {i}: Used {gpu_stat['used_gb']:.2f} GB / "
+                        f"({gpu_stat['percent']:.2f}%) list_gpu_processes: {gpu_stat['list_gpu_processes']}"
+                    )
+        self.logger.info(log_msg)
 
     def _log_data_info(self, rollout_idx: int, data_info: dict):
         """Formats and logs the data statistics dictionary."""

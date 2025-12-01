@@ -300,7 +300,13 @@ class TrainingWorker(SingleAcceleratorWorker):
         return other_log
 
     def fit(self, data_batches: list[WorkerInputItem], rollout_idx: int):
+        torch.cuda.empty_cache()
         # NOTE: sglang会清除logger handle, 重新创建
+        max_memory = DEVICE_MODULE.max_memory_allocated()  # type: ignore[attr-defined]
+        reserved_memory = DEVICE_MODULE.max_memory_reserved()  # type: ignore[attr-defined]
+        before_train_max_memory = max_memory / 1024**3
+        before_train_reserved_memory = reserved_memory / 1024**3
+
         self.logger = get_logger(log_dir=self.log_dir, tag="TrainingWorker")
         loss_cfg = self.config.loss_cfg
         num_batches = len(data_batches)
@@ -313,6 +319,8 @@ class TrainingWorker(SingleAcceleratorWorker):
         seq_ctx_list: list[SequenceContext] = []
         loss_ctx_input_list: list[RLLossContextInputItem] = []
         rollout_logprobs_list: list[torch.Tensor | None] = []
+
+        DEVICE_MODULE.reset_peak_memory_stats()
         for data in data_batches:
             seq_ctx = data["seq_ctx"]
             pixel_values = seq_ctx.pixel_values
@@ -390,6 +398,11 @@ class TrainingWorker(SingleAcceleratorWorker):
         rank_grad_tokens = cast(torch.Tensor, rank_grad_tokens)
         global_grad_tokens = rank_grad_tokens
         dist.all_reduce(global_grad_tokens, op=dist.ReduceOp.SUM)
+        max_memory = DEVICE_MODULE.max_memory_allocated()  # type: ignore[attr-defined]
+        reserved_memory = DEVICE_MODULE.max_memory_reserved()  # type: ignore[attr-defined]
+        after_data_max_memory = max_memory / 1024**3
+        after_data_reserved_memory = reserved_memory / 1024**3
+        DEVICE_MODULE.reset_peak_memory_stats()
 
         # old logprobs are inplaced updated in compute_actor_logprobs
         loss_ctx_input_list = self.compute_actor_logprobs(seq_ctx_list, loss_ctx_input_list)
@@ -468,6 +481,12 @@ class TrainingWorker(SingleAcceleratorWorker):
             avg_kl_div = kl_div_sum / global_grad_tokens if global_grad_tokens > 0 else 0
             self.logger.info(f"Rollout {rollout_idx}: avg KL divergence: {avg_kl_div:.4f}")
 
+        max_memory = DEVICE_MODULE.max_memory_allocated()  # type: ignore[attr-defined]
+        reserved_memory = DEVICE_MODULE.max_memory_reserved()  # type: ignore[attr-defined]
+        after_logprob_max_memory = max_memory / 1024 ** 3
+        after_logprob_reserved_memory = reserved_memory / 1024 ** 3
+        DEVICE_MODULE.reset_peak_memory_stats()
+
         for i in range(0, len(seq_ctx_list), iters_per_step):
             batches_seq_ctx = seq_ctx_list[i : i + iters_per_step]
             batches_loss_ctx_input = loss_ctx_input_list[i : i + iters_per_step]
@@ -508,6 +527,19 @@ class TrainingWorker(SingleAcceleratorWorker):
             )
             log_str = f"Rollout {rollout_idx} Step {i}: " + log_str
             self.logger.info(log_str)
+
+        max_memory = DEVICE_MODULE.max_memory_allocated()  # type: ignore[attr-defined]
+        reserved_memory = DEVICE_MODULE.max_memory_reserved()  # type: ignore[attr-defined]
+        after_train_max_memory = max_memory / 1024 ** 3
+        after_train_reserved_memory = reserved_memory / 1024 ** 3
+        DEVICE_MODULE.reset_peak_memory_stats()
+
+        self.logger.info(f'Train Mem(G): '
+                         f'before_train: {before_train_max_memory, before_train_reserved_memory},'
+                         f'after_data: {after_data_max_memory, after_data_reserved_memory},'
+                         f'after_logprob: {after_logprob_max_memory, after_logprob_reserved_memory},'
+                         f'after_train: {after_train_max_memory, after_train_reserved_memory}')
+        torch.cuda.empty_cache()
 
     def save_hf(self, hf_dir: str, save_dtype: torch.dtype = torch.bfloat16):
         self._engine.save_hf(hf_dir, save_dtype)
@@ -555,9 +587,10 @@ class TrainingWorker(SingleAcceleratorWorker):
         tp = rollout_config.tensor_parallel_size
         ep = rollout_config.expert_parallel_size
         assert tp == 1 or ep == 1, "Either tensor parallel size or engine parallel size must be 1."
-        self.rollout_device_mesh = DeviceMesh(
-            "cpu", mesh=engine_mesh_list, mesh_dim_names=("engine_instance", "engine_parallel")
-        )
+        if self.rollout_device_mesh is None:
+            self.rollout_device_mesh = DeviceMesh(
+                "cpu", mesh=engine_mesh_list, mesh_dim_names=("engine_instance", "engine_parallel")
+            )
         rollout_server_url = server_url_dict.get(self.rank, "")
         if worker_server_urls_status.get(rollout_server_url, "False") is False:
             self.logger.error(f"Rollout server url {rollout_server_url} is not available.")
