@@ -64,6 +64,7 @@ class _LegacySoftPackDataset(torch.utils.data.Dataset):
 
         if global_pack:
             num_tokens = [np.concatenate([dset.num_tokens for dset in datasets])]
+            num_img_tokens = [np.concatenate([dset.num_img_tokens for dset in datasets])]
             datasets = [ConcatDataset(datasets)]
         else:
             num_tokens = [dset.num_tokens for dset in datasets]
@@ -75,7 +76,7 @@ class _LegacySoftPackDataset(torch.utils.data.Dataset):
 
         pack_infos = []
         for i, dataset in enumerate(self.datasets):
-            _infos = self.get_pack_infos(dataset, i, num_tokens[i])
+            _infos = self.get_pack_infos(dataset, i, num_tokens[i], num_img_tokens[i])
             pack_infos.append(_infos)
         self.pack_infos = concatenate_datasets(pack_infos)
 
@@ -142,6 +143,10 @@ def closest_sum_indices(buffer, value):
 
     return closest_indices
 
+def calc_num_patch(num_tokens, num_img_tokens, flash_attn_block_size):
+    return (round(num_tokens / flash_attn_block_size)) ** 2
+    # return (round(num_tokens / flash_attn_block_size)) ** 2 + (round(num_img_tokens / flash_attn_block_size)) ** 2
+    # return (round(num_tokens / flash_attn_block_size)) ** 2 + 2* (round(num_img_tokens / flash_attn_block_size)) ** 2
 
 def get_pack_chunk_infos(
     inds,
@@ -151,10 +156,13 @@ def get_pack_chunk_infos(
     pack_len_type,
     pack_extra_buffer_size,
     num_tokens=None,
+    num_img_tokens=None,
     shm_name=None,
     shape=None,
     dtype=None,
-):
+):  
+    # import debugpy
+    # debugpy.connect(('10.103.23.59', 5680))
     if num_tokens is None:
         existing_shm = shared_memory.SharedMemory(name=shm_name)
         num_tokens = np.ndarray(shape, dtype=dtype, buffer=existing_shm.buf)
@@ -172,7 +180,7 @@ def get_pack_chunk_infos(
         if num_tokens[shfl_i] + sum(length_buffer) <= target:
             item_buffer.append(shfl_i)
             length_buffer.append(num_tokens[shfl_i])
-            num_patch += (round(num_tokens[shfl_i] / flash_attn_block_size)) ** 2
+            num_patch += calc_num_patch(num_tokens[shfl_i], num_img_tokens[shfl_i], flash_attn_block_size)
             longest = max(longest, num_tokens[shfl_i])
         else:
             if len(item_buffer) > 0:
@@ -197,7 +205,7 @@ def get_pack_chunk_infos(
                             indices_to_remove.append(closest_inds + len(inds) - len(buffer_index))
                             item_buffer.append(buffer_index[closest_inds])
                             length_buffer.append(num_tokens[buffer_index[closest_inds]])
-                            num_patch += (round(num_tokens[buffer_index[closest_inds]] / flash_attn_block_size)) ** 2
+                            num_patch += calc_num_patch(num_tokens[buffer_index[closest_inds]], num_img_tokens[buffer_index[closest_inds]], flash_attn_block_size)
                             longest = max(longest, num_tokens[buffer_index[closest_inds]])
 
                         indices_to_remove = sorted(indices_to_remove, reverse=True)
@@ -218,7 +226,7 @@ def get_pack_chunk_infos(
             item_buffer = [shfl_i]
             length_buffer = [num_tokens[shfl_i]]
             longest = num_tokens[shfl_i]
-            num_patch = (round(num_tokens[shfl_i] / flash_attn_block_size)) ** 2
+            num_patch += calc_num_patch(num_tokens[shfl_i], num_img_tokens[shfl_i], flash_attn_block_size)
 
     if len(item_buffer) > 0:
         info = {
@@ -226,6 +234,13 @@ def get_pack_chunk_infos(
             "indices": item_buffer,
         }
         if pack_len_type == "total_block":
+
+            # 考虑 pad 效应
+            total_num_tokens = [num_tokens[shfl_i] for shfl_i in item_buffer]
+            pad_tokens = target - sum(total_num_tokens)
+            assert pad_tokens >= 0, f"Internal Error! Found negative pad tokens: {pad_tokens} with total_num_tokens: {total_num_tokens} and target: {target}"
+            num_patch += calc_num_patch(pad_tokens, 0, flash_attn_block_size)
+
             info["longest"] = int(num_patch)
         elif pack_len_type == "max_block":
             info["longest"] = int(longest)
@@ -237,6 +252,7 @@ def get_pack_infos_by_expand_soft_split(
     inds: list[int],
     dataset_id: int,
     num_tokens: np.ndarray,
+    num_img_tokens: np.ndarray,
     pack_max_length: int,
     pack_workers: int = 8,
     pack_chunk_size: int = 10000,
@@ -256,6 +272,7 @@ def get_pack_infos_by_expand_soft_split(
                 pack_len_type,
                 pack_extra_buffer_size,
                 num_tokens,
+                num_img_tokens,
             )
             pack_infos.extend(chunk_pack_infos)
     else:
@@ -320,12 +337,13 @@ class ExpandSoftPackDataset(_LegacySoftPackDataset):
             seed=seed,
         )
 
-    def get_pack_infos(self, dataset: Sized, dataset_id: int, num_tokens: np.ndarray):
+    def get_pack_infos(self, dataset: Sized, dataset_id: int, num_tokens: np.ndarray, num_img_tokens: np.ndarray):
         inds = torch.randperm(len(dataset), generator=self.torch_random_generator).tolist()
         pack_infos = get_pack_infos_by_expand_soft_split(
             inds,
             dataset_id,
             num_tokens,
+            num_img_tokens,
             pack_max_length=self.pack_max_length,
             pack_workers=self.pack_workers,
             pack_chunk_size=self.pack_chunk_size,

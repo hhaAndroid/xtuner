@@ -290,7 +290,7 @@ class JsonlDataset(torch.utils.data.Dataset[T | CacheItem]):
                     logger.info(f"Loading `num_tokens` from cache: {_cached_file}")
                     num_tokens = np.load(_cached_file)
                 else:
-                    num_tokens = self.count_tokens(offsets, tok_cache_dir)
+                    num_tokens, num_img_tokens = self.count_tokens(offsets, tok_cache_dir)
 
                 if get_rank() == 0:
                     with open(self.meta_path, "r+") as f:
@@ -333,9 +333,9 @@ class JsonlDataset(torch.utils.data.Dataset[T | CacheItem]):
                     "`CachableTokenizeFunction`, data will always "
                     "be re-tokenized during training!"
                 )
-                num_tokens = self.count_tokens(offsets)
+                num_tokens, num_img_tokens = self.count_tokens(offsets)
             else:
-                num_tokens = None
+                num_tokens, num_img_tokens = None
 
                 offsets = offsets
                 num_tokens = num_tokens
@@ -344,7 +344,7 @@ class JsonlDataset(torch.utils.data.Dataset[T | CacheItem]):
             offsets = self.count_offsets()
             num_tokens = None
             if tokenize_fn is not None:
-                num_tokens = self.count_tokens(offsets)
+                num_tokens, num_img_tokens = self.count_tokens(offsets)
 
         # offset starts from 0 and endwith `file_size`
         # The size of offsets is `num_samples + 1`
@@ -375,8 +375,10 @@ class JsonlDataset(torch.utils.data.Dataset[T | CacheItem]):
 
         if num_tokens is not None:
             num_tokens = num_tokens[self.sampled]
+            num_img_tokens = num_img_tokens[self.sampled]
 
         self.num_tokens = num_tokens
+        self.num_img_tokens = num_img_tokens
         self.offsets = offsets[self.sampled]
 
         if self._shared_memory is not None:
@@ -443,7 +445,7 @@ class JsonlDataset(torch.utils.data.Dataset[T | CacheItem]):
     ) -> dict:
         line = data.decode()
         tokenized = tokenize_fn(json.loads(line))
-        return {"num_tokens": tokenized["num_tokens"]}
+        return {"num_tokens": tokenized["num_tokens"], "num_img_tokens": tokenized['num_img_tokens']}
 
     def count_tokens(self, offsets, cache_dir=None):
         self.tokenize_fn.set_state("cache")
@@ -491,6 +493,8 @@ class JsonlDataset(torch.utils.data.Dataset[T | CacheItem]):
 
         _num_tokens = [data["num_tokens"] for data in tokenized]
         _num_tokens = np.array(_num_tokens)
+        _num_img_tokens = [data["num_img_tokens"] for data in tokenized]
+        _num_img_tokens = np.array(_num_img_tokens)
 
         if dist.is_initialized():
             # TODO:
@@ -501,15 +505,20 @@ class JsonlDataset(torch.utils.data.Dataset[T | CacheItem]):
             num_tokens = [None] * world_size
             dist.all_gather_object(num_tokens, _num_tokens, group=self.process_group)
             num_tokens = np.concatenate(num_tokens, axis=0)
+
+            num_img_tokens = [None] * world_size
+            dist.all_gather_object(num_img_tokens, _num_img_tokens, group=self.process_group)
+            num_img_tokens = np.concatenate(num_img_tokens, axis=0)
         else:
             num_tokens = _num_tokens
+            num_img_tokens = _num_img_tokens
 
         if rank == 0 and cache_dir:
             save_path = os.path.join(cache_dir, "num_tokens.npy")
             np.save(save_path, num_tokens)
 
         self.tokenize_fn.set_state("runtime")
-        return num_tokens
+        return num_tokens, num_img_tokens
 
     def __len__(self):
         return len(self.offsets)

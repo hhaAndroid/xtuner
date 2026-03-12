@@ -175,7 +175,7 @@ class BaseMLLMTokenizeFunction(CachableTokenizeFunction[T]):
         input_ids = tokenized["input_ids"]
         labels = tokenized["labels"]
         input_ids, _ = self._truncated_input_and_labels(input_ids, labels)
-        return {"num_tokens": len(input_ids)}
+        return {"num_tokens": len(input_ids),"num_img_tokens": 0}
 
     def pure_text_get_item(self, data_item: Any) -> BaseMLLMDataItem:
         raise NotImplementedError
@@ -199,7 +199,7 @@ class BaseMLLMTokenizeFunction(CachableTokenizeFunction[T]):
         except RuntimeError as e:
             if self.state == "cache":
                 print(f"!!!! RuntimeError: {e} of {self.data_name} when tokenize cache item. skip {item}!")
-                ret = CacheItem(num_tokens=0)
+                ret = CacheItem(num_tokens=0, num_img_tokens=0)
                 return ret
             else:
                 raise RuntimeError(f"!!!! RuntimeError: {e} of {self.data_name}")

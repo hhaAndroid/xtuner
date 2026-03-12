@@ -144,7 +144,12 @@ class Qwen3VLForConditionalGeneration(BaseComposeModel):
         sequence_parallel_mesh = seq_ctx.sequence_parallel_mesh
 
         inputs_embeds = self.language_model.embed_tokens(input_ids)  # type: ignore
-        
+
+        # _events = {}
+        # _events['vit_start'] = torch.cuda.Event(enable_timing=True)
+        # _events['vit_end'] = torch.cuda.Event(enable_timing=True)
+        # _events['vit_start'].record()
+
         if pixel_values is not None:
             assert self.only_llm_forward is False, "only_llm_forward is True, but pixel_values is not None. Please check your config setting."
             assert image_grid_thw is not None
@@ -192,6 +197,11 @@ class Qwen3VLForConditionalGeneration(BaseComposeModel):
             deepstack_visual_embeds = None
             visual_pos_masks = None
 
+        # _events['vit_end'].record()
+        # _events['llm_start'] = torch.cuda.Event(enable_timing=True)
+        # _events['llm_end'] = torch.cuda.Event(enable_timing=True)
+        # _events['llm_start'].record()
+
         # NOTE: 一定不要原地覆盖，否则第二次 forward 会缺少数据
         lang_seq_ctx = seq_ctx.copy(
             input_ids=None,
@@ -203,4 +213,8 @@ class Qwen3VLForConditionalGeneration(BaseComposeModel):
             lang_seq_ctx,
             loss_ctx
         )
+        # _events['llm_end'].record()
+        # torch.cuda.synchronize()
+        # logger.error(f"Vision encoding time: {_events['vit_start'].elapsed_time(_events['vit_end'])} ms, "
+        #              f"LLM forward time: {_events['llm_start'].elapsed_time(_events['llm_end'])} ms")
         return outputs
