@@ -1,5 +1,6 @@
 import asyncio
 import importlib
+import time
 from typing import Any, Awaitable, Callable, cast
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -50,6 +51,8 @@ class HarborAgentLoopConfig(AgentLoopConfig):
 
     bridge_import_path: str
     bridge_kwargs: dict[str, Any] = Field(default_factory=dict)
+    prefer_rollout_gateway: bool = True
+    rollout_metadata_ttl_sec: int = 10
 
     def build(self, rollout_controller, judger=None, logger=None) -> "HarborAgentLoop":
         return HarborAgentLoop(
@@ -58,6 +61,8 @@ class HarborAgentLoopConfig(AgentLoopConfig):
             hf_checkpoint=self.hf_checkpoint,
             bridge_import_path=self.bridge_import_path,
             bridge_kwargs=self.bridge_kwargs,
+            prefer_rollout_gateway=self.prefer_rollout_gateway,
+            rollout_metadata_ttl_sec=self.rollout_metadata_ttl_sec,
             judger=judger,
             logger=logger,
         )
@@ -78,13 +83,19 @@ class HarborAgentLoop(AgentLoop):
         hf_checkpoint: str,
         bridge_import_path: str,
         bridge_kwargs: dict[str, Any] | None = None,
+        prefer_rollout_gateway: bool = True,
+        rollout_metadata_ttl_sec: int = 10,
         judger=None,
         logger=None,
     ):
         super().__init__(rollout_ctl=rollout_ctl, sample_params=sample_params, hf_checkpoint=hf_checkpoint, judger=judger, logger=logger)
         self.bridge_import_path = bridge_import_path
         self.bridge_kwargs = bridge_kwargs or {}
+        self.prefer_rollout_gateway = prefer_rollout_gateway
+        self.rollout_metadata_ttl_sec = max(1, rollout_metadata_ttl_sec)
         self._bridge_fn: HarborGenerateFn = self._load_bridge(bridge_import_path)
+        self._rollout_meta_cache: dict[str, Any] | None = None
+        self._rollout_meta_cache_ts: float = 0.0
 
     @staticmethod
     def _load_bridge(import_path: str) -> HarborGenerateFn:
@@ -100,10 +111,12 @@ class HarborAgentLoop(AgentLoop):
         return cast(HarborGenerateFn, fn)
 
     async def _call_bridge(self, rollout_state: RolloutState, rollout_step: int) -> HarborResult:
+        resolved_gateway = await self._resolve_rollout_gateway()
         context = {
             "rollout_step": rollout_step,
             "sample_params": rollout_state.sample_params.model_dump() if rollout_state.sample_params else self.sample_params.model_dump(),
             "hf_checkpoint": self.hf_checkpoint,
+            **resolved_gateway,
             **self.bridge_kwargs,
         }
         out = self._bridge_fn(rollout_state, context)
@@ -115,6 +128,65 @@ class HarborAgentLoop(AgentLoop):
         if isinstance(out, dict):
             return HarborResult.model_validate(out)
         raise TypeError(f"Bridge function returned unsupported type: {type(out)}")
+
+    async def _get_rollout_metadata(self) -> dict[str, Any]:
+        now = time.time()
+        if (
+            self._rollout_meta_cache is not None
+            and (now - self._rollout_meta_cache_ts) < self.rollout_metadata_ttl_sec
+        ):
+            return self._rollout_meta_cache
+
+        ref = self.rollout_ctl.get_rollout_metadata.remote()  # type: ignore[attr-defined]
+        metadata = await ref
+        self._rollout_meta_cache = cast(dict[str, Any], metadata)
+        self._rollout_meta_cache_ts = now
+        return self._rollout_meta_cache
+
+    @staticmethod
+    def _select_active_gateway_url(metadata: dict[str, Any]) -> str | None:
+        status_map = cast(dict[str, bool], metadata.get("worker_server_urls_status", {}) or {})
+        server_url_dict = cast(dict[str, list[str]], metadata.get("server_url_dict", {}) or {})
+
+        # 1) prefer active urls from status map
+        for url, is_active in status_map.items():
+            if is_active and url:
+                return url
+
+        # 2) fallback to first url in server_url_dict
+        for urls in server_url_dict.values():
+            for url in urls or []:
+                if url:
+                    return url
+        return None
+
+    @staticmethod
+    def _normalize_api_base(url: str) -> str:
+        # Keep existing /v1; append if missing.
+        u = url.rstrip("/")
+        if u.endswith("/v1"):
+            return u
+        return f"{u}/v1"
+
+    async def _resolve_rollout_gateway(self) -> dict[str, Any]:
+        if not self.prefer_rollout_gateway:
+            return {}
+        try:
+            metadata = await self._get_rollout_metadata()
+        except Exception as e:
+            self.logger.warning(f"Failed to query rollout metadata, fallback to bridge kwargs: {e}")
+            return {}
+
+        url = self._select_active_gateway_url(metadata)
+        if not url:
+            return {}
+
+        rollout_cfg = cast(dict[str, Any], metadata.get("rollout_config", {}) or {})
+        api_key = rollout_cfg.get("api_key")
+        return {
+            "api_base": self._normalize_api_base(url),
+            "inference_api_key": api_key,
+        }
 
     async def generate_sample(self, rollout_state: RolloutState, **kwargs) -> RolloutState:
         rollout_step = kwargs.get("rollout_step", 0)

@@ -10,6 +10,7 @@ without adding a hard dependency on Harbor's internal Python APIs.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import time
@@ -120,6 +121,7 @@ def generate_with_harbor(rollout_state: RolloutState, context: dict[str, Any]) -
 
     llm_backend = context.get("llm_backend")
     api_base = context.get("api_base")
+    inference_api_key = context.get("inference_api_key")
     extra_agent_kwargs = dict(context.get("extra_agent_kwargs", {}))
 
     if not harbor_repo.exists():
@@ -168,6 +170,14 @@ def generate_with_harbor(rollout_state: RolloutState, context: dict[str, Any]) -
         for k, v in extra_agent_kwargs.items():
             cmd.extend(["--ak", f"{k}={v}"])
 
+        env = None
+        if inference_api_key:
+            env = dict(os.environ)
+            # Generic key for bridge consumers.
+            env["INFERENCE_API_KEY"] = str(inference_api_key)
+            # Common OpenAI-compatible gateway env.
+            env.setdefault("OPENAI_API_KEY", str(inference_api_key))
+
         proc = subprocess.run(
             cmd,
             cwd=str(harbor_repo),
@@ -175,6 +185,7 @@ def generate_with_harbor(rollout_state: RolloutState, context: dict[str, Any]) -
             text=True,
             timeout=timeout_sec,
             check=False,
+            env=env,
         )
 
         if proc.returncode != 0:

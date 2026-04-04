@@ -35,6 +35,9 @@ agent_loop_cfg = HarborAgentLoopConfig(
     hf_checkpoint=model_path,
     sample_params=SampleParams(max_tokens=1024, temperature=1.0, top_p=1.0),
     bridge_import_path="xtuner.v1.rl.agent_loop.harbor_bridge:generate_with_harbor",
+    # Prefer rollout controller metadata (gateway base_url/api_key) when available.
+    prefer_rollout_gateway=True,
+    rollout_metadata_ttl_sec=10,
     bridge_kwargs={
         "harbor_repo": "/home/huanghaian/.openclaw/workspace/harbor",
         "harbor_bin": "harbor",
@@ -43,7 +46,7 @@ agent_loop_cfg = HarborAgentLoopConfig(
         "job_name_prefix": "xtuner-harbor",
         "env": "docker",
         "agent": "terminus-2",
-        # Point to your own inference engine
+        # Fallback if rollout metadata is unavailable:
         "llm_backend": "litellm",
         "api_base": "http://127.0.0.1:8000/v1",
         "model_name": "openai/your-model",
