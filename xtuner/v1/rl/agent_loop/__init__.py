@@ -8,6 +8,8 @@ from .producer import (
     SyncProduceStrategy,
     SyncProduceStrategyConfig,
 )
+from .harbor_agent_loop import HarborAgentLoop, HarborAgentLoopConfig
+from .harbor_bridge import generate_with_harbor
 from .sampler import Sampler, SamplerConfig
 from .single_turn_agent_loop import SingleTurnAgentLoop, SingleTurnAgentLoopConfig
 
@@ -15,8 +17,11 @@ from .single_turn_agent_loop import SingleTurnAgentLoop, SingleTurnAgentLoopConf
 __all__ = [
     "AgentLoopConfig",
     "SingleTurnAgentLoopConfig",
+    "HarborAgentLoopConfig",
     "AgentLoop",
     "SingleTurnAgentLoop",
+    "HarborAgentLoop",
+    "generate_with_harbor",
     "AgentLoopManagerConfig",
     "AgentLoopManager",
     "ProduceBatchResult",
