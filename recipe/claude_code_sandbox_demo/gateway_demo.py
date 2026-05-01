@@ -117,11 +117,12 @@ if __name__ == "__main__":
     if not only_debug:
         ray.init(num_cpus=80, ignore_reinit_error=True)
 
-        MODEL_PATH = '/mnt/shared-storage-user/llmit/user/maningsheng/data/models/models--Qwen--Qwen3.5-35B-A3B'
+        # MODEL_PATH = '/mnt/shared-storage-user/llmit/user/maningsheng/data/models/models--Qwen--Qwen3.5-35B-A3B'
+        MODEL_PATH = '/mnt/shared-storage-user/llmrazor-share/model/Qwen3.6-35B-A3B'
 
         resources_cfg = AcceleratorResourcesConfig(
             accelerator='GPU',
-            num_workers=2,
+            num_workers=8,
             num_cpus_per_worker=8,
             cpu_memory_per_worker=16 * 1024**3,
         )

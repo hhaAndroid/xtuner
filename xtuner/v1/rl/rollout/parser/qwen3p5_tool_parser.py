@@ -6,7 +6,13 @@ from uuid import uuid4
 
 from xtuner.v1.data_proto.rl_data import RolloutToolCall
 
-from .tool_parser import ParsedToolCallResult, ToolCallParser, build_rollout_tool_call, coerce_parameter_value
+from .tool_parser import (
+    ParsedToolCallResult,
+    ToolCallParser,
+    build_rollout_tool_call,
+    coerce_parameter_value,
+    parse_json_or_python_mapping,
+)
 
 
 class Qwen3p5ToolCallParser(ToolCallParser):
@@ -27,8 +33,6 @@ class Qwen3p5ToolCallParser(ToolCallParser):
         parsed_tool_calls: list[Any] | None,
     ) -> bool:
         if not has_tools:
-            return False
-        if parsed_tool_calls:
             return False
         if not text:
             return False
@@ -54,6 +58,15 @@ class Qwen3p5ToolCallParser(ToolCallParser):
         return "".join(text_parts), tool_calls
 
     def _parse_single_tool_call(self, raw_payload: str) -> RolloutToolCall | None:
+        payload = parse_json_or_python_mapping(raw_payload)
+        if isinstance(payload, dict) and payload.get("name"):
+            arguments = payload.get("arguments", payload.get("parameters", {}))
+            return build_rollout_tool_call(
+                name=str(payload["name"]),
+                arguments=arguments,
+                call_id=str(payload.get("id") or f"call_{uuid4().hex}"),
+            )
+
         function_name = self._extract_function_name(raw_payload)
         if not function_name:
             return None
@@ -72,10 +85,16 @@ class Qwen3p5ToolCallParser(ToolCallParser):
 
     def _extract_function_name(self, raw_payload: str) -> str | None:
         function_start = raw_payload.find("<function=")
+        prefix = "<function="
         if function_start == -1:
-            return None
+            stripped_payload = raw_payload.lstrip()
+            if not stripped_payload.startswith("function="):
+                return None
+            raw_payload = stripped_payload
+            function_start = 0
+            prefix = "function="
 
-        name_start = function_start + len("<function=")
+        name_start = function_start + len(prefix)
         terminators = [
             index for index in (raw_payload.find(">", name_start), raw_payload.find("\n", name_start)) if index != -1
         ]

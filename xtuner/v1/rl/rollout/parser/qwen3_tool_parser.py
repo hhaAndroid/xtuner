@@ -38,8 +38,6 @@ class Qwen3ToolCallParser(ToolCallParser):
     ) -> bool:
         if not has_tools:
             return False
-        if parsed_tool_calls:
-            return False
         if not text:
             return False
         return any(marker in text for marker in ("<tool_call>", "</tool_call>", "<function=", "<parameter="))
@@ -88,9 +86,40 @@ class Qwen3ToolCallParser(ToolCallParser):
                 call_id=str(payload.get("id") or f"call_{uuid4().hex}"),
             )
         function_match = self._qwen_function_pattern.search(raw_payload)
-        if function_match is None:
+        if function_match is not None:
+            return self._parse_qwen_function_call(function_match.group(1).strip(), function_match.group(2))
+
+        bare_function = self._parse_bare_function_payload(raw_payload)
+        if bare_function is not None:
+            return bare_function
+
+        return None
+
+    def _parse_bare_function_payload(self, raw_payload: str) -> RolloutToolCall | None:
+        stripped_payload = raw_payload.lstrip()
+        prefix = "function="
+        if not stripped_payload.startswith(prefix):
             return None
-        return self._parse_qwen_function_call(function_match.group(1).strip(), function_match.group(2))
+
+        name_start = len(prefix)
+        terminators = [
+            index
+            for index in (
+                stripped_payload.find(">", name_start),
+                stripped_payload.find("\n", name_start),
+            )
+            if index != -1
+        ]
+        if not terminators:
+            return None
+
+        name_end = min(terminators)
+        function_name = stripped_payload[name_start:name_end].strip()
+        if not function_name:
+            return None
+
+        function_body = stripped_payload[name_end + 1 :]
+        return self._parse_qwen_function_call(function_name, function_body)
 
     def _parse_qwen_function_call(self, function_name: str, function_body: str) -> RolloutToolCall | None:
         arguments: dict[str, Any] = {}

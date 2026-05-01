@@ -356,6 +356,8 @@ class AnthropicChatAdapter(BaseChatAPIAdapter[AnthropicMessagesRequest, Anthropi
                         "tool_call_id": block.get("tool_use_id"),
                     }
                 )
+            elif block_type in {"document", "image"}:
+                text_chunks.append(self._serialize_non_text_content_block(block))
             else:
                 raise AnthropicChatAdapterError(
                     f"Unsupported Anthropic content block type in messages[{role}]: {block_type}",
@@ -386,6 +388,42 @@ class AnthropicChatAdapter(BaseChatAPIAdapter[AnthropicMessagesRequest, Anthropi
         if isinstance(content, dict):
             return json.dumps(content, ensure_ascii=False)
         return str(content)
+
+    def _serialize_non_text_content_block(self, block: dict[str, Any]) -> str:
+        block_type = str(block.get("type") or "unknown")
+        embedded_text = self._extract_embedded_text_content(block)
+        if embedded_text:
+            return embedded_text
+
+        details = [f"type={block_type}"]
+        for key in ("title", "name", "filename", "file_name", "media_type"):
+            value = block.get(key)
+            if value:
+                details.append(f"{key}={value}")
+
+        source = block.get("source")
+        if isinstance(source, dict):
+            for key in ("type", "media_type", "url", "file_id"):
+                value = source.get(key)
+                if value:
+                    details.append(f"source.{key}={value}")
+
+        return f"[Anthropic {block_type} block omitted; {', '.join(details)}]"
+
+    def _extract_embedded_text_content(self, block: dict[str, Any]) -> str:
+        text = block.get("text")
+        if isinstance(text, str) and text:
+            return text
+
+        source = block.get("source")
+        if not isinstance(source, dict):
+            return ""
+
+        source_type = source.get("type")
+        data = source.get("data")
+        if source_type in {"text", "plain_text"} and isinstance(data, str):
+            return data
+        return ""
 
     def _normalize_tools_for_backend(self, tools: list[dict[str, Any]] | None) -> list[dict[str, Any]] | None:
         if not tools:
@@ -488,6 +526,8 @@ class AnthropicChatAdapter(BaseChatAPIAdapter[AnthropicMessagesRequest, Anthropi
                         )
                     )
                 )
+            elif block_type in {"document", "image"}:
+                canonical_blocks.append(CanonicalTextBlock(text=self._serialize_non_text_content_block(block)))
             elif block_type in {"reasoning", "thinking"}:
                 reasoning_text = str(block.get("text", ""))
                 canonical_blocks.append(

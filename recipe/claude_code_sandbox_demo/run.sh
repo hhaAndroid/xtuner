@@ -8,13 +8,13 @@
 
 set -euo pipefail
 
-TASKS_DIR="/mnt/shared-storage-user/huanghaian/code/bench/skillsbench/tasks"
-ARTIFACTS_DIR="/mnt/shared-storage-user/huanghaian/code/xtuner/worker_logs/skillsbench_artifacts"
+TASKS_DIR="${TASKS_DIR:-/mnt/shared-storage-user/huanghaian/code/bench/skillsbench/tasks}"
+ARTIFACTS_DIR="${ARTIFACTS_DIR:-/mnt/shared-storage-user/huanghaian/code/xtuner/worker_logs/skillsbench_artifacts_36_1}"
 
-gateway_url="http://s-20260104203038-22bhb.ailab-evalservice.pjh-service.org.cn/v1"
-api_key="sk-admin"
-model_name="xtuner_gateway_demo"
-max_concurrent=400
+gateway_url="${GATEWAY_URL:-http://s-20260104203038-22bhb.ailab-evalservice.pjh-service.org.cn/v1}"
+api_key="${API_KEY:-sk-admin}"
+model_name="${MODEL_NAME:-xtuner_gateway_demo}"
+max_concurrent="${MAX_CONCURRENT:-32}"
 
 # ---------------------------------------------------------------------------
 # Argument parsing

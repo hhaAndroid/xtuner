@@ -204,23 +204,40 @@ class LocalRolloutBackend:
 
     def _canonical_messages_to_backend_messages(self, messages: list[Any]) -> list[dict[str, Any]]:
         backend_messages: list[dict[str, Any]] = []
+
+        def append_tool_result(block: CanonicalToolResultBlock) -> None:
+            backend_messages.append(
+                {
+                    "role": "tool",
+                    "content": block.tool_result.output_text
+                    if block.tool_result.output_text is not None
+                    else coerce_content_to_text(block.tool_result.output),
+                    "tool_call_id": block.tool_result.tool_call_id,
+                }
+            )
+
         for message in messages:
             if message.role == "tool":
                 for block in message.content:
                     if isinstance(block, CanonicalToolResultBlock):
-                        backend_messages.append(
-                            {
-                                "role": "tool",
-                                "content": block.tool_result.output_text
-                                if block.tool_result.output_text is not None
-                                else coerce_content_to_text(block.tool_result.output),
-                                "tool_call_id": block.tool_result.tool_call_id,
-                            }
-                        )
+                        append_tool_result(block)
                 continue
 
             text_chunks: list[str] = []
             tool_calls: list[dict[str, Any]] = []
+
+            def flush_message_content() -> None:
+                if not (text_chunks or tool_calls or message.name):
+                    return
+                payload: dict[str, Any] = {"role": message.role, "content": "\n".join(text_chunks)}
+                if message.name:
+                    payload["name"] = message.name
+                if tool_calls:
+                    payload["tool_calls"] = list(tool_calls)
+                backend_messages.append(self._normalize_backend_message(payload))
+                text_chunks.clear()
+                tool_calls.clear()
+
             for block in message.content:
                 if isinstance(block, CanonicalTextBlock):
                     if block.text:
@@ -240,12 +257,10 @@ class LocalRolloutBackend:
                             },
                         }
                     )
-            payload: dict[str, Any] = {"role": message.role, "content": "\n".join(text_chunks)}
-            if message.name:
-                payload["name"] = message.name
-            if tool_calls:
-                payload["tool_calls"] = tool_calls
-            backend_messages.append(self._normalize_backend_message(payload))
+                elif isinstance(block, CanonicalToolResultBlock):
+                    flush_message_content()
+                    append_tool_result(block)
+            flush_message_content()
         return backend_messages
 
     def _canonical_tools_to_backend(self, tools: list[CanonicalToolDefinition]) -> list[dict[str, Any]] | None:

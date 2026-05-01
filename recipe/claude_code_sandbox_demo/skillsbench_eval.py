@@ -137,6 +137,24 @@ class TaskResult:
 # ---------------------------------------------------------------------------
 
 
+def _exec_checked(env_client: EnvClient, command: str, *, action: str, timeout_sec: int | None = None):
+    if timeout_sec is None:
+        result = env_client.exec(command)
+    else:
+        result = env_client.exec(command, timeout_sec=timeout_sec)
+    return_code = getattr(result, "return_code", 0)
+    if return_code not in (0, None):
+        stdout = (getattr(result, "stdout", "") or "").strip()
+        stderr = (getattr(result, "stderr", "") or "").strip()
+        details = [f"{action} failed with return_code={return_code}"]
+        if stderr:
+            details.append(f"stderr={stderr[:1000]}")
+        if stdout:
+            details.append(f"stdout={stdout[:1000]}")
+        raise RuntimeError(" | ".join(details))
+    return result
+
+
 def _upload_dir_recursive(env_client: EnvClient, local_dir: Path, remote_dir: str) -> None:
     """Upload all files from local_dir to remote_dir in the sandbox."""
     env_client.exec(f"mkdir -p {remote_dir}")
@@ -161,32 +179,40 @@ def _install_claude_code(env_client: EnvClient, timeout_sec: int = 300) -> None:
     nvm_src = "https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh"
 
     # Step 1: Install system deps (curl + bash needed by nvm installer)
-    env_client.exec(
+    _exec_checked(
+        env_client,
         "sh -c 'set -e; "
         "if command -v apk >/dev/null 2>&1; then apk add --no-cache bash curl ca-certificates; "
         "elif command -v apt-get >/dev/null 2>&1; then apt-get update -qq && apt-get install -y -qq bash curl ca-certificates; "
         "elif command -v dnf >/dev/null 2>&1; then dnf install -y bash curl ca-certificates; "
         "elif command -v yum >/dev/null 2>&1; then yum install -y bash curl ca-certificates; "
         "fi'",
+        action="install system dependencies",
         timeout_sec=60,
     )
 
     # Step 2: Install nvm under /root/.nvm
-    env_client.exec(
+    _exec_checked(
+        env_client,
         f"bash -c 'export NVM_DIR=\"/root/.nvm\" && curl -fsSL {nvm_src} | bash'",
+        action="install nvm",
         timeout_sec=timeout_sec,
     )
 
     # Step 3: Install Node.js LTS
-    env_client.exec(
+    _exec_checked(
+        env_client,
         "bash -c 'export NVM_DIR=\"/root/.nvm\" && . \"$NVM_DIR/nvm.sh\" && nvm install --lts'",
+        action="install Node.js LTS",
         timeout_sec=timeout_sec,
     )
 
     # Step 4: Install @anthropic-ai/claude-code and verify
-    env_client.exec(
+    _exec_checked(
+        env_client,
         "bash -c 'export NVM_DIR=\"/root/.nvm\" && . \"$NVM_DIR/nvm.sh\" && "
         "npm install -g @anthropic-ai/claude-code && claude --version'",
+        action="install claude-code",
         timeout_sec=timeout_sec,
     )
 
@@ -351,10 +377,10 @@ def _evaluate_task(task: TaskInfo, config: EvalConfig) -> TaskResult:
 
         # b) Install nvm + node + claude-code as root
         logger.info("[%s] Installing claude code", task.name)
-        start_time = time.time()
+        install_start_time = time.time()
         _install_claude_code(env_client)
         end_time = time.time()
-        logger.info("[%s] Installed claude code in %s seconds", task.name, end_time - start_time)
+        logger.info("[%s] Installed claude code in %s seconds", task.name, end_time - install_start_time)
 
         # c) Upload skills to /root/.claude/skills/ (claude runs as root)
         skills_dir = task.task_dir / "environment" / "skills"
@@ -405,6 +431,25 @@ def _evaluate_task(task: TaskInfo, config: EvalConfig) -> TaskResult:
         logger.info("[%s] Claude finished (returncode=%s)", task.name, agent_returncode)
         if agent_stderr:
             logger.warning("[%s] Claude stderr: %s", task.name, agent_stderr[:500])
+        if agent_returncode not in (0, None):
+            error = f"Claude exited with return_code={agent_returncode}"
+            if agent_stderr.strip():
+                error = f"{error}: {agent_stderr.strip()[:500]}"
+            if config.work_dir is not None:
+                _dump_task_artifacts(env_client, task.name, config.work_dir, agent_stdout, agent_stderr)
+            elapsed_sec = time.monotonic() - start_time
+            return TaskResult(
+                task_name=task.name,
+                api_key=task_api_key,
+                reward=0.0,
+                error=error,
+                agent_stdout=agent_stdout,
+                agent_stderr=agent_stderr,
+                agent_returncode=agent_returncode,
+                verifier_stdout="",
+                elapsed_sec=elapsed_sec,
+                started_at=started_at,
+            )
 
         # e) Upload tests/ to /tests/
         logger.info("[%s] Uploading tests", task.name)
@@ -602,7 +647,7 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--max-concurrent", type=int, default=4, help="Max concurrent sandboxes")
     parser.add_argument("--max-turns", type=int, default=50, help="Max claude turns per task")
-    parser.add_argument("--agent-timeout", type=int, default=500, help="Timeout for claude execution (seconds)")
+    parser.add_argument("--agent-timeout", type=int, default=1500, help="Timeout for claude execution (seconds)")
     parser.add_argument("--sandbox-ttl", type=int, default=3600, help="Sandbox TTL in seconds")
     parser.add_argument(
         "--output-file",
