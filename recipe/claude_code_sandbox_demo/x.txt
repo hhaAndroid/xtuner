@@ -1,0 +1,36 @@
+
+vllm serve /mnt/shared-storage-user/llmrazor-share/model/Qwen3.6-35B-A3B \
+  --served-model-name xtuner_vllm_qwen3.6-35b-a3b \
+  --trust-remote-code \
+  --tensor-parallel-size 1 \
+  --enable-auto-tool-choice \
+  --tool-call-parser qwen3_coder \
+  --reasoning-parser qwen3 \
+  --mm-encoder-tp-mode data
+
+
+curl -sS http://10.102.249.52:30001/v1/messages \
+  -H 'Content-Type: application/json' \
+  -H 'Authorization: Bearer sk-admin' \
+  -d '{
+    "model": "xtuner_qwen3.6-35b-a3b",
+    "max_tokens": 256,
+    "temperature": 0,
+    "messages": [
+      {
+        "role": "user",
+        "content": [
+          {"type": "text", "text": "Reply with exactly: pong"}
+        ]
+      }
+    ]
+  }'
+
+
+curl --location 'http://s-20260126171100-kgrf5.ailab-evalservice.pjh-service.org.cn/v1/models/delete' \
+--header 'accept: application/json' \
+--header 'Content-Type: application/json' \
+--data '{
+  "model_name": "xtuner_qwen3.6-35b-a3b",
+  "all": true
+}'

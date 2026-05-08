@@ -84,6 +84,7 @@ def check_claude_messages(base_url: str, model: str):
 
     payload = {
         "model": model,
+        "provider": "anthropic",
         "messages": [
             {
                 "role": "user",
@@ -111,9 +112,9 @@ def check_claude_messages(base_url: str, model: str):
 
 if __name__ == "__main__":
 
-    only_debug=False
+    only_debug=True
     
-    gateway_url='http://10.102.249.52:38100/v1'
+    gateway_url='http://10.103.23.59:38100/v1'
     if not only_debug:
         ray.init(num_cpus=80, ignore_reinit_error=True)
 
