@@ -1,12 +1,13 @@
 import math
 import os
-from typing import Literal, TypedDict
+from typing import Any, Literal, TypedDict
 
 import ray
 import torch
 
 from xtuner.v1.data_proto.sequence_context import SequenceContext
 from xtuner.v1.model.compose.base import BaseComposeConfig
+from xtuner.v1.rl.utils.misc import estimate_object_nbytes, format_bytes, get_process_rss_bytes
 from xtuner.v1.train.trainer import LoadCheckpointConfig
 from xtuner.v1.utils import get_logger
 
@@ -27,6 +28,26 @@ class TrainingController:
     def __init__(self, workers: list[TrainingWorker]) -> None:
         self.workers = workers
         self.logger = get_logger()
+        self._enable_central_mem_trace = os.environ.get("XTUNER_CENTRAL_MEM_TRACE", "0") == "1"
+        self._central_mem_trace_max_nodes = int(os.environ.get("XTUNER_CENTRAL_MEM_TRACE_MAX_NODES", "200000"))
+
+    def _trace_central_memory(self, stage: str, **tracked_objects: Any) -> None:
+        if not self._enable_central_mem_trace:
+            return
+        parts: list[str] = []
+        tracked_total = 0
+        for name, value in tracked_objects.items():
+            nbytes, truncated, nodes = estimate_object_nbytes(
+                value, max_nodes=self._central_mem_trace_max_nodes
+            )
+            tracked_total += nbytes
+            truncated_tag = " truncated" if truncated else ""
+            parts.append(f"{name}={format_bytes(nbytes)} nodes={nodes}{truncated_tag}")
+        rss_bytes = get_process_rss_bytes()
+        self.logger.info(
+            f"[CentralMemTrace][Controller] {stage} | "
+            f"{', '.join(parts)} | tracked_total={format_bytes(tracked_total)} | rss={format_bytes(rss_bytes)}"
+        )
 
     # TODO(hha): 这个逻辑不够通用，应该复用 sft 函数，从而支持 expand soft pack
     def _get_pack_infos(self, dataset, num_tokens, target, random=None):
@@ -164,7 +185,13 @@ class TrainingController:
         # 排序后这条 pack 会被放在最前面，导致 rank0 的第一个 step 消耗的有效 token 数往往少于其他 rank，是正常现象。
         return sorted(packed_data_batches, key=lambda x: x["seq_ctx"].max_length_q, reverse=True)
 
-    def fit(self, data_batches: list[ColateItem], pack_max_length: int, rollout_idx: int) -> list[WorkerLogItem]:
+    def fit(
+        self,
+        data_batches: list[ColateItem],
+        pack_max_length: int,
+        rollout_idx: int,
+        trace_train_batch: Any | None = None,
+    ) -> list[WorkerLogItem]:
         has_rollout_routed_experts = False
         language_cfg = None
         if data_batches[0]["seq_ctx"].rollout_routed_experts is not None:
@@ -245,6 +272,12 @@ class TrainingController:
             pad_data_samples = [pad_data for _ in range(pad_num)]
             packed_data_batches = packed_data_batches + pad_data_samples
 
+        self._trace_central_memory(
+            stage=f"rollout_idx={rollout_idx}/before_worker_dispatch",
+            train_batch=trace_train_batch,
+            data_batches=data_batches,
+            packed_data_batches=packed_data_batches,
+        )
         print(f"len(packed_data_batches): {len(packed_data_batches)}")
 
         handles = []

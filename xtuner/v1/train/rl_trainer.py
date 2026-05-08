@@ -39,6 +39,7 @@ from xtuner.v1.rl.utils import (
     create_task,
     sort_rollout_state_for_deterministic,
 )
+from xtuner.v1.rl.utils.misc import estimate_object_nbytes, format_bytes, get_process_rss_bytes
 from xtuner.v1.train.trainer import LoadCheckpointConfig, XTunerMeta
 from xtuner.v1.utils import XTUNER_DETERMINISTIC, get_logger, is_hf_model_path, set_deterministic, timer
 from xtuner.v1.utils.device import get_device, get_torch_device_module
@@ -335,6 +336,31 @@ class BaseRLTrainer:
         self._enable_initial_evaluate = cfg.enable_initial_evaluate
         self._evaluate_step = cfg.evaluate_step
         self._debug_rollout = cfg.debug_rollout
+        self._enable_central_mem_trace = os.environ.get("XTUNER_CENTRAL_MEM_TRACE", "0") == "1"
+        self._central_mem_trace_max_nodes = int(os.environ.get("XTUNER_CENTRAL_MEM_TRACE_MAX_NODES", "200000"))
+        if self._enable_central_mem_trace:
+            self.logger.info(
+                f"Central memory trace enabled: max_nodes={self._central_mem_trace_max_nodes}. "
+                "Set XTUNER_CENTRAL_MEM_TRACE=0 to disable."
+            )
+
+    def _trace_central_memory(self, stage: str, **tracked_objects: Any) -> None:
+        if not self._enable_central_mem_trace:
+            return
+        parts: list[str] = []
+        tracked_total = 0
+        for name, value in tracked_objects.items():
+            nbytes, truncated, nodes = estimate_object_nbytes(
+                value, max_nodes=self._central_mem_trace_max_nodes
+            )
+            tracked_total += nbytes
+            truncated_tag = " truncated" if truncated else ""
+            parts.append(f"{name}={format_bytes(nbytes)} nodes={nodes}{truncated_tag}")
+        rss_bytes = get_process_rss_bytes()
+        self.logger.info(
+            f"[CentralMemTrace][Trainer] {stage} | "
+            f"{', '.join(parts)} | tracked_total={format_bytes(tracked_total)} | rss={format_bytes(rss_bytes)}"
+        )
 
     def _maybe_start_gateway(self, cfg: BaseRLTrainerConfig) -> None:
         if cfg.gateway_config is None or not cfg.gateway_config.auto_start:
@@ -509,8 +535,14 @@ class BaseRLTrainer:
         offload_rollout_before_train: bool = False,
         onload_train_before_train: bool = False,
     ) -> TrainInfo:
+        
+        # TODO: 会同时存在 4 份全局内存，train_batch + data_batches + packed_data_batches + 序列化后的要发给每个 worker 的 packed_data_batches
         train_sample_count = sum(len(group) for group in train_batch)
         self.logger.info(f"generate {train_sample_count} samples for training")
+        self._trace_central_memory(
+            stage=f"step={train_step}/train_batch_ready",
+            train_batch=train_batch,
+        )
 
         train_trajectory_dir = self.exp_dir / "train_rollout"
         train_trajectory_dir.mkdir(parents=True, exist_ok=True)
@@ -528,6 +560,11 @@ class BaseRLTrainer:
 
         with timer("prepare_data", step_timer_dict):
             data_batches, data_info = self._prepare_train_data(train_batch, self._train_worker_cfg.pack_max_length)
+        self._trace_central_memory(
+            stage=f"step={train_step}/prepared_data_ready",
+            train_batch=train_batch,
+            data_batches=data_batches,
+        )
         self.logger.info(f"Prepared {len(data_batches)} training data batches")
 
         with timer("training", step_timer_dict):
@@ -535,6 +572,7 @@ class BaseRLTrainer:
                 data_batches,
                 pack_max_length=self._train_worker_cfg.pack_max_length,
                 rollout_idx=train_step,
+                trace_train_batch=train_batch if self._enable_central_mem_trace else None,
             )
         return {
             "data_info": data_info,

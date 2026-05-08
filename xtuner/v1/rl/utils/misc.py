@@ -1,11 +1,13 @@
 import importlib
 import json
+import os
 import random
 import socket
+import sys
 import typing
 from abc import ABC
 from copy import deepcopy
-from dataclasses import asdict, is_dataclass
+from dataclasses import asdict, fields, is_dataclass
 from pathlib import Path
 from typing import Any, List, Literal, Union
 
@@ -336,3 +338,107 @@ def chat_trace_records_to_rollout_states(
         }
         states.append(normalized)
     return states
+
+
+def format_bytes(num_bytes: int | float | None) -> str:
+    if num_bytes is None:
+        return "unknown"
+    size = float(num_bytes)
+    units = ["B", "KB", "MB", "GB", "TB"]
+    for unit in units:
+        if size < 1024.0 or unit == units[-1]:
+            return f"{size:.2f}{unit}"
+        size /= 1024.0
+    return f"{size:.2f}TB"
+
+
+def get_process_rss_bytes() -> int | None:
+    try:
+        import psutil  # type: ignore
+
+        return int(psutil.Process(os.getpid()).memory_info().rss)
+    except Exception:
+        pass
+
+    try:
+        with open("/proc/self/statm", "r", encoding="utf-8") as f:
+            parts = f.read().strip().split()
+        if len(parts) >= 2:
+            rss_pages = int(parts[1])
+            page_size = os.sysconf("SC_PAGE_SIZE")
+            return rss_pages * page_size
+    except Exception:
+        return None
+    return None
+
+
+def estimate_object_nbytes(obj: Any, max_nodes: int = 200_000) -> tuple[int, bool, int]:
+    total_bytes = 0
+    visited: set[int] = set()
+    stack: list[Any] = [obj]
+    nodes = 0
+    truncated = False
+
+    while stack:
+        current = stack.pop()
+        obj_id = id(current)
+        if obj_id in visited:
+            continue
+        visited.add(obj_id)
+        nodes += 1
+
+        if nodes > max_nodes:
+            truncated = True
+            break
+
+        if hasattr(current, "is_cuda") and hasattr(current, "numel") and hasattr(current, "element_size"):
+            try:
+                total_bytes += int(current.numel()) * int(current.element_size())
+                continue
+            except Exception:
+                pass
+
+        if type(current).__module__.startswith("numpy") and hasattr(current, "nbytes"):
+            try:
+                total_bytes += int(current.nbytes)
+                continue
+            except Exception:
+                pass
+
+        try:
+            total_bytes += sys.getsizeof(current)
+        except Exception:
+            pass
+
+        if isinstance(current, dict):
+            stack.extend(current.keys())
+            stack.extend(current.values())
+            continue
+
+        if isinstance(current, (list, tuple, set, frozenset)):
+            stack.extend(current)
+            continue
+
+        if is_dataclass(current) and not isinstance(current, type):
+            for field in fields(current):
+                try:
+                    stack.append(getattr(current, field.name))
+                except Exception:
+                    continue
+            continue
+
+        if hasattr(current, "__dict__"):
+            try:
+                stack.append(vars(current))
+            except Exception:
+                pass
+            continue
+
+        if hasattr(current, "__slots__"):
+            for slot in current.__slots__:
+                try:
+                    stack.append(getattr(current, slot))
+                except Exception:
+                    continue
+
+    return total_bytes, truncated, nodes
