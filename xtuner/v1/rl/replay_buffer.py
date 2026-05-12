@@ -160,6 +160,23 @@ class ReplayPolicy(ABC):
     @abstractmethod
     async def get(self, count: int, query: QueryType, storage_backend: StorageBackend) -> list[list[RolloutState]]: ...
 
+    @abstractmethod
+    def sort_key(self, record: StorageItem) -> tuple:
+        """Priority ordering for trajectory-count-aware retrieval.
+
+        ``ReplayBuffer.take_batch_by_trajectory_count`` fetches all matching
+        records without deletion, sorts them by this key (ascending), and
+        greedily takes groups until the trajectory budget is reached.
+        Implementations must return a tuple whose natural ordering matches
+        the policy's consumption order.
+
+        Args:
+            record (StorageItem): The record to score.
+
+        Returns:
+            tuple: Comparable sort key; lower values are consumed first.
+        """
+
     async def count(self, query: QueryType, storage_backend: StorageBackend) -> int:
         return await storage_backend.count(query)
 
@@ -420,6 +437,9 @@ class FIFOReplayPolicy(ReplayPolicy):
             await storage_backend.delete([record.uid for record in selected])
         return [record.item for record in selected]
 
+    def sort_key(self, record: StorageItem) -> tuple:
+        return (record.timestamp_id,)
+
 
 class StalenessReplayPolicy(ReplayPolicy):
     async def put(self, item: StorageItem, storage_backend: StorageBackend) -> None:
@@ -437,6 +457,9 @@ class StalenessReplayPolicy(ReplayPolicy):
         if selected:
             await storage_backend.delete([record.uid for record in selected])
         return [record.item for record in selected]
+
+    def sort_key(self, record: StorageItem) -> tuple:
+        return (-record.staleness, record.timestamp_id)
 
     async def count(self, query: QueryType, storage_backend: StorageBackend) -> int:
         return await storage_backend.count(query)
@@ -573,6 +596,64 @@ class ReplayBuffer:
                 batch_by_task[task_name] = task_batch
                 consumed_counts[task_name] = len(task_batch)
         return batch_by_task, consumed_counts
+
+    async def take_batch_by_trajectory_count(
+        self,
+        task_trajectory_targets: dict[str, int],
+        *,
+        group_status: Status = Status.COMPLETED,
+    ) -> tuple[dict[str, list[list[RolloutState]]], dict[str, int], dict[str, int]]:
+        """Take groups until each task's trajectory budget is met.
+
+        Groups are ordered by :meth:`ReplayPolicy.sort_key`. The walk stops
+        as soon as the cumulative trajectory count reaches or exceeds the
+        target, **including the last group in full**. The actual consumed
+        trajectory count may therefore exceed the target by up to
+        ``len(last_group) - 1``; this is the agreed-upon overflow policy
+        for the trajectory-batched refactor.
+
+        Args:
+            task_trajectory_targets (dict[str, int]): Per-task trajectory
+                budget. Non-positive entries are treated as empty.
+            group_status (Status): Status filter applied to candidate
+                groups. Defaults to ``Status.COMPLETED``.
+
+        Returns:
+            tuple[dict[str, list[list[RolloutState]]], dict[str, int], dict[str, int]]:
+                ``(batch_by_task, consumed_group_counts, consumed_trajectory_counts)``.
+                Groups selected for a task are removed from the storage
+                backend before the tuple is returned.
+        """
+        batch_by_task: dict[str, list[list[RolloutState]]] = {}
+        consumed_group_counts: dict[str, int] = {}
+        consumed_trajectory_counts: dict[str, int] = {}
+        async with self._lock:
+            for task_name, traj_target in task_trajectory_targets.items():
+                if traj_target <= 0:
+                    batch_by_task[task_name] = []
+                    consumed_group_counts[task_name] = 0
+                    consumed_trajectory_counts[task_name] = 0
+                    continue
+                query_dsl: QueryDict = {
+                    "$and": [{"task_name": task_name}, {"status": group_status}]
+                }
+                records = await self._storage.get(query_dsl)
+                records.sort(key=self._policy.sort_key)
+                collected_groups: list[list[RolloutState]] = []
+                collected_uids: list[int] = []
+                traj_sum = 0
+                for record in records:
+                    collected_groups.append(record.item)
+                    collected_uids.append(record.uid)
+                    traj_sum += len(record.item)
+                    if traj_sum >= traj_target:
+                        break
+                if collected_uids:
+                    await self._storage.delete(collected_uids)
+                batch_by_task[task_name] = collected_groups
+                consumed_group_counts[task_name] = len(collected_groups)
+                consumed_trajectory_counts[task_name] = traj_sum
+        return batch_by_task, consumed_group_counts, consumed_trajectory_counts
 
     async def count_statuses(
         self,
