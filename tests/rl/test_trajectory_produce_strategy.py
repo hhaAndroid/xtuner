@@ -278,18 +278,6 @@ class TestStateDictRoundTrip(unittest.IsolatedAsyncioTestCase):
         await new_strategy.load_state_dict(state)
         self.assertTrue(await new_strategy.aggregator.exists(42))
 
-    async def test_preserves_stats_counters(self):
-        strategy = SyncProduceStrategyConfig().build(prompt_repeat_k=2)
-        strategy._stopped_count = 5
-        strategy._needs_more_count = 3
-
-        state = await strategy.state_dict()
-
-        new_strategy = SyncProduceStrategyConfig().build(prompt_repeat_k=2)
-        await new_strategy.load_state_dict(state)
-        self.assertEqual(new_strategy._stopped_count, 5)
-        self.assertEqual(new_strategy._needs_more_count, 3)
-
     async def test_empty_state_dict_noop_restore(self):
         strategy = SyncProduceStrategyConfig().build(prompt_repeat_k=2)
         await strategy.load_state_dict({})

@@ -365,6 +365,22 @@ class AgentLoopManager:
 
         self.task_names = [task.task_name for task in self.task_runners]
 
+        # Manager-level task_batch_unit is the common count_unit of every
+        # task's produce strategy. All tasks must agree so the replay-buffer
+        # batch-fetch path can pick between take_batch (groups) and
+        # take_batch_by_trajectory_count (trajectories) without ambiguity.
+        units: set[str] = set()
+        for task in self.task_runners:
+            unit = getattr(task.produce_strategy, "count_unit", "groups")
+            units.add(unit)
+        if len(units) > 1:
+            raise ValueError(
+                "AgentLoopManager requires all task produce strategies to share the "
+                f"same count_unit; saw {sorted(units)}. Progressive and legacy shims "
+                "cannot be mixed in one manager."
+            )
+        self._task_batch_unit = units.pop() if units else "groups"
+
         # 非共卡并发控制信号：consumer 在同步权重前置位，producer / strategy 应直接观察
         # event 状态并尽快停止继续发新 rollout；不要用额外布尔快照替代这个 event。
         self._update_event = asyncio.Event()
@@ -679,8 +695,18 @@ class AgentLoopManager:
         self._pause_time_s = 0.0
 
         self._validate_task_batch_sizes(task_batch_sizes, batch_size)
-        batch_by_task, consumed_counts = await self.replay_buffer.take_batch(task_batch_sizes)
-        consume_progress.mark_consumed(consumed_counts)
+        if self._task_batch_unit == "trajectories":
+            # Progressive strategies size targets by trajectory count and
+            # tolerate the last group overflowing past the target. We still
+            # record the trajectory consumed counts into progress so the
+            # producer sees its deficit correctly.
+            batch_by_task, _group_counts, traj_counts = (
+                await self.replay_buffer.take_batch_by_trajectory_count(task_batch_sizes)
+            )
+            consume_progress.mark_consumed(traj_counts)
+        else:
+            batch_by_task, consumed_counts = await self.replay_buffer.take_batch(task_batch_sizes)
+            consume_progress.mark_consumed(consumed_counts)
         leftover_counts = await self.replay_buffer.count_statuses(self.task_names, _LEFTOVER_STATUSES)
         self._log_buffer_counts(task_batch_sizes, batch_by_task, leftover_counts)
         return self._build_result_from_batch(

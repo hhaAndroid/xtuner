@@ -519,6 +519,19 @@ class ReplayBuffer:
         async with self._lock:
             return await self._policy.count(query_dsl, self._storage)
 
+    async def count_trajectories(self, task_name: str, group_status: Status) -> int:
+        """Total number of trajectories across matching groups.
+
+        Groups contain a variable number of trajectories once progressive
+        sampling is on (``min_repeat != max_repeat``), so callers that size
+        their batch by trajectory count need to sum group sizes explicitly
+        rather than multiplying the group count by ``prompt_repeat_k``.
+        """
+        query_dsl: QueryDict = {"$and": [{"task_name": task_name}, {"status": group_status}]}
+        async with self._lock:
+            records = await self._storage.get(query_dsl)
+        return sum(len(record.item) for record in records)
+
     async def refresh_staleness(
         self,
         *,

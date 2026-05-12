@@ -5,7 +5,7 @@ import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum, auto
-from typing import Any, Awaitable, Callable, Protocol, runtime_checkable
+from typing import Any, Awaitable, Callable, Literal, Protocol, runtime_checkable
 from uuid import uuid4
 
 import ray
@@ -101,9 +101,13 @@ class ProduceProgress:
     - next_consumer_step：producer 写入新样本时应面向的训练 step。get_batch(i) 入口设为 i，
       成功取出非空 batch 后设为 i + 1。
     - producer_future_step：producer 当前准备生产的 future step。
-    - consumed_samples：各 task 已被 consumer 从 replay buffer 取走的 group 绝对累计数。
-    - target_samples：各 task 截至 target_upto_future_step 应生产出的 group 绝对累计目标。
+    - consumed_samples：各 task 已被 consumer 从 replay buffer 取走的累计计数。
+      单位由当前 task 的 strategy ``count_unit`` 决定：legacy shim 下是 group 数，
+      progressive 下是 trajectory 数。
+    - target_samples：各 task 截至 target_upto_future_step 应生产出的累计目标，单位同上。
     - target_upto_future_step：target_samples 已覆盖到的最大 future step。
+    - stopped_prompts：progressive 模式下各 task 因 max_repeat 耗尽被丢弃的 prompt 累计数。
+    - needs_more_reentries：progressive 模式下各 task 触发 NEEDS_MORE 队首重入的累计次数。
     """
 
     next_consumer_step: int = 1
@@ -111,12 +115,16 @@ class ProduceProgress:
     consumed_samples: dict[str, int] = field(default_factory=dict)
     target_samples: dict[str, int] = field(default_factory=dict)
     target_upto_future_step: int = 0
+    stopped_prompts: dict[str, int] = field(default_factory=dict)
+    needs_more_reentries: dict[str, int] = field(default_factory=dict)
 
     @classmethod
     def build(cls, task_names: list[str]) -> "ProduceProgress":
         return cls(
             consumed_samples={task_name: 0 for task_name in task_names},
             target_samples={task_name: 0 for task_name in task_names},
+            stopped_prompts={task_name: 0 for task_name in task_names},
+            needs_more_reentries={task_name: 0 for task_name in task_names},
         )
 
     @classmethod
@@ -133,6 +141,8 @@ class ProduceProgress:
             consumed_samples={task_name: 0 for task_name in task_names},
             target_samples=dict(task_batch_sizes),
             target_upto_future_step=train_step,
+            stopped_prompts={task_name: 0 for task_name in task_names},
+            needs_more_reentries={task_name: 0 for task_name in task_names},
         )
 
     def ensure_target_upto(
@@ -161,6 +171,12 @@ class ProduceProgress:
         for task_name, count in consumed_counts.items():
             self.consumed_samples[task_name] += count
 
+    def mark_stopped(self, task_name: str, count: int = 1) -> None:
+        self.stopped_prompts[task_name] = self.stopped_prompts.get(task_name, 0) + count
+
+    def mark_needs_more(self, task_name: str, count: int = 1) -> None:
+        self.needs_more_reentries[task_name] = self.needs_more_reentries.get(task_name, 0) + count
+
     def finish_consume(self, train_step: int) -> None:
         self.next_consumer_step = train_step + 1
 
@@ -174,6 +190,8 @@ class ProduceProgress:
             "consumed_samples": dict(self.consumed_samples),
             "target_samples": dict(self.target_samples),
             "target_upto_future_step": self.target_upto_future_step,
+            "stopped_prompts": dict(self.stopped_prompts),
+            "needs_more_reentries": dict(self.needs_more_reentries),
         }
 
     def load_state_dict(self, state: dict[str, Any]) -> None:
@@ -185,6 +203,10 @@ class ProduceProgress:
         self.consumed_samples.update(state["consumed_samples"])
         self.target_samples.clear()
         self.target_samples.update(state["target_samples"])
+        self.stopped_prompts.clear()
+        self.stopped_prompts.update(state.get("stopped_prompts", {}))
+        self.needs_more_reentries.clear()
+        self.needs_more_reentries.update(state.get("needs_more_reentries", {}))
 
 
 class ProduceBatchStatus(Enum):
@@ -219,6 +241,9 @@ class IsValidSampleFn(Protocol):
 @runtime_checkable
 class ShouldContinueFn(Protocol):
     def __call__(self, completed_count: int, batch_size: int, **kwargs) -> bool: ...
+
+
+CountUnit = Literal["groups", "trajectories"]
 
 
 @dataclass
@@ -262,6 +287,19 @@ class ProduceContext:
     async def available_count(self) -> int:
         completed_count = await self.replay_buffer.count(task_name=self.task_name, group_status=Status.COMPLETED)
         return self.progress.consumed_samples[self.task_name] + completed_count
+
+    async def available_trajectory_count(self) -> int:
+        """Trajectory-unit analogue of :meth:`available_count`.
+
+        Sums the in-buffer COMPLETED trajectories plus the cumulative
+        ``consumed_samples`` counter for this task. Callers using
+        ``count_unit="trajectories"`` must populate ``consumed_samples``
+        with trajectory counts for this arithmetic to line up.
+        """
+        completed_trajectories = await self.replay_buffer.count_trajectories(
+            task_name=self.task_name, group_status=Status.COMPLETED
+        )
+        return self.progress.consumed_samples[self.task_name] + completed_trajectories
 
     async def sample_group(self, *, from_expired_pool: bool) -> list[RolloutState]:
         group_status = [Status.EXPIRED, Status.ABORTED] if from_expired_pool else [Status.ABORTED]
@@ -417,6 +455,7 @@ def _build_trajectory_strategy(
     prompt_repeat_k: int,
     is_valid_sample_fn: IsValidSampleFn,
     should_continue_fn: ShouldContinueFn,
+    count_unit: CountUnit = "groups",
 ) -> "TrajectoryProduceStrategy":
     group_policy = GroupPolicyConfig(
         min_repeat=prompt_repeat_k,
@@ -437,7 +476,58 @@ def _build_trajectory_strategy(
         over_sample_threshold=over_sample_threshold,
         is_valid_sample_fn=is_valid_sample_fn,
         should_continue_fn=should_continue_fn,
+        count_unit=count_unit,
     )
+
+
+class ProgressiveProduceStrategyConfig(ProduceStrategyConfig):
+    """Progressive-sampling strategy with explicit group-policy / scheduler knobs.
+
+    Unlike :class:`SyncProduceStrategyConfig` and
+    :class:`AsyncProduceStrategyConfig`, this config exposes
+    :class:`GroupPolicyConfig` directly so users can configure
+    ``min_repeat < max_repeat`` and enable the all-equal NEEDS_MORE /
+    STOPPED state machine.
+
+    ``ProduceProgress.target_samples`` and
+    ``ProduceProgress.consumed_samples`` are interpreted as trajectory
+    counts when this config is used; the manager switches to
+    :meth:`ReplayBuffer.take_batch_by_trajectory_count` and allows the
+    last group to overflow the target.
+
+    Args:
+        group_policy (GroupPolicyConfig): Policy controlling
+            COLLECTING / NEEDS_MORE / READY / STOPPED transitions.
+        scheduler (TrajectorySchedulerConfig): Scheduler capacity and
+            partial-rollout behavior.
+        over_sample_threshold (float): Extra prompts kept preloaded beyond
+            the strict target (same semantic as legacy but in the same unit
+            as the config's ``count_unit``, which is always
+            ``"trajectories"`` here).
+    """
+
+    group_policy: GroupPolicyConfig
+    scheduler: TrajectorySchedulerConfig
+    over_sample_threshold: float = 0.0
+
+    def build(
+        self,
+        *,
+        sync_weights_interval: int = 1,
+        prompt_repeat_k: int = 1,
+    ) -> "ProduceStrategy":
+        # prompt_repeat_k coming from SamplerConfig is ignored: the
+        # progressive config expresses its own min/max via group_policy.
+        _ = prompt_repeat_k
+        scheduler = self.scheduler.build(sync_weights_interval=sync_weights_interval)
+        return TrajectoryProduceStrategy(
+            scheduler=scheduler,
+            group_policy=self.group_policy.build(),
+            over_sample_threshold=self.over_sample_threshold,
+            is_valid_sample_fn=self.is_valid_sample_fn,
+            should_continue_fn=self.should_continue_fn,
+            count_unit="trajectories",
+        )
 
 
 class ProduceStrategy(ABC):
@@ -483,22 +573,30 @@ class TrajectoryProduceStrategy(ProduceStrategy):
     3. Updates the aggregator atomically: on READY the completed group is
        written to the buffer; on COLLECTING / NEEDS_MORE the prompt is
        re-submitted (NEEDS_MORE goes to the front); on STOPPED the
-       aggregation is dropped and a stats counter ticks.
+       aggregation is dropped and the per-task telemetry counter ticks.
 
-    Phase 2 wires this strategy through legacy config shims with
-    ``min_repeat == max_repeat == prompt_repeat_k`` and
-    ``stop_when_all_equal=False`` so the emitted groups match the legacy
-    AsyncProduceStrategy byte-for-byte modulo trajectory arrival order.
+    ``count_unit`` chooses the semantic of ``ProduceProgress.target_samples``
+    and ``ProduceProgress.consumed_samples`` for this strategy:
+
+    * ``"groups"`` (legacy Sync / Async shims): target and consumed counters
+      track group counts. The produce loop exits when
+      ``ctx.available_count()`` reaches the target.
+    * ``"trajectories"`` (progressive config): counters track trajectory
+      counts and the loop uses ``ctx.available_trajectory_count()`` so that
+      variable-K groups fall out naturally.
 
     Args:
         scheduler (TrajectoryScheduler): Global concurrency / queue manager.
         group_policy (GroupPolicy): Policy driving aggregation decisions.
         over_sample_threshold (float): Extra prompts kept preloaded beyond
-            the strict target, mirroring the legacy knob.
+            the strict target, mirroring the legacy knob. Interpreted in
+            the same unit as ``count_unit``.
         is_valid_sample_fn (IsValidSampleFn): Filter applied on finalized
             groups before they are written to the replay buffer.
         should_continue_fn (ShouldContinueFn): Loop termination predicate
-            evaluated against ``ctx.available_count()``.
+            evaluated against ``available`` vs. ``target``.
+        count_unit (CountUnit): ``"groups"`` or ``"trajectories"``. See
+            above.
     """
 
     def __init__(
@@ -509,14 +607,14 @@ class TrajectoryProduceStrategy(ProduceStrategy):
         over_sample_threshold: float,
         is_valid_sample_fn: IsValidSampleFn,
         should_continue_fn: ShouldContinueFn,
+        count_unit: CountUnit = "groups",
     ) -> None:
         super().__init__(is_valid_sample_fn, should_continue_fn)
         self._scheduler = scheduler
         self._policy = group_policy
         self._aggregator = GroupAggregator(group_policy)
         self._over_sample_threshold = over_sample_threshold
-        self._stopped_count: int = 0
-        self._needs_more_count: int = 0
+        self._count_unit: CountUnit = count_unit
 
     @property
     def stale_threshold(self) -> int:
@@ -529,6 +627,10 @@ class TrajectoryProduceStrategy(ProduceStrategy):
     @property
     def scheduler(self) -> TrajectoryScheduler:
         return self._scheduler
+
+    @property
+    def count_unit(self) -> CountUnit:
+        return self._count_unit
 
     def is_model_expired(self, train_step: int, model_step: int) -> bool:
         return self._scheduler.is_model_expired(train_step, model_step)
@@ -561,7 +663,8 @@ class TrajectoryProduceStrategy(ProduceStrategy):
 
         logger.info(
             f"Starting produce_batch for task {ctx.task_name}: "
-            f"target_abs={ctx.target_abs}, over_sample_threshold={self._over_sample_threshold}, "
+            f"target_abs={ctx.target_abs} ({self._count_unit}), "
+            f"over_sample_threshold={self._over_sample_threshold}, "
             f"max_on_fly={self._scheduler.config.max_on_fly}."
         )
 
@@ -573,7 +676,7 @@ class TrajectoryProduceStrategy(ProduceStrategy):
             if self.is_model_expired(ctx.train_step, ctx.model_step):
                 return ProduceBatchStatus.EXPIRED_BATCH
 
-            available = await ctx.available_count()
+            available = await self._available_for_unit(ctx)
             if not self.should_continue_fn(available, ctx.target_abs):
                 break
 
@@ -604,23 +707,37 @@ class TrajectoryProduceStrategy(ProduceStrategy):
     async def state_dict(self) -> dict[str, Any]:
         return {
             "aggregator": await self._aggregator.state_dict(),
-            "stopped_count": self._stopped_count,
-            "needs_more_count": self._needs_more_count,
         }
 
     async def load_state_dict(self, state: dict[str, Any]) -> None:
         if "aggregator" in state:
             await self._aggregator.load_state_dict(state["aggregator"])
-        self._stopped_count = int(state.get("stopped_count", 0))
-        self._needs_more_count = int(state.get("needs_more_count", 0))
+
+    async def _available_for_unit(self, ctx: ProduceContext) -> int:
+        if self._count_unit == "trajectories":
+            return await ctx.available_trajectory_count()
+        return await ctx.available_count()
 
     async def _preload_prompts(self, ctx: ProduceContext, available: int) -> None:
-        groups_needed = ctx.target_abs - available
-        if groups_needed <= 0:
+        """Top up the scheduler queue with fresh prompts.
+
+        When ``count_unit`` is ``"groups"`` each preloaded prompt counts as
+        one unit toward the target. When it is ``"trajectories"`` each
+        preloaded prompt will eventually emit roughly ``min_repeat`` up to
+        ``max_repeat`` trajectories, so the number of prompts needed to
+        close the gap is scaled by ``min_repeat``.
+        """
+        deficit = ctx.target_abs - available
+        if deficit <= 0:
             return
+        if self._count_unit == "trajectories":
+            per_prompt = max(1, self._policy.min_repeat)
+            prompts_for_deficit = math.ceil(deficit / per_prompt)
+        else:
+            prompts_for_deficit = deficit
         active_prompts = await self._aggregator.active_count() + self._scheduler.queue_len()
         oversample = math.ceil(self._over_sample_threshold * ctx.task_batch_size)
-        target_active = groups_needed + oversample
+        target_active = prompts_for_deficit + oversample
         to_preload = max(0, target_active - active_prompts)
         for _ in range(to_preload):
             if ctx.should_abort():
@@ -675,13 +792,13 @@ class TrajectoryProduceStrategy(ProduceStrategy):
                 assert group is not None
                 await ctx.put_generated_group(group)
             elif state is GroupState.NEEDS_MORE:
-                self._needs_more_count += 1
+                ctx.progress.mark_needs_more(ctx.task_name)
                 await self._scheduler.submit_front(req)
             elif state is GroupState.COLLECTING:
                 await self._scheduler.submit(req)
             elif state is GroupState.STOPPED:
                 await self._aggregator.drop(req.prompt_uid)
-                self._stopped_count += 1
+                ctx.progress.mark_stopped(ctx.task_name)
             return
 
         if traj.status == Status.ABORTED:
