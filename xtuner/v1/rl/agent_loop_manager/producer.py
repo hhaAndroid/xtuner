@@ -1,10 +1,12 @@
 import asyncio
+import copy
 import math
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum, auto
 from typing import Any, Awaitable, Callable, Protocol, runtime_checkable
+from uuid import uuid4
 
 import ray
 import tqdm
@@ -17,6 +19,17 @@ from xtuner.v1.data_proto.rl_data import (
     get_group_status,
 )
 from xtuner.v1.rl.agent_loop import AgentLoopSpec, get_agent_loop_rollout_ctl
+from xtuner.v1.rl.agent_loop_manager.group_aggregator import GroupAggregator
+from xtuner.v1.rl.agent_loop_manager.group_policy import (
+    GroupPolicy,
+    GroupPolicyConfig,
+    GroupState,
+)
+from xtuner.v1.rl.agent_loop_manager.trajectory_scheduler import (
+    PromptRequest,
+    TrajectoryScheduler,
+    TrajectorySchedulerConfig,
+)
 from xtuner.v1.rl.replay_buffer import ReplayBuffer
 from xtuner.v1.rl.rollout.utils import pause_generation
 from xtuner.v1.rl.utils import calculate_seq_staleness, create_task
@@ -321,70 +334,52 @@ class ProduceStrategyConfig(ABC, BaseModel):
     should_continue_fn: ShouldContinueFn = default_should_continue_fn
 
     @abstractmethod
-    def build(self, *, sync_weights_interval: int = 1) -> "ProduceStrategy": ...
+    def build(
+        self,
+        *,
+        sync_weights_interval: int = 1,
+        prompt_repeat_k: int = 1,
+    ) -> "ProduceStrategy": ...
 
 
 class SyncProduceStrategyConfig(ProduceStrategyConfig):
-    """Configuration for synchronous rollout production.
+    """Legacy shim: colocated / synchronous path.
 
-    The synchronous strategy produces samples on demand for the current training
-    step. It is simpler and is the default choice when rollout and training run
-    in a colocated or tightly synchronized workflow.
-
-    Args:
-        is_valid_sample_fn (IsValidSampleFn): Function used to decide whether a
-            generated rollout group is trainable. Defaults to
-            ``default_is_valid_sample_fn``.
-        should_continue_fn (ShouldContinueFn): Function used to decide whether
-            production should continue after a group is processed. Defaults to
-            ``default_should_continue_fn``.
-
-    **Examples:**
-
-    Example synchronous strategy::
-
-        config = SyncProduceStrategyConfig()
+    Translates to a :class:`TrajectoryProduceStrategy` with
+    ``wait_until_all_ready=True`` and ``max_staleness=0``. The aggregator
+    runs with ``min_repeat == max_repeat == prompt_repeat_k`` and
+    ``stop_when_all_equal=False`` so READY fires on the k-th completion
+    regardless of reward variance, matching legacy group behavior.
     """
 
-    def build(self, *, sync_weights_interval: int = 1) -> "SyncProduceStrategy":
-        return SyncProduceStrategy(
-            is_valid_sample_fn=self.is_valid_sample_fn, should_continue_fn=self.should_continue_fn
+    def build(
+        self,
+        *,
+        sync_weights_interval: int = 1,
+        prompt_repeat_k: int = 1,
+    ) -> "ProduceStrategy":
+        return _build_trajectory_strategy(
+            wait_until_all_ready=True,
+            over_sample_threshold=0.0,
+            enable_partial_rollout=False,
+            max_staleness=0,
+            tail_batch_trigger_size=0,
+            sync_weights_interval=sync_weights_interval,
+            prompt_repeat_k=prompt_repeat_k,
+            is_valid_sample_fn=self.is_valid_sample_fn,
+            should_continue_fn=self.should_continue_fn,
         )
 
 
 class AsyncProduceStrategyConfig(ProduceStrategyConfig):
-    """Configuration for asynchronous rollout production.
+    """Legacy shim: disaggregated / async path.
 
-    The asynchronous strategy keeps producing rollout samples in the background
-    and stores them in the replay buffer. It can oversample, allow partial
-    rollout continuation, and discard samples that are too stale relative to the
-    current training step.
-
-    Args:
-        is_valid_sample_fn (IsValidSampleFn): Function used to decide whether a
-            generated rollout group is trainable. Defaults to
-            ``default_is_valid_sample_fn``.
-        should_continue_fn (ShouldContinueFn): Function used to decide whether
-            production should continue after a group is processed. Defaults to
-            ``default_should_continue_fn``.
-        over_sample_threshold (float): Extra completed-sample ratio allowed
-            before the producer stops. Defaults to 0.0.
-        enable_partial_rollout (bool): Whether unfinished rollouts can be
-            continued after a weight sync. Defaults to False.
-        max_staleness (int): Maximum allowed model-step staleness for replayed
-            samples. Defaults to 0.
-        tail_batch_trigger_size (int): Minimum pending tail size that can
-            trigger a final batch. Defaults to 0.
-
-    **Examples:**
-
-    Example asynchronous strategy::
-
-        config = AsyncProduceStrategyConfig(
-            over_sample_threshold=0.2,
-            enable_partial_rollout=True,
-            max_staleness=1,
-        )
+    Preserves the legacy knobs (``over_sample_threshold``,
+    ``enable_partial_rollout``, ``max_staleness``, ``tail_batch_trigger_size``)
+    and routes them onto :class:`TrajectorySchedulerConfig`. The group
+    policy is fixed to min=max=prompt_repeat_k with
+    ``stop_when_all_equal=False`` for behavioral equivalence with the
+    removed AsyncProduceStrategy class body.
     """
 
     over_sample_threshold: float = 0.0
@@ -392,16 +387,57 @@ class AsyncProduceStrategyConfig(ProduceStrategyConfig):
     max_staleness: int = Field(default=0, ge=0)
     tail_batch_trigger_size: int = 0
 
-    def build(self, *, sync_weights_interval: int = 1) -> "AsyncProduceStrategy":
-        return AsyncProduceStrategy(
+    def build(
+        self,
+        *,
+        sync_weights_interval: int = 1,
+        prompt_repeat_k: int = 1,
+    ) -> "ProduceStrategy":
+        return _build_trajectory_strategy(
+            wait_until_all_ready=False,
             over_sample_threshold=self.over_sample_threshold,
             enable_partial_rollout=self.enable_partial_rollout,
             max_staleness=self.max_staleness,
-            sync_weights_interval=sync_weights_interval,
             tail_batch_trigger_size=self.tail_batch_trigger_size,
+            sync_weights_interval=sync_weights_interval,
+            prompt_repeat_k=prompt_repeat_k,
             is_valid_sample_fn=self.is_valid_sample_fn,
             should_continue_fn=self.should_continue_fn,
         )
+
+
+def _build_trajectory_strategy(
+    *,
+    wait_until_all_ready: bool,
+    over_sample_threshold: float,
+    enable_partial_rollout: bool,
+    max_staleness: int,
+    tail_batch_trigger_size: int,
+    sync_weights_interval: int,
+    prompt_repeat_k: int,
+    is_valid_sample_fn: IsValidSampleFn,
+    should_continue_fn: ShouldContinueFn,
+) -> "TrajectoryProduceStrategy":
+    group_policy = GroupPolicyConfig(
+        min_repeat=prompt_repeat_k,
+        max_repeat=prompt_repeat_k,
+        stop_when_all_equal=False,
+    ).build()
+    scheduler_cfg = TrajectorySchedulerConfig(
+        max_on_fly=max(1, prompt_repeat_k * 64),
+        wait_until_all_ready=wait_until_all_ready,
+        max_staleness=max_staleness,
+        enable_partial_rollout=enable_partial_rollout,
+        tail_batch_trigger_size=tail_batch_trigger_size,
+    )
+    scheduler = scheduler_cfg.build(sync_weights_interval=sync_weights_interval)
+    return TrajectoryProduceStrategy(
+        scheduler=scheduler,
+        group_policy=group_policy,
+        over_sample_threshold=over_sample_threshold,
+        is_valid_sample_fn=is_valid_sample_fn,
+        should_continue_fn=should_continue_fn,
+    )
 
 
 class ProduceStrategy(ABC):
@@ -420,20 +456,260 @@ class ProduceStrategy(ABC):
         return 0.0
 
     def is_model_expired(self, train_step: int, model_step: int) -> bool:
-        # 默认同步策略没有跨权重版本的后台样本，只有异步策略需要判定模型过期。
         return False
 
     def pending_task_count(self) -> int:
         return 0
 
+    async def state_dict(self) -> dict[str, Any]:
+        return {}
+
+    async def load_state_dict(self, state: dict[str, Any]) -> None:
+        return None
+
+
+class TrajectoryProduceStrategy(ProduceStrategy):
+    """Trajectory-level producer backed by TrajectoryScheduler + GroupAggregator.
+
+    The strategy preloads prompts onto the scheduler queue, spawns trajectory
+    runners up to the scheduler's global cap, and forwards completed groups
+    to the replay buffer via :meth:`ProduceContext.put_generated_group`.
+
+    Each runner:
+
+    1. Deep-copies the prompt template and assigns a fresh trajectory uid.
+    2. Invokes ``ctx.generate_group`` on a single-element list so
+       per-trajectory and batch-judge agent loops both keep working.
+    3. Updates the aggregator atomically: on READY the completed group is
+       written to the buffer; on COLLECTING / NEEDS_MORE the prompt is
+       re-submitted (NEEDS_MORE goes to the front); on STOPPED the
+       aggregation is dropped and a stats counter ticks.
+
+    Phase 2 wires this strategy through legacy config shims with
+    ``min_repeat == max_repeat == prompt_repeat_k`` and
+    ``stop_when_all_equal=False`` so the emitted groups match the legacy
+    AsyncProduceStrategy byte-for-byte modulo trajectory arrival order.
+
+    Args:
+        scheduler (TrajectoryScheduler): Global concurrency / queue manager.
+        group_policy (GroupPolicy): Policy driving aggregation decisions.
+        over_sample_threshold (float): Extra prompts kept preloaded beyond
+            the strict target, mirroring the legacy knob.
+        is_valid_sample_fn (IsValidSampleFn): Filter applied on finalized
+            groups before they are written to the replay buffer.
+        should_continue_fn (ShouldContinueFn): Loop termination predicate
+            evaluated against ``ctx.available_count()``.
+    """
+
+    def __init__(
+        self,
+        *,
+        scheduler: TrajectoryScheduler,
+        group_policy: GroupPolicy,
+        over_sample_threshold: float,
+        is_valid_sample_fn: IsValidSampleFn,
+        should_continue_fn: ShouldContinueFn,
+    ) -> None:
+        super().__init__(is_valid_sample_fn, should_continue_fn)
+        self._scheduler = scheduler
+        self._policy = group_policy
+        self._aggregator = GroupAggregator(group_policy)
+        self._over_sample_threshold = over_sample_threshold
+        self._stopped_count: int = 0
+        self._needs_more_count: int = 0
+
+    @property
+    def stale_threshold(self) -> int:
+        return self._scheduler.stale_threshold
+
+    @property
+    def aggregator(self) -> GroupAggregator:
+        return self._aggregator
+
+    @property
+    def scheduler(self) -> TrajectoryScheduler:
+        return self._scheduler
+
+    def is_model_expired(self, train_step: int, model_step: int) -> bool:
+        return self._scheduler.is_model_expired(train_step, model_step)
+
+    def pending_task_count(self) -> int:
+        return self._scheduler.pending_count()
+
+    async def pause_produce(self, ctx: ProduceContext) -> float:
+        pause_start = time.perf_counter()
+        if self._scheduler.pending_count() == 0:
+            return 0.0
+        rollout_ctl = await get_agent_loop_rollout_ctl(ctx.agent_loop)
+        await pause_generation(rollout_ctl)
+        await self._scheduler.pause_and_cleanup()
+        return time.perf_counter() - pause_start
+
+    async def produce_batch(self, ctx: ProduceContext) -> ProduceBatchStatus:
+        if ctx.task_name not in ctx.progress.consumed_samples:
+            raise KeyError(f"ProduceProgress.consumed_samples missing task_name={ctx.task_name!r}")
+        if ctx.task_name not in ctx.progress.target_samples:
+            raise KeyError(f"ProduceProgress.target_samples missing task_name={ctx.task_name!r}")
+
+        if ctx.target_abs <= 0:
+            return ProduceBatchStatus.NORMAL
+
+        if ctx.should_abort():
+            return ProduceBatchStatus.UPDATE_WEIGHT_AND_ABORT
+        if self.is_model_expired(ctx.train_step, ctx.model_step):
+            return ProduceBatchStatus.EXPIRED_BATCH
+
+        logger.info(
+            f"Starting produce_batch for task {ctx.task_name}: "
+            f"target_abs={ctx.target_abs}, over_sample_threshold={self._over_sample_threshold}, "
+            f"max_on_fly={self._scheduler.config.max_on_fly}."
+        )
+
+        runner = self._build_runner(ctx)
+
+        while True:
+            if ctx.should_abort():
+                return ProduceBatchStatus.UPDATE_WEIGHT_AND_ABORT
+            if self.is_model_expired(ctx.train_step, ctx.model_step):
+                return ProduceBatchStatus.EXPIRED_BATCH
+
+            available = await ctx.available_count()
+            if not self.should_continue_fn(available, ctx.target_abs):
+                break
+
+            await self._preload_prompts(ctx, available)
+
+            spawned_any = False
+            while await self._scheduler.spawn_if_slot(runner):
+                spawned_any = True
+
+            if not spawned_any and self._scheduler.pending_count() == 0:
+                if (
+                    self._scheduler.queue_len() == 0
+                    and await self._aggregator.active_count() == 0
+                ):
+                    logger.warning(
+                        f"Produce stalled for task {ctx.task_name}: no pending tasks, "
+                        "empty queue, no active aggregation."
+                    )
+                    return ProduceBatchStatus.NORMAL
+
+            await self._scheduler.wait_first_completed(timeout_s=1.0)
+
+        if self._scheduler.config.wait_until_all_ready:
+            await self._scheduler.drain()
+
+        return ProduceBatchStatus.NORMAL
+
+    async def state_dict(self) -> dict[str, Any]:
+        return {
+            "aggregator": await self._aggregator.state_dict(),
+            "stopped_count": self._stopped_count,
+            "needs_more_count": self._needs_more_count,
+        }
+
+    async def load_state_dict(self, state: dict[str, Any]) -> None:
+        if "aggregator" in state:
+            await self._aggregator.load_state_dict(state["aggregator"])
+        self._stopped_count = int(state.get("stopped_count", 0))
+        self._needs_more_count = int(state.get("needs_more_count", 0))
+
+    async def _preload_prompts(self, ctx: ProduceContext, available: int) -> None:
+        groups_needed = ctx.target_abs - available
+        if groups_needed <= 0:
+            return
+        active_prompts = await self._aggregator.active_count() + self._scheduler.queue_len()
+        oversample = math.ceil(self._over_sample_threshold * ctx.task_batch_size)
+        target_active = groups_needed + oversample
+        to_preload = max(0, target_active - active_prompts)
+        for _ in range(to_preload):
+            if ctx.should_abort():
+                return
+            prompt_req = await ctx.sampler.sample_prompt(task_name=ctx.task_name)
+            await self._aggregator.register_prompt(prompt_req.prompt, ctx.task_name)
+            await self._scheduler.submit(prompt_req)
+
+    def _build_runner(self, ctx: ProduceContext) -> Callable[[PromptRequest], Awaitable[None]]:
+        async def runner(req: PromptRequest) -> None:
+            try:
+                await self._aggregator.mark_in_flight(req.prompt_uid, +1)
+                pending: RolloutState | None = None
+                if self._scheduler.config.enable_partial_rollout:
+                    pending = await self._aggregator.pop_pending_keep(req.prompt_uid)
+                if pending is not None:
+                    input_state = pending
+                else:
+                    input_state = copy.deepcopy(req.prompt)
+                    input_state.uid = uuid4().int
+                    input_state.session_uid = input_state.uid
+                result_list = await ctx.generate_group(
+                    [input_state],
+                    enable_partial_rollout=self._scheduler.config.enable_partial_rollout,
+                )
+                traj = result_list[0]
+                await self._dispatch_trajectory(ctx, req, traj)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001 - must not break scheduler state
+                logger.error(
+                    f"Trajectory runner failed for prompt_uid={req.prompt_uid}: "
+                    f"{type(exc).__name__}: {exc}",
+                    exc_info=exc,
+                )
+            finally:
+                await self._aggregator.mark_in_flight(req.prompt_uid, -1)
+
+        return runner
+
+    async def _dispatch_trajectory(
+        self,
+        ctx: ProduceContext,
+        req: PromptRequest,
+        traj: RolloutState,
+    ) -> None:
+        if traj.status == Status.COMPLETED:
+            state, group = await self._aggregator.add_trajectory(traj)
+            if state is None:
+                return
+            if state is GroupState.READY:
+                assert group is not None
+                await ctx.put_generated_group(group)
+            elif state is GroupState.NEEDS_MORE:
+                self._needs_more_count += 1
+                await self._scheduler.submit_front(req)
+            elif state is GroupState.COLLECTING:
+                await self._scheduler.submit(req)
+            elif state is GroupState.STOPPED:
+                await self._aggregator.drop(req.prompt_uid)
+                self._stopped_count += 1
+            return
+
+        if traj.status == Status.ABORTED:
+            if self._scheduler.config.enable_partial_rollout:
+                await self._aggregator.push_pending_keep(traj)
+            await self._scheduler.submit_front(req)
+            return
+
+        logger.warning(
+            f"Dropping aggregation prompt_uid={req.prompt_uid} because trajectory "
+            f"uid={traj.uid} ended with status {traj.status}."
+        )
+        await self._aggregator.drop(req.prompt_uid)
+
+
+# Backward-compatibility aliases. Phase 2 collapses Sync / Async strategies
+# into a single trajectory-based class; external code that still imports the
+# legacy names (isinstance checks, __all__ re-exports) keeps working.
+AsyncProduceStrategy = TrajectoryProduceStrategy
+SyncProduceStrategy = TrajectoryProduceStrategy
+
 
 class _PendingTasks:
-    """AsyncProduceStrategy 的并发 pending task 集合。
+    """(deprecated) Concurrency primitive from the removed AsyncProduceStrategy.
 
-    这里只封装 pending set 的并发协议，不理解 sampler / rollout / replay buffer：
-    - wait 使用快照，随后必须二次 claim，避免 produce 和 pause 重复处理同一个 done task。
-    - cancel 前先原子 claim 并清空集合，避免 cancel 后又被其他路径 claim。
-    - schedule one 在锁内同时检查 abort 和 pending 数，避免 pause 已触发后继续新增 task。
+    Retained as a standalone shell so tests that imported it at module top
+    level continue to import cleanly. Production code no longer references
+    it; prefer :class:`TrajectoryScheduler` for new work.
     """
 
     def __init__(self) -> None:
@@ -441,7 +717,6 @@ class _PendingTasks:
         self._lock = asyncio.Lock()
 
     def count(self) -> int:
-        # 只暴露已经纳入 pending 集合的 task 数量。
         return len(self._tasks)
 
     async def claim_ready(self) -> set[asyncio.Task]:
@@ -455,7 +730,6 @@ class _PendingTasks:
             snapshot = set(self._tasks)
         if not snapshot:
             return set()
-
         done, _ = await asyncio.wait(snapshot, timeout=timeout_s, return_when=asyncio.FIRST_COMPLETED)
         async with self._lock:
             claimed = done & self._tasks
@@ -472,7 +746,6 @@ class _PendingTasks:
         async with self._lock:
             if should_abort() or len(self._tasks) >= max_pending:
                 return False
-            # 保持“检查 abort / pending 数 / 新增 task”这一组操作原子化。
             self._tasks.add(await spawn_one())
             return True
 
@@ -488,248 +761,3 @@ class _PendingTasks:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
         return len(tasks)
-
-
-class SyncProduceStrategy(ProduceStrategy):
-    async def produce_batch(self, ctx: ProduceContext) -> ProduceBatchStatus:
-        pending_tasks = set()
-        completed_sample_count = await ctx.replay_buffer.count(task_name=ctx.task_name, group_status=Status.COMPLETED)
-        # TODO: 是否支持 SyncProduceStrategy 在非共卡时使用？如果支持，下面这行注释掉？
-        # assert completed_sample_count == 0, "SyncProduceStrategy assumes no completed samples at the start."
-
-        for _ in range(ctx.task_batch_size):
-            rollout_state = await ctx.sampler.sample(task_name=ctx.task_name)
-            task = create_task(ctx.generate_group(rollout_state))
-            pending_tasks.add(task)
-
-        logger.info(f"[SyncProduceStrategy] Started {len(pending_tasks)} initial tasks.")
-
-        progress_displayer = _ProgressDisplayer.create(
-            strategy_name=self.__class__.__name__,
-            task_name=ctx.task_name,
-            total=ctx.target_abs,
-            initial=completed_sample_count,
-        )
-        try:
-            while self.should_continue_fn(completed_sample_count, ctx.task_batch_size):
-                if not pending_tasks:
-                    logger.warning("[SyncProduceStrategy] All tasks are done but not enough samples collected.")
-                    break
-                done_tasks, pending_tasks = await asyncio.wait(
-                    pending_tasks, timeout=1, return_when=asyncio.FIRST_COMPLETED
-                )
-                # 如果要过滤，在这个地方处理，然后加入到 replay buffer
-                # 如果被过滤的数据就放到 put_to_filtered pool 中
-                for task in done_tasks:
-                    items = task.result()
-
-                    is_completed = await ctx.put_generated_group(items)
-                    if not is_completed:
-                        continue
-
-                    completed_sample_count += 1
-                    progress_displayer.update(completed_sample_count)
-
-                while len(pending_tasks) + completed_sample_count < ctx.task_batch_size and self.should_continue_fn(
-                    completed_sample_count, ctx.task_batch_size
-                ):
-                    rollout_state = await ctx.sampler.sample(task_name=ctx.task_name)
-                    task = create_task(ctx.generate_group(rollout_state))
-                    pending_tasks.add(task)
-        finally:
-            progress_displayer.close()
-
-        return ProduceBatchStatus.NORMAL
-
-
-class AsyncProduceStrategy(ProduceStrategy):
-    def __init__(
-        self,
-        over_sample_threshold: float,
-        enable_partial_rollout: bool,
-        tail_batch_trigger_size: int,
-        max_staleness: int,
-        sync_weights_interval: int,
-        is_valid_sample_fn: IsValidSampleFn,
-        should_continue_fn: ShouldContinueFn,
-    ):
-        super().__init__(is_valid_sample_fn, should_continue_fn)
-
-        # TODO: 需要添加 tail_batch_max_tries
-        # 作用是：如果一个样本多次重试，则将它置为特殊状态 MAX_TRIES，这类样本和过期样本一起触发tail batch逻辑
-        # 这个依赖：RolloutState 添加并维护一个新的属性 num_tries，每次打断时加1，达到 max_tries 时置为 MAX_TRIES
-        # 如果 enable_partial_rollout=True，不会触发这个逻辑，所以不受此影响
-        # 如果 enable_partial_rollout=False，分两种情况：
-        # 1) staleness = 0，即不允许过期样本，此时过期触发tail batch逻辑已经cover了tail batch逻辑
-        # 2) staleness > 0，此时需要 重试tail batch逻辑，否则多次重试的样本会影响rollout 效率
-        if not enable_partial_rollout and max_staleness > 0:
-            logger.warning(
-                "max_staleness > 0, enable_partial_rollout is False, this will affect rollout efficiency because not support tail_batch_max_tries logic now"
-            )
-
-        self.over_sample_threshold = over_sample_threshold
-        self.enable_partial_rollout = enable_partial_rollout
-        self.max_staleness = max_staleness
-        self.sync_weights_interval = sync_weights_interval
-        self.stale_threshold = calculate_stale_threshold(max_staleness, sync_weights_interval)
-        self.tail_batch_trigger_size = tail_batch_trigger_size
-        self._pending_tasks = _PendingTasks()
-        self.cleanup_task_time = 5 * 60  # 5 minutes
-
-    def is_model_expired(self, train_step: int, model_step: int) -> bool:
-        staleness = calculate_seq_staleness(model_step, train_step)
-        return staleness >= self.stale_threshold
-
-    def pending_task_count(self) -> int:
-        return self._pending_tasks.count()
-
-    async def _put_claimed(
-        self,
-        claimed_tasks: set[asyncio.Task],
-        ctx: ProduceContext,
-        available_base: int | None = None,
-        progress_displayer: _ProgressDisplayer | None = None,
-    ) -> None:
-        completed_count = 0
-        for task in claimed_tasks:
-            is_completed = await ctx.put_generated_group(task.result())
-            if is_completed:
-                completed_count += 1
-            if is_completed and available_base is not None and progress_displayer is not None:
-                progress_displayer.update(available_base + completed_count)
-
-    async def pause_produce(self, ctx: ProduceContext) -> float:
-        pause_start = time.perf_counter()
-        if self._pending_tasks.count() == 0:
-            return 0.0
-
-        rollout_ctl = await get_agent_loop_rollout_ctl(ctx.agent_loop)
-        await pause_generation(rollout_ctl)
-        cleanup_start_time = time.perf_counter()
-        while True:
-            elapsed_time = time.perf_counter() - cleanup_start_time
-            if elapsed_time > self.cleanup_task_time:
-                cancelled_count = await self._pending_tasks.cancel_all()
-                logger.warning(
-                    f"Cleanup timeout of {self.cleanup_task_time}s reached. "
-                    f"Forcefully cancelling {cancelled_count} remaining tasks."
-                )
-                break
-
-            if self._pending_tasks.count() == 0:
-                break
-
-            claimed_done = await self._pending_tasks.wait_and_claim(timeout_s=1)
-            for task in claimed_done:
-                paused_items = task.result()
-                for item in paused_items:
-                    logger.debug(
-                        f"[{self.__class__.__name__}] Task {ctx.task_name} | "
-                        f"Collecting paused sample (uid: {item.uid}, status: {item.status}, "
-                        f"length: {len(item.response_ids or [])}) after pausing generation."
-                    )
-                await ctx.put_generated_group(paused_items)
-            if self._pending_tasks.count() > 0:
-                await pause_generation(rollout_ctl)
-                await asyncio.sleep(1)
-        return time.perf_counter() - pause_start
-
-    async def produce_batch(self, ctx: ProduceContext) -> ProduceBatchStatus:
-        if ctx.task_name not in ctx.progress.consumed_samples:
-            raise KeyError(f"ProduceProgress.consumed_samples missing task_name={ctx.task_name!r}")
-        if ctx.task_name not in ctx.progress.target_samples:
-            raise KeyError(f"ProduceProgress.target_samples missing task_name={ctx.task_name!r}")
-
-        if ctx.target_abs <= 0:
-            return ProduceBatchStatus.NORMAL
-
-        # TODO: place this check just before while loop
-        if ctx.should_abort():
-            return ProduceBatchStatus.UPDATE_WEIGHT_AND_ABORT
-        if self.is_model_expired(ctx.train_step, ctx.model_step):
-            return ProduceBatchStatus.EXPIRED_BATCH
-
-        # 先回收跨 produce_batch 调用遗留的已完成任务，避免 done task 长期留在 pending 集合里。
-        claimed_done = await self._pending_tasks.claim_ready()
-        await self._put_claimed(claimed_done, ctx)
-
-        # TODO: remove this check
-        if ctx.should_abort():
-            return ProduceBatchStatus.UPDATE_WEIGHT_AND_ABORT
-        if self.is_model_expired(ctx.train_step, ctx.model_step):
-            return ProduceBatchStatus.EXPIRED_BATCH
-
-        expired_count = await ctx.expired_count()
-        sample_from_expired = self.tail_batch_trigger_size > 0 and expired_count >= self.tail_batch_trigger_size
-        if sample_from_expired:
-            logger.info(
-                f"Tail batch trigger condition met: {expired_count} expired samples "
-                f"(threshold: {self.tail_batch_trigger_size}). Enabling tail batch mode."
-            )
-
-        # 本轮 produce_batch 的必要累计目标固定；normal 模式只按当前 task batch 追加固定超发预算。
-        # tail-batch 模式只补必要缺口，新增任务固定从 EXPIRED pool 取，不再扩大超发窗口。
-        target_abs = ctx.target_abs
-        oversample_budget = 0 if sample_from_expired else math.ceil(self.over_sample_threshold * ctx.task_batch_size)
-        scheduled_target = target_abs + oversample_budget
-        logger.info(
-            f"Starting produce_batch for task {ctx.task_name} with target_abs={target_abs}, "
-            f"oversample_budget={oversample_budget}, scheduled_target={scheduled_target}."
-        )
-
-        async def spawn_one() -> asyncio.Task:
-            rollout_state = await ctx.sample_group(from_expired_pool=sample_from_expired)
-            return create_task(
-                ctx.generate_group(
-                    rollout_state,
-                    enable_partial_rollout=self.enable_partial_rollout,
-                )
-            )
-
-        initial_available = await ctx.available_count()
-        progress_displayer = _ProgressDisplayer.create(
-            strategy_name=self.__class__.__name__,
-            task_name=ctx.task_name,
-            total=ctx.target_abs,
-            initial=initial_available,
-        )
-        try:
-            while True:
-                if ctx.should_abort():
-                    return ProduceBatchStatus.UPDATE_WEIGHT_AND_ABORT
-                if self.is_model_expired(ctx.train_step, ctx.model_step):
-                    return ProduceBatchStatus.EXPIRED_BATCH
-
-                available = await ctx.available_count()
-                progress_displayer.update(available)
-                if not self.should_continue_fn(available, target_abs):
-                    return ProduceBatchStatus.NORMAL
-
-                pending_count = self._pending_tasks.count()
-                desired_pending = max(0, scheduled_target - available)
-                if available + pending_count < scheduled_target:
-                    while await self._pending_tasks.schedule_one(
-                        max_pending=desired_pending,
-                        should_abort=ctx.should_abort,
-                        spawn_one=spawn_one,
-                    ):
-                        pass
-                    # TODO: remove this check, because will check it when exit if statement, it's redundant
-                    if ctx.should_abort():
-                        return ProduceBatchStatus.UPDATE_WEIGHT_AND_ABORT
-
-                if ctx.should_abort():
-                    return ProduceBatchStatus.UPDATE_WEIGHT_AND_ABORT
-                if self._pending_tasks.count() == 0:
-                    logger.warning("All tasks are done but not enough samples collected.")
-                    return ProduceBatchStatus.NORMAL
-
-                claimed_done = await self._pending_tasks.wait_and_claim(timeout_s=1)
-                await self._put_claimed(
-                    claimed_done,
-                    ctx,
-                    available_base=available,
-                    progress_displayer=progress_displayer,
-                )
-        finally:
-            progress_displayer.close()

@@ -51,25 +51,37 @@ class GroupState(StrEnum):
 class GroupPolicyConfig(BaseModel):
     """Configuration for :class:`GroupPolicy` instances.
 
-    ``min_repeat`` is at least 2 so that algorithms that rely on within-group
-    variance (for example, GRPO z-score normalization) do not degenerate.
+    ``min_repeat`` must be at least 1. When the variance-based stopping
+    rule is on (``stop_when_all_equal=True``) it is further required to
+    be at least 2 so GRPO-style algorithms have a non-degenerate group.
 
     Args:
-        min_repeat (int): Minimum number of completed trajectories before the
-            aggregation can be considered for training. Must be >= 2.
-        max_repeat (int): Hard upper bound on the number of trajectories that
-            can be spawned for a single prompt. Must be >= ``min_repeat``.
+        min_repeat (int): Minimum number of completed trajectories before
+            the aggregation can be considered for training. Must be >= 1;
+            effectively >= 2 when ``stop_when_all_equal`` is True.
+        max_repeat (int): Hard upper bound on the number of trajectories
+            that can be spawned for a single prompt. Must be
+            >= ``min_repeat``.
+        stop_when_all_equal (bool): When True the policy emits NEEDS_MORE
+            / STOPPED if every completed trajectory has the same
+            ``score_key`` reward, allowing the scheduler to drop all-equal
+            groups. When False the policy emits READY as soon as
+            ``len(completed) >= min_repeat`` without reading rewards at
+            all, matching the legacy group-based producer that always
+            kept groups regardless of reward variance. Default True.
         score_key (str): Key used to look up the scalar reward in
-            ``RolloutState.reward`` when deciding whether all rewards within
-            an aggregation are equal.
-        score_tol (float): Floating-point tolerance used when evaluating the
-            "all-equal" condition.
+            ``RolloutState.reward`` when deciding whether all rewards
+            within an aggregation are equal. Ignored when
+            ``stop_when_all_equal`` is False.
+        score_tol (float): Floating-point tolerance used when evaluating
+            the "all-equal" condition.
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    min_repeat: int = Field(ge=2)
-    max_repeat: int = Field(ge=2)
+    min_repeat: int = Field(ge=1)
+    max_repeat: int = Field(ge=1)
+    stop_when_all_equal: bool = True
     score_key: str = "score"
     score_tol: float = 1e-8
 
@@ -78,6 +90,11 @@ class GroupPolicyConfig(BaseModel):
         if self.max_repeat < self.min_repeat:
             raise ValueError(
                 f"max_repeat ({self.max_repeat}) must be >= min_repeat ({self.min_repeat})."
+            )
+        if self.stop_when_all_equal and self.min_repeat < 2:
+            raise ValueError(
+                f"min_repeat ({self.min_repeat}) must be >= 2 when stop_when_all_equal=True; "
+                "variance-based stopping is undefined for a single sample."
             )
         return self
 
@@ -145,11 +162,14 @@ class DefaultGroupPolicy(GroupPolicy):
     Decision procedure on each completed trajectory:
 
     1. If ``len(completed) < min_repeat`` -> ``COLLECTING``.
-    2. If the set of scores (using ``score_key``) differs beyond ``score_tol``
-       -> ``READY``.
-    3. Otherwise the rewards are all equal. If the aggregation still has
-       headroom before ``max_repeat`` (counting both completed and
-       in-flight) -> ``NEEDS_MORE``, else -> ``STOPPED``.
+    2. If ``stop_when_all_equal`` is False -> ``READY`` immediately
+       (matches legacy group-based behavior; reward is never inspected).
+    3. Otherwise read scores via ``score_key``:
+       * Scores differ beyond ``score_tol`` -> ``READY``.
+       * Rewards are all equal and the aggregation still has headroom
+         before ``max_repeat`` (counting both completed and in-flight)
+         -> ``NEEDS_MORE``.
+       * Rewards are all equal and no headroom remains -> ``STOPPED``.
     """
 
     def on_trajectory_done(self, agg: "GroupAggregation") -> GroupState:
@@ -157,6 +177,9 @@ class DefaultGroupPolicy(GroupPolicy):
         n_completed = len(completed)
         if n_completed < self._config.min_repeat:
             return GroupState.COLLECTING
+
+        if not self._config.stop_when_all_equal:
+            return GroupState.READY
 
         scores = [self._extract_score(traj) for traj in completed]
         if max(scores) - min(scores) > self._config.score_tol:

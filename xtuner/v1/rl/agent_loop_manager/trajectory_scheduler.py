@@ -244,6 +244,19 @@ class TrajectoryScheduler:
                 return
             await asyncio.wait(pending, return_when=asyncio.ALL_COMPLETED)
 
+    async def wait_first_completed(self, timeout_s: float | None = None) -> None:
+        """Wait until any pending task completes or the timeout elapses.
+
+        Used by the main produce loop to yield control while pending
+        trajectories make progress. Returns immediately when the pending
+        set is empty.
+        """
+        async with self._lock:
+            pending = set(self._pending)
+        if not pending:
+            return
+        await asyncio.wait(pending, timeout=timeout_s, return_when=asyncio.FIRST_COMPLETED)
+
     async def pause_and_cleanup(self) -> float:
         """Drain pending tasks; cancel any still running after the timeout.
 

@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from enum import Enum, auto
 from pathlib import Path
 
+import torch
 from pydantic import BaseModel, ConfigDict, Field
 
 from transformers import PreTrainedTokenizer, PreTrainedTokenizerFast
@@ -309,7 +310,10 @@ class AgentLoopManagerConfig(BaseModel):
                 judger=build_judger(task_cfg.judger_config) if task_cfg.judger_config is not None else None,
                 logger=logger,
             )
-            produce_strategy = task_cfg.produce_strategy_config.build(sync_weights_interval=sync_weights_interval)
+            produce_strategy = task_cfg.produce_strategy_config.build(
+                sync_weights_interval=sync_weights_interval,
+                prompt_repeat_k=task_cfg.sampler_config.prompt_repeat_k,
+            )
             sampler = task_cfg.sampler_config.build(tokenizer=tokenizer, replay_buffer=replay_buffer)
             task_runners.append(
                 _TaskRunner(
@@ -332,6 +336,7 @@ class AgentLoopManagerConfig(BaseModel):
 class AgentLoopManager:
     _TASK_CHECKPOINT_DIR = "tasks"
     _MANAGER_STATE_PATH = "agent_loop_manager_state.json"
+    _PRODUCE_STRATEGY_FILE = "produce_strategy.pth"
     _STATUS_POLL_INTERVAL_S = 1.0
 
     def __init__(
@@ -886,6 +891,11 @@ class AgentLoopManager:
             task_checkpoint_path = self._task_checkpoint_path(checkpoint_path, task.task_name)
             task_checkpoint_path.mkdir(parents=True, exist_ok=True)
             task.sampler.save(task_checkpoint_path)
+            # Persist per-task produce_strategy state (aggregator + stats). Phase 2
+            # introduces this file; resume tolerates its absence for forward compat.
+            strategy_state = asyncio_run(task.produce_strategy.state_dict())
+            if strategy_state:
+                torch.save(strategy_state, task_checkpoint_path / self._PRODUCE_STRATEGY_FILE)
         asyncio_run(self.replay_buffer.save(checkpoint_path))
         manager_state_path = self._manager_state_path(checkpoint_path)
         progress_state = self._produce_progress.state_dict()
@@ -903,7 +913,16 @@ class AgentLoopManager:
         """Resume all task sampler states and the shared replay buffer."""
         checkpoint_path = Path(checkpoint_path)
         for task in self.task_runners:
-            task.sampler.resume(self._task_checkpoint_path(checkpoint_path, task.task_name))
+            task_checkpoint_path = self._task_checkpoint_path(checkpoint_path, task.task_name)
+            task.sampler.resume(task_checkpoint_path)
+            # Restore per-task produce_strategy state when present. Older
+            # checkpoints without the file resume with an empty aggregator.
+            strategy_state_path = task_checkpoint_path / self._PRODUCE_STRATEGY_FILE
+            if strategy_state_path.exists():
+                strategy_state = torch.load(
+                    strategy_state_path, map_location="cpu", weights_only=False
+                )
+                asyncio_run(task.produce_strategy.load_state_dict(strategy_state))
         asyncio_run(self.replay_buffer.resume(checkpoint_path))
 
         manager_state_path = self._manager_state_path(checkpoint_path)
