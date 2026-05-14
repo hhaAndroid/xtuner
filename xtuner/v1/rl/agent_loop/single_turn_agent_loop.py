@@ -87,7 +87,8 @@ class SingleTurnAgentLoop(AgentLoop):
             return rollout_state
         if self.judger is not None and not self.enable_batch_judge:
             # 如果开启了批量打分，则在 generate_group 里统一打分，不在这里逐条打分
-            rollout_state = await self.judger.judge(rollout_state)
+            rollout_state = await self.judger.judge([rollout_state])
+            rollout_state = rollout_state[0]
         return rollout_state
 
     async def generate_group(self, rollout_state: list[RolloutState], **kwargs) -> list[RolloutState]:

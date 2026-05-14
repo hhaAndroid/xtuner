@@ -12,7 +12,10 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from xtuner.v1.utils import StrEnum
+from xtuner.v1.utils import StrEnum, get_logger
+
+
+logger = get_logger(__name__)
 
 
 if TYPE_CHECKING:
@@ -183,12 +186,30 @@ class DefaultGroupPolicy(GroupPolicy):
 
         scores = [self._extract_score(traj) for traj in completed]
         if max(scores) - min(scores) > self._config.score_tol:
+            logger.info(f"scores: {scores}, group is ready")
             return GroupState.READY
 
-        total = n_completed + agg.in_flight
-        if total < self._config.max_repeat:
-            return GroupState.NEEDS_MORE
-        return GroupState.STOPPED
+        # All-equal: drop only once the aggregation has collected
+        # ``max_repeat`` COMPLETED trajectories. Holding off on STOPPED until
+        # every committed trajectory has actually landed has two upsides:
+        #
+        # * Late-arriving trajectories still get a chance to introduce reward
+        #   variance. If T_last differs from T_1..T_{n-1}, the policy flips to
+        #   READY and we keep the group instead of discarding k trajectories
+        #   worth of compute.
+        # * The log line is intuitive: ``scores`` has length == max_repeat at
+        #   the moment STOPPED fires, matching the user's mental model of
+        #   "retry up to max_repeat times, then give up."
+        #
+        # The runner's NEEDS_MORE submit path is responsible for keeping the
+        # total commitment (``len(completed) + agg.in_flight``) bounded at
+        # ``max_repeat`` via ``should_spawn_more``; otherwise this check would
+        # spin forever on additional submits.
+        if n_completed >= self._config.max_repeat:
+            logger.info(f"scores: {scores}, group reached max_repeat, drop group")
+            return GroupState.STOPPED
+        logger.info(f"scores: {scores}, group is not ready, need more trajectories")
+        return GroupState.NEEDS_MORE
 
     def should_spawn_more(self, agg: "GroupAggregation") -> int:
         completed_and_inflight = len(agg.completed) + agg.in_flight

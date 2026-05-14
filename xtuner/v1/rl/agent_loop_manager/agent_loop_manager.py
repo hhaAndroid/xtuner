@@ -700,13 +700,22 @@ class AgentLoopManager:
             # tolerate the last group overflowing past the target. We still
             # record the trajectory consumed counts into progress so the
             # producer sees its deficit correctly.
-            batch_by_task, _group_counts, traj_counts = (
+            batch_by_task, group_counts, traj_counts = (
                 await self.replay_buffer.take_batch_by_trajectory_count(task_batch_sizes)
             )
             consume_progress.mark_consumed(traj_counts)
+            self.logger.info(
+                f"[{self.name}] consumed from buffer (unit=trajectories): "
+                f"targets={task_batch_sizes}, taken_trajectories={traj_counts}, "
+                f"taken_groups={group_counts}"
+            )
         else:
             batch_by_task, consumed_counts = await self.replay_buffer.take_batch(task_batch_sizes)
             consume_progress.mark_consumed(consumed_counts)
+            self.logger.info(
+                f"[{self.name}] consumed from buffer (unit=groups): "
+                f"targets={task_batch_sizes}, taken={consumed_counts}"
+            )
         leftover_counts = await self.replay_buffer.count_statuses(self.task_names, _LEFTOVER_STATUSES)
         self._log_buffer_counts(task_batch_sizes, batch_by_task, leftover_counts)
         return self._build_result_from_batch(

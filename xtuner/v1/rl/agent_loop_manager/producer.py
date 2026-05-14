@@ -334,10 +334,22 @@ class ProduceContext:
 
     async def put_generated_group(self, group: list[RolloutState]) -> bool:
         # 只有完整生成的 group 才需要业务有效性过滤；ABORTED / EXPIRED 保留原状态供重试或统计。
-        is_completed = get_group_status(group) == Status.COMPLETED
+        initial_status = get_group_status(group)
+        group_size = len(group)
+        sample_uids: list[int | None] = [getattr(item, "uid", None) for item in group[:3]]
+        prompt_uid = getattr(group[0], "message_uid", None) if group else None
+        logger.debug(
+            f"[{self.task_name}] put_generated_group: initial_status={initial_status.name}, "
+            f"size={group_size}, prompt_uid={prompt_uid}, sample_uids={sample_uids}"
+        )
+        is_completed = initial_status == Status.COMPLETED
         if is_completed:
             is_valid = self.is_valid_sample_fn(group)
             if not is_valid:
+                logger.info(
+                    f"[{self.task_name}] group filtered by is_valid_sample_fn: "
+                    f"prompt_uid={prompt_uid}, size={group_size}"
+                )
                 for item in group:
                     item.status = Status.FILTERED
         await self.replay_buffer.put(
@@ -348,8 +360,14 @@ class ProduceContext:
             stale_threshold=self.stale_threshold,
         )
         # replay_buffer.put 可能把 stale group 转为 EXPIRED，返回前重新判断是否仍可训练。
-        is_completed = get_group_status(group) == Status.COMPLETED
-        return is_completed
+        final_status = get_group_status(group)
+        if final_status != initial_status:
+            logger.info(
+                f"[{self.task_name}] group status transition: "
+                f"{initial_status.name} -> {final_status.name} "
+                f"(prompt_uid={prompt_uid}, size={group_size})"
+            )
+        return final_status == Status.COMPLETED
 
 
 class ProduceStrategyConfig(ABC, BaseModel):
@@ -661,23 +679,41 @@ class TrajectoryProduceStrategy(ProduceStrategy):
         if self.is_model_expired(ctx.train_step, ctx.model_step):
             return ProduceBatchStatus.EXPIRED_BATCH
 
+        stopped_start = ctx.progress.stopped_prompts.get(ctx.task_name, 0)
+        needs_more_start = ctx.progress.needs_more_reentries.get(ctx.task_name, 0)
+
         logger.info(
-            f"Starting produce_batch for task {ctx.task_name}: "
-            f"target_abs={ctx.target_abs} ({self._count_unit}), "
+            f"[{ctx.task_name}] produce_batch start: "
+            f"target={ctx.target_abs} ({self._count_unit}), "
+            f"task_batch_size={ctx.task_batch_size}, "
             f"over_sample_threshold={self._over_sample_threshold}, "
-            f"max_on_fly={self._scheduler.config.max_on_fly}."
+            f"max_on_fly={self._scheduler.config.max_on_fly}, "
+            f"stop_when_all_equal={self._policy.config.stop_when_all_equal}, "
+            f"policy=[{self._policy.min_repeat}-{self._policy.max_repeat}], "
+            f"stopped_so_far={stopped_start}, needs_more_so_far={needs_more_start}"
         )
 
         runner = self._build_runner(ctx)
+        iteration = 0
+        last_log_time = time.perf_counter()
+        last_available = -1
+        exit_reason = "normal"
 
         while True:
+            iteration += 1
             if ctx.should_abort():
-                return ProduceBatchStatus.UPDATE_WEIGHT_AND_ABORT
+                exit_reason = "abort"
+                status_out = ProduceBatchStatus.UPDATE_WEIGHT_AND_ABORT
+                break
             if self.is_model_expired(ctx.train_step, ctx.model_step):
-                return ProduceBatchStatus.EXPIRED_BATCH
+                exit_reason = "model_expired"
+                status_out = ProduceBatchStatus.EXPIRED_BATCH
+                break
 
             available = await self._available_for_unit(ctx)
             if not self.should_continue_fn(available, ctx.target_abs):
+                exit_reason = f"target_met (available={available}, target={ctx.target_abs})"
+                status_out = ProduceBatchStatus.NORMAL
                 break
 
             await self._preload_prompts(ctx, available)
@@ -692,17 +728,43 @@ class TrajectoryProduceStrategy(ProduceStrategy):
                     and await self._aggregator.active_count() == 0
                 ):
                     logger.warning(
-                        f"Produce stalled for task {ctx.task_name}: no pending tasks, "
-                        "empty queue, no active aggregation."
+                        f"[{ctx.task_name}] produce stalled: available={available}/"
+                        f"{ctx.target_abs}, no pending tasks, empty queue, no active aggregation. "
+                        f"stopped_this_call={ctx.progress.stopped_prompts.get(ctx.task_name, 0) - stopped_start}, "
+                        f"needs_more_this_call={ctx.progress.needs_more_reentries.get(ctx.task_name, 0) - needs_more_start}."
                     )
-                    return ProduceBatchStatus.NORMAL
+                    exit_reason = f"stalled (available={available}, target={ctx.target_abs})"
+                    status_out = ProduceBatchStatus.NORMAL
+                    break
+
+            now = time.perf_counter()
+            if now - last_log_time >= 10.0 or available != last_available:
+                logger.info(
+                    f"[{ctx.task_name}] iter={iteration} available={available}/{ctx.target_abs} "
+                    f"pending={self._scheduler.pending_count()} "
+                    f"queue={self._scheduler.queue_len()} "
+                    f"active_aggregations={await self._aggregator.active_count()} "
+                    f"stopped_this_call={ctx.progress.stopped_prompts.get(ctx.task_name, 0) - stopped_start} "
+                    f"needs_more_this_call={ctx.progress.needs_more_reentries.get(ctx.task_name, 0) - needs_more_start}"
+                )
+                last_log_time = now
+                last_available = available
 
             await self._scheduler.wait_first_completed(timeout_s=1.0)
 
         if self._scheduler.config.wait_until_all_ready:
             await self._scheduler.drain()
 
-        return ProduceBatchStatus.NORMAL
+        stopped_delta = ctx.progress.stopped_prompts.get(ctx.task_name, 0) - stopped_start
+        needs_more_delta = ctx.progress.needs_more_reentries.get(ctx.task_name, 0) - needs_more_start
+        logger.info(
+            f"[{ctx.task_name}] produce_batch exit: reason={exit_reason}, "
+            f"iterations={iteration}, stopped={stopped_delta}, needs_more={needs_more_delta}, "
+            f"pending_remaining={self._scheduler.pending_count()}, "
+            f"queue_remaining={self._scheduler.queue_len()}, "
+            f"active_aggregations={await self._aggregator.active_count()}"
+        )
+        return status_out
 
     async def state_dict(self) -> dict[str, Any]:
         return {
@@ -721,30 +783,87 @@ class TrajectoryProduceStrategy(ProduceStrategy):
     async def _preload_prompts(self, ctx: ProduceContext, available: int) -> None:
         """Top up the scheduler queue with fresh prompts.
 
-        When ``count_unit`` is ``"groups"`` each preloaded prompt counts as
-        one unit toward the target. When it is ``"trajectories"`` each
-        preloaded prompt will eventually emit roughly ``min_repeat`` up to
-        ``max_repeat`` trajectories, so the number of prompts needed to
-        close the gap is scaled by ``min_repeat``.
+        Trajectory mode (progressive) is *saturation-driven*: the producer
+        keeps pulling prompts from the dataloader until
+        ``pending + queue`` equals the scheduler's ``max_on_fly`` cap, so
+        the inference engine stays busy regardless of how close
+        ``available`` is to ``target_abs``. Any group finalised past the
+        target simply lands in the replay buffer for the next training
+        step; ``max_staleness`` and partial rollout absorb the cross-step
+        reuse. The legacy deficit-based behaviour is kept for ``groups``
+        mode so the Sync / Async shim stays byte-equivalent.
         """
+        if self._count_unit == "trajectories":
+            await self._preload_saturating(ctx)
+            return
+        await self._preload_deficit_based(ctx, available)
+
+    async def _preload_saturating(self, ctx: ProduceContext) -> None:
+        per_prompt = max(1, self._policy.min_repeat)
+        pending = self._scheduler.pending_count()
+        queue = self._scheduler.queue_len()
+        capacity = self._scheduler.config.max_on_fly
+        current_load = pending + queue
+        slots_available = max(0, capacity - current_load)
+        if slots_available < per_prompt:
+            logger.debug(
+                f"[{ctx.task_name}] preload skipped: saturated "
+                f"(pending={pending}, queue={queue}, capacity={capacity})"
+            )
+            return
+        prompts_to_add = slots_available // per_prompt
+        logger.info(
+            f"[{ctx.task_name}] preload (saturating): pending={pending}, queue={queue}, "
+            f"capacity={capacity}, slots_available={slots_available}, "
+            f"per_prompt={per_prompt}, prompts_to_add={prompts_to_add}"
+        )
+        preloaded = 0
+        for _ in range(prompts_to_add):
+            if ctx.should_abort():
+                logger.debug(
+                    f"[{ctx.task_name}] preload aborted after {preloaded}/{prompts_to_add} prompts"
+                )
+                return
+            prompt_req = await ctx.sampler.sample_prompt(task_name=ctx.task_name)
+            await self._aggregator.register_prompt(prompt_req.prompt, ctx.task_name)
+            for _ in range(per_prompt):
+                await self._scheduler.submit(prompt_req)
+            preloaded += 1
+
+    async def _preload_deficit_based(self, ctx: ProduceContext, available: int) -> None:
         deficit = ctx.target_abs - available
         if deficit <= 0:
             return
-        if self._count_unit == "trajectories":
-            per_prompt = max(1, self._policy.min_repeat)
-            prompts_for_deficit = math.ceil(deficit / per_prompt)
-        else:
-            prompts_for_deficit = deficit
-        active_prompts = await self._aggregator.active_count() + self._scheduler.queue_len()
-        oversample = math.ceil(self._over_sample_threshold * ctx.task_batch_size)
-        target_active = prompts_for_deficit + oversample
+        per_prompt = 1
+        prompts_for_deficit = deficit
+        oversample_prompts = math.ceil(self._over_sample_threshold * ctx.task_batch_size)
+        active_prompts = await self._aggregator.active_count()
+        target_active = prompts_for_deficit + oversample_prompts
         to_preload = max(0, target_active - active_prompts)
+        if to_preload <= 0:
+            logger.debug(
+                f"[{ctx.task_name}] preload skipped: deficit={deficit} (groups), "
+                f"prompts_for_deficit={prompts_for_deficit}, oversample_prompts={oversample_prompts}, "
+                f"active_prompts={active_prompts}"
+            )
+            return
+        logger.info(
+            f"[{ctx.task_name}] preload: deficit={deficit} (groups), "
+            f"per_prompt={per_prompt}, prompts_for_deficit={prompts_for_deficit}, "
+            f"oversample_prompts={oversample_prompts}, active_prompts={active_prompts}, "
+            f"to_preload={to_preload}, initial_submits_per_prompt=1"
+        )
+        preloaded = 0
         for _ in range(to_preload):
             if ctx.should_abort():
+                logger.debug(
+                    f"[{ctx.task_name}] preload aborted after {preloaded}/{to_preload} prompts"
+                )
                 return
             prompt_req = await ctx.sampler.sample_prompt(task_name=ctx.task_name)
             await self._aggregator.register_prompt(prompt_req.prompt, ctx.task_name)
             await self._scheduler.submit(prompt_req)
+            preloaded += 1
 
     def _build_runner(self, ctx: ProduceContext) -> Callable[[PromptRequest], Awaitable[None]]:
         async def runner(req: PromptRequest) -> None:
@@ -755,10 +874,18 @@ class TrajectoryProduceStrategy(ProduceStrategy):
                     pending = await self._aggregator.pop_pending_keep(req.prompt_uid)
                 if pending is not None:
                     input_state = pending
+                    logger.debug(
+                        f"[{ctx.task_name}] runner resuming prompt_uid={req.prompt_uid} "
+                        f"from pending_keep traj_uid={pending.uid}"
+                    )
                 else:
                     input_state = copy.deepcopy(req.prompt)
                     input_state.uid = uuid4().int
                     input_state.session_uid = input_state.uid
+                    logger.debug(
+                        f"[{ctx.task_name}] runner spawning prompt_uid={req.prompt_uid} "
+                        f"-> traj_uid={input_state.uid}"
+                    )
                 result_list = await ctx.generate_group(
                     [input_state],
                     enable_partial_rollout=self._scheduler.config.enable_partial_rollout,
@@ -769,7 +896,7 @@ class TrajectoryProduceStrategy(ProduceStrategy):
                 raise
             except Exception as exc:  # noqa: BLE001 - must not break scheduler state
                 logger.error(
-                    f"Trajectory runner failed for prompt_uid={req.prompt_uid}: "
+                    f"[{ctx.task_name}] trajectory runner failed for prompt_uid={req.prompt_uid}: "
                     f"{type(exc).__name__}: {exc}",
                     exc_info=exc,
                 )
@@ -787,29 +914,69 @@ class TrajectoryProduceStrategy(ProduceStrategy):
         if traj.status == Status.COMPLETED:
             state, group = await self._aggregator.add_trajectory(traj)
             if state is None:
+                logger.debug(
+                    f"[{ctx.task_name}] dispatch orphan: prompt_uid={req.prompt_uid}, "
+                    f"traj_uid={traj.uid} (aggregation already finalized or dropped)"
+                )
                 return
+            logger.debug(
+                f"[{ctx.task_name}] dispatch COMPLETED: prompt_uid={req.prompt_uid}, "
+                f"traj_uid={traj.uid} -> {state.name}"
+                + (f" (group_size={len(group)})" if group is not None else "")
+            )
             if state is GroupState.READY:
                 assert group is not None
                 await ctx.put_generated_group(group)
             elif state is GroupState.NEEDS_MORE:
+                # All-equal rewards after min_repeat: extend the aggregation by
+                # spawning up to ``min_repeat`` more trajectories in parallel,
+                # capped at the headroom reported by the policy so the total
+                # commitment (completed + in_flight) never exceeds
+                # ``max_repeat``. When headroom hits zero we skip the submit
+                # entirely and let the remaining in-flight drain; the policy
+                # will emit STOPPED once ``len(completed) >= max_repeat``.
                 ctx.progress.mark_needs_more(ctx.task_name)
-                await self._scheduler.submit_front(req)
+                snapshot = await self._aggregator.get_snapshot(req.prompt_uid)
+                if snapshot is None:
+                    # Aggregation was dropped concurrently; nothing to resubmit.
+                    return
+                headroom = self._policy.should_spawn_more(snapshot)
+                if headroom <= 0:
+                    logger.debug(
+                        f"[{ctx.task_name}] NEEDS_MORE: prompt_uid={req.prompt_uid} "
+                        f"commitment already at cap; waiting for in-flight to drain"
+                    )
+                    return
+                n_to_submit = min(self._policy.min_repeat, headroom)
+                logger.debug(
+                    f"[{ctx.task_name}] NEEDS_MORE: prompt_uid={req.prompt_uid} "
+                    f"submitting {n_to_submit} more trajectories (headroom={headroom})"
+                )
+                for _ in range(n_to_submit):
+                    await self._scheduler.submit_front(req)
             elif state is GroupState.COLLECTING:
-                await self._scheduler.submit(req)
+                # No re-submit: the ``min_repeat`` initial spawns queued in
+                # _preload_prompts keep this prompt saturated until it
+                # transitions to READY or NEEDS_MORE.
+                pass
             elif state is GroupState.STOPPED:
                 await self._aggregator.drop(req.prompt_uid)
                 ctx.progress.mark_stopped(ctx.task_name)
             return
 
         if traj.status == Status.ABORTED:
+            logger.info(
+                f"[{ctx.task_name}] dispatch ABORTED: prompt_uid={req.prompt_uid}, "
+                f"traj_uid={traj.uid}, partial_rollout={self._scheduler.config.enable_partial_rollout}"
+            )
             if self._scheduler.config.enable_partial_rollout:
                 await self._aggregator.push_pending_keep(traj)
             await self._scheduler.submit_front(req)
             return
 
         logger.warning(
-            f"Dropping aggregation prompt_uid={req.prompt_uid} because trajectory "
-            f"uid={traj.uid} ended with status {traj.status}."
+            f"[{ctx.task_name}] dispatch {traj.status.name}: prompt_uid={req.prompt_uid}, "
+            f"traj_uid={traj.uid}; dropping aggregation."
         )
         await self._aggregator.drop(req.prompt_uid)
 
