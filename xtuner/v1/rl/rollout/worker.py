@@ -27,6 +27,7 @@ from xtuner.v1.rl.utils import (
     SingleAcceleratorWorker,
     find_master_addr_and_port,
     get_eos_token,
+    partial_rollout_postprocess,
     register_cpu_resources,
 )
 from xtuner.v1.utils import get_logger
@@ -604,110 +605,130 @@ class RolloutWorker(SingleAcceleratorWorker):
         max_retries = self.config.max_retry_per_sample
         payload = self._get_request_payload(rollout_state)
 
-        # 早退逻辑 1：检查是否已被标记为完成
-        if rollout_state.status == Status.COMPLETED:
-            self.logger.debug(f"Request {uid} is already marked as COMPLETED, skipping generation.")
-            return rollout_state
+        # Partial-rollout history merge runs in this worker process (not in
+        # the centralized agent_loop / producer): the rollout engine has just
+        # produced ``rollout_state.routed_experts`` as a local tensor, so the
+        # merge needs only one ``ray.get`` (history) + one ``ray.put`` (merged
+        # tensor) and parallelises across all GPU workers. The ``finally``
+        # clause runs before Ray serializes the return value, so mutations
+        # there are reflected on the controller side.
+        async def _maybe_merge_partial_rollout() -> None:
+            if rollout_state.extra_fields.get("history_response_dict") is None:
+                return
+            await asyncio.to_thread(partial_rollout_postprocess, rollout_state)
 
-        # 早退逻辑 2：检测输入是否还需要 generation (安全获取变量)
-        input_ids = payload.get("input_ids", [])
-        max_tokens = payload.get("max_tokens")
+        try:
+            # 早退逻辑 1：检查是否已被标记为完成
+            if rollout_state.status == Status.COMPLETED:
+                self.logger.debug(f"Request {uid} is already marked as COMPLETED, skipping generation.")
+                return rollout_state
 
-        last_id = input_ids[-1] if len(input_ids) > 0 else "None"
-        is_max_tokens_zero = max_tokens is not None and max_tokens <= 0
-        is_eos_reached = len(input_ids) > 0 and input_ids[-1] in self.eos_token
+            # 早退逻辑 2：检测输入是否还需要 generation (安全获取变量)
+            input_ids = payload.get("input_ids", [])
+            max_tokens = payload.get("max_tokens")
 
-        if is_max_tokens_zero or is_eos_reached:
-            self.logger.debug(
-                f"No generation needed for request {uid}: max_tokens={max_tokens} or last input_id={last_id} is in eos_token."
-            )
-            rollout_state.status = Status.COMPLETED
-            rollout_state.response_ids = []
-            rollout_state.response = ""
-            rollout_state.logprobs = []
-            rollout_state.response_mask = []
-            rollout_state.response_model_steps = []
-            rollout_state.finish_reason = "stop" if is_eos_reached else "length"
-            return rollout_state
+            last_id = input_ids[-1] if len(input_ids) > 0 else "None"
+            is_max_tokens_zero = max_tokens is not None and max_tokens <= 0
+            is_eos_reached = len(input_ids) > 0 and input_ids[-1] in self.eos_token
 
-        for attempt in range(max_retries + 1):
-            is_last_attempt = attempt == max_retries
-            http_result = await self._safe_post_request(endpoint_url, headers=headers, payload=payload)
+            if is_max_tokens_zero or is_eos_reached:
+                self.logger.debug(
+                    f"No generation needed for request {uid}: max_tokens={max_tokens} or last input_id={last_id} is in eos_token."
+                )
+                rollout_state.status = Status.COMPLETED
+                rollout_state.response_ids = []
+                rollout_state.response = ""
+                rollout_state.logprobs = []
+                rollout_state.response_mask = []
+                rollout_state.response_model_steps = []
+                rollout_state.finish_reason = "stop" if is_eos_reached else "length"
+                return rollout_state
 
-            # Case 1: HTTP Request is Successful
-            if http_result.response:
-                # Case 1.1: Valid rollout response
-                rollout_state = await self._safe_handle_response(rollout_state, http_result.response)
-                if rollout_state.status in [Status.COMPLETED, Status.ABORTED]:
+            for attempt in range(max_retries + 1):
+                is_last_attempt = attempt == max_retries
+                http_result = await self._safe_post_request(endpoint_url, headers=headers, payload=payload)
+
+                # Case 1: HTTP Request is Successful
+                if http_result.response:
+                    # Case 1.1: Valid rollout response
+                    rollout_state = await self._safe_handle_response(rollout_state, http_result.response)
+                    if rollout_state.status in [Status.COMPLETED, Status.ABORTED]:
+                        return rollout_state
+
+                    if is_last_attempt:
+                        # Case 1.2: Invalid rollout response and no retries left, so we return FAILED
+                        self.logger.warning(
+                            f"Invalid rollout response for request {uid} after {max_retries} attempts, marking as FAILED."
+                        )
+                        rollout_state.status = Status.FAILED
+                        rollout_state.error_msg = f"Invalid rollout response after {max_retries} attempts."
+                        return rollout_state
+
+                    # Case 1.3: Invalid rollout response but we have retries left
+                    self.logger.warning(
+                        f"Invalid rollout response for request {uid}, retrying {attempt + 1}/{max_retries}."
+                    )
+                    await asyncio.sleep(0.1)
+                    continue
+
+                # Case 2: Error occurred during HTTP Request
+                if http_result.error_type == HttpRequestErrorType.REQUEST_ABORTED:
+                    # Case 2.1: The request was aborted due to an signal set by `receive_abort_request`
+                    rollout_state.finish_reason = "abort"
+                    rollout_state.status = update_status_from_finish_reason("abort")
                     return rollout_state
 
-                if is_last_attempt:
-                    # Case 1.2: Invalid rollout response and no retries left, so we return FAILED
+                if http_result.is_client_error:
+                    # Case 2.2: A non-retryable client error occurred (such as 4xx HTTP status)
                     self.logger.warning(
-                        f"Invalid rollout response for request {uid} after {max_retries} attempts, marking as FAILED."
+                        f"rollout request {uid} to {http_result.url} was skipped due to client error {http_result.error_type} with {http_result.error_msg}"
+                    )
+                    rollout_state.error_msg = (
+                        f"Client error {http_result.error_type} with message: {http_result.error_msg}"
                     )
                     rollout_state.status = Status.FAILED
-                    rollout_state.error_msg = f"Invalid rollout response after {max_retries} attempts."
                     return rollout_state
 
-                # Case 1.3: Invalid rollout response but we have retries left
-                self.logger.warning(
-                    f"Invalid rollout response for request {uid}, retrying {attempt + 1}/{max_retries}."
-                )
-                await asyncio.sleep(0.1)
-                continue
-
-            # Case 2: Error occurred during HTTP Request
-            if http_result.error_type == HttpRequestErrorType.REQUEST_ABORTED:
-                # Case 2.1: The request was aborted due to an signal set by `receive_abort_request`
-                rollout_state.finish_reason = "abort"
-                rollout_state.status = update_status_from_finish_reason("abort")
-                return rollout_state
-
-            if http_result.is_client_error:
-                # Case 2.2: A non-retryable client error occurred (such as 4xx HTTP status)
-                self.logger.warning(
-                    f"rollout request {uid} to {http_result.url} was skipped due to client error {http_result.error_type} with {http_result.error_msg}"
-                )
-                rollout_state.error_msg = (
-                    f"Client error {http_result.error_type} with message: {http_result.error_msg}"
-                )
-                rollout_state.status = Status.FAILED
-                return rollout_state
-
-            if http_result.is_server_error:
-                # Case 2.3: A non-retryable server error occurred (such as 5xx HTTP status)
-                self.logger.warning(
-                    f"rollout request {uid} to {http_result.url} failed due to server error {http_result.error_type} with {http_result.error_msg}"
-                )
-                rollout_state.error_msg = (
-                    f"Server error {http_result.error_type} with message: {http_result.error_msg}"
-                )
-                rollout_state.status = Status.FAILED
-                return rollout_state
-
-            # Case 3: Retryable error occurred during HTTP Request
-            if http_result.is_retryable:
-                if is_last_attempt:
+                if http_result.is_server_error:
+                    # Case 2.3: A non-retryable server error occurred (such as 5xx HTTP status)
                     self.logger.warning(
-                        f"rollout request {uid} to {http_result.url} failed after {max_retries} attempts due to retryable error {http_result.error_type} with {http_result.error_msg}"
+                        f"rollout request {uid} to {http_result.url} failed due to server error {http_result.error_type} with {http_result.error_msg}"
                     )
-                    rollout_state.error_msg = f"Request failed after {max_retries} attempts due to retryable error {http_result.error_type} with message: {http_result.error_msg}"
+                    rollout_state.error_msg = (
+                        f"Server error {http_result.error_type} with message: {http_result.error_msg}"
+                    )
                     rollout_state.status = Status.FAILED
                     return rollout_state
 
-                self.logger.warning(
-                    f"rollout request {uid} to {http_result.url} failed due to retryable error {http_result.error_type} with {http_result.error_msg}, retrying {attempt + 1}/{max_retries}."
-                )
-                await asyncio.sleep(0.1)
-                continue
+                # Case 3: Retryable error occurred during HTTP Request
+                if http_result.is_retryable:
+                    if is_last_attempt:
+                        self.logger.warning(
+                            f"rollout request {uid} to {http_result.url} failed after {max_retries} attempts due to retryable error {http_result.error_type} with {http_result.error_msg}"
+                        )
+                        rollout_state.error_msg = f"Request failed after {max_retries} attempts due to retryable error {http_result.error_type} with message: {http_result.error_msg}"
+                        rollout_state.status = Status.FAILED
+                        return rollout_state
 
-            # Case 4: Unknown error occurred during HTTP Request and stop the rollout
-            if http_result.is_unknown_error:
-                raise RuntimeError(
-                    f"Unexpected error during rollout request {uid} to {http_result.url}: {http_result.exception}"
-                )
-        return rollout_state
+                    self.logger.warning(
+                        f"rollout request {uid} to {http_result.url} failed due to retryable error {http_result.error_type} with {http_result.error_msg}, retrying {attempt + 1}/{max_retries}."
+                    )
+                    await asyncio.sleep(0.1)
+                    continue
+
+                # Case 4: Unknown error occurred during HTTP Request and stop the rollout
+                if http_result.is_unknown_error:
+                    raise RuntimeError(
+                        f"Unexpected error during rollout request {uid} to {http_result.url}: {http_result.exception}"
+                    )
+            return rollout_state
+        finally:
+            # ``finally`` guarantees postprocess runs on every return path
+            # (success, abort, retry exhausted, raise). The merged
+            # rollout_state is the same instance the return statement
+            # captured, so mutations done here are visible to Ray's
+            # serializer and to the caller.
+            await _maybe_merge_partial_rollout()
 
     def _launch_server(self):
         """Launch the inference server as a separate process or Ray task.

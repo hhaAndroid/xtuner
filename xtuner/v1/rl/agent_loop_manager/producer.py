@@ -26,16 +26,22 @@ from xtuner.v1.rl.agent_loop_manager.group_policy import (
     GroupState,
 )
 from xtuner.v1.rl.agent_loop_manager.trajectory_scheduler import (
+    PRIORITY_COLLECTING,
+    PRIORITY_NEEDS_MORE,
+    PRIORITY_NEW_PROMPT,
+    PRIORITY_PARTIAL_RESUME,
+    Pipeline,
     PromptRequest,
     TrajectoryScheduler,
     TrajectorySchedulerConfig,
+    format_queue_breakdown,
 )
 from xtuner.v1.rl.replay_buffer import ReplayBuffer
 from xtuner.v1.rl.rollout.utils import pause_generation
-from xtuner.v1.rl.utils import calculate_seq_staleness, create_task
+from xtuner.v1.rl.utils import calculate_seq_staleness, create_task, free_rollout_state_refs
 from xtuner.v1.utils import get_logger
 
-from .sampler import Sampler
+from .sampler import Sampler, SamplerExhausted
 
 
 logger = get_logger()
@@ -659,10 +665,35 @@ class TrajectoryProduceStrategy(ProduceStrategy):
     async def pause_produce(self, ctx: ProduceContext) -> float:
         pause_start = time.perf_counter()
         if self._scheduler.pending_count() == 0:
+            # Drain stale queued PromptRequests so the next produce_batch
+            # does not see double-bookkeeping (queue + aggregator). The
+            # aggregator state is preserved across steps so unfinished
+            # aggregations can be resumed in _resubmit_unfinished_aggregations.
+            queue_drained = len(await self._scheduler.clear_queue())
+            if queue_drained:
+                logger.info(
+                    f"[{ctx.task_name}] pause_produce idle cleanup: "
+                    f"queue_drained={queue_drained}"
+                )
             return 0.0
         rollout_ctl = await get_agent_loop_rollout_ctl(ctx.agent_loop)
         await pause_generation(rollout_ctl)
         await self._scheduler.pause_and_cleanup()
+        # Clear queued prompts that never got spawned this round; the
+        # aggregations they registered are still live in the aggregator
+        # and will be re-submitted by _resubmit_unfinished_aggregations
+        # next produce_batch via a single canonical path. The aggregator
+        # itself is intentionally NOT cleared — completed / pending_keep
+        # trajectories represent real inference work that should be
+        # reused across steps.
+        queue_drained = len(await self._scheduler.clear_queue())
+        unfinished = await self._aggregator.active_count()
+        if queue_drained or unfinished:
+            logger.info(
+                f"[{ctx.task_name}] pause_produce cleanup: "
+                f"queue_drained={queue_drained}, "
+                f"unfinished_aggregations_kept={unfinished}"
+            )
         return time.perf_counter() - pause_start
 
     async def produce_batch(self, ctx: ProduceContext) -> ProduceBatchStatus:
@@ -693,7 +724,26 @@ class TrajectoryProduceStrategy(ProduceStrategy):
             f"stopped_so_far={stopped_start}, needs_more_so_far={needs_more_start}"
         )
 
-        runner = self._build_runner(ctx)
+        # Cross-step reuse: aggregations whose in-flight trajectories were
+        # cancelled by the previous step's pause_produce sit idle in the
+        # aggregator. Re-evaluate each (refresh staleness, finalise if
+        # already READY, otherwise re-submit prompts to fill the gap to
+        # min_repeat) before pulling fresh prompts from the dataloader.
+        resume_stats = await self._resubmit_unfinished_aggregations(ctx)
+        if any(resume_stats.values()):
+            logger.info(
+                f"[{ctx.task_name}] cross-step resume: "
+                f"resubmitted={resume_stats['resubmitted']} "
+                f"(partial_resume={resume_stats['resubmitted_partial_resume']}, "
+                f"collecting={resume_stats['resubmitted_collecting']}, "
+                f"needs_more={resume_stats['resubmitted_needs_more']}), "
+                f"finalized={resume_stats['finalized']}, "
+                f"stale_completed={resume_stats['stale_completed']}, "
+                f"stale_pending={resume_stats['stale_pending']}, "
+                f"queue_after_resume=[{format_queue_breakdown(self._scheduler.queue_lens_by_priority())}]"
+            )
+
+        runner = self._build_pipeline(ctx)
         iteration = 0
         last_log_time = time.perf_counter()
         last_available = -1
@@ -741,8 +791,10 @@ class TrajectoryProduceStrategy(ProduceStrategy):
             if now - last_log_time >= 10.0 or available != last_available:
                 logger.info(
                     f"[{ctx.task_name}] iter={iteration} available={available}/{ctx.target_abs} "
+                    f"inflight={self._scheduler.inflight_count()} "
                     f"pending={self._scheduler.pending_count()} "
                     f"queue={self._scheduler.queue_len()} "
+                    f"queue_by_pri=[{format_queue_breakdown(self._scheduler.queue_lens_by_priority())}] "
                     f"active_aggregations={await self._aggregator.active_count()} "
                     f"stopped_this_call={ctx.progress.stopped_prompts.get(ctx.task_name, 0) - stopped_start} "
                     f"needs_more_this_call={ctx.progress.needs_more_reentries.get(ctx.task_name, 0) - needs_more_start}"
@@ -762,6 +814,7 @@ class TrajectoryProduceStrategy(ProduceStrategy):
             f"iterations={iteration}, stopped={stopped_delta}, needs_more={needs_more_delta}, "
             f"pending_remaining={self._scheduler.pending_count()}, "
             f"queue_remaining={self._scheduler.queue_len()}, "
+            f"queue_by_pri=[{format_queue_breakdown(self._scheduler.queue_lens_by_priority())}], "
             f"active_aggregations={await self._aggregator.active_count()}"
         )
         return status_out
@@ -776,9 +829,127 @@ class TrajectoryProduceStrategy(ProduceStrategy):
             await self._aggregator.load_state_dict(state["aggregator"])
 
     async def _available_for_unit(self, ctx: ProduceContext) -> int:
+        # Main loop's exit condition only counts trajectories that have
+        # actually landed in the replay buffer, because that's what
+        # ``take_batch`` will pull from. Trajectories sitting in
+        # aggregator.completed have not yet been finalised into a group
+        # — they need their sibling in-flight trajectories to finish so
+        # add_trajectory can flip the aggregation to READY → buffer.
+        # The Q3 "don't over-sample fresh prompts when partial progress
+        # already covers target" semantics is enforced inside
+        # ``_preload_saturating`` via a target-gap cap, not here.
         if self._count_unit == "trajectories":
             return await ctx.available_trajectory_count()
         return await ctx.available_count()
+
+    async def _resubmit_unfinished_aggregations(
+        self, ctx: ProduceContext
+    ) -> dict[str, int]:
+        """Resume aggregations whose in-flight trajectories were cancelled.
+
+        Runs once at the top of each colocated produce_batch. For every
+        aggregation still alive in the aggregator (carried over from the
+        previous step's pause_produce), this method:
+
+        1. Refreshes per-trajectory ``seq_staleness`` against the current
+           ``train_step`` and drops stale completed / pending_keep entries
+           (``routed_experts`` ObjectRefs are freed inside the aggregator).
+        2. Re-runs the policy: if the surviving completed list already
+           satisfies READY, finalise the group straight to the replay
+           buffer (no extra inference needed).
+        3. Otherwise re-submits PromptRequests to ``submit_front`` so the
+           scheduler picks them up before any fresh prompts pulled by
+           ``_preload_saturating``. The resubmit count covers:
+           - one slot per ``pending_keep`` entry — runners with
+             ``enable_partial_rollout=True`` will pop them and resume the
+             partial trajectory.
+           - additional fresh spawns to fill the gap to ``min_repeat``
+             (COLLECTING) or one ``min_repeat`` chunk for the NEEDS_MORE
+             retry path. Total commitment is capped by ``max_repeat``.
+
+        The producer's main loop sees the resumed aggregations through
+        ``aggregator.completed_trajectory_count`` (Q3) so ``available_for_unit``
+        already reflects the partial progress.
+        """
+        snapshots = await self._aggregator.list_unfinished_snapshots()
+        stats = {
+            "resubmitted": 0,
+            "resubmitted_partial_resume": 0,
+            "resubmitted_collecting": 0,
+            "resubmitted_needs_more": 0,
+            "finalized": 0,
+            "stale_completed": 0,
+            "stale_pending": 0,
+        }
+        if not snapshots:
+            return stats
+
+        for snap in snapshots:
+            stale_completed, stale_pending = await self._aggregator.refresh_aggregation_staleness(
+                snap.prompt_uid, ctx.train_step, self.stale_threshold
+            )
+            stats["stale_completed"] += stale_completed
+            stats["stale_pending"] += stale_pending
+
+            finalized_group = await self._aggregator.try_finalize_if_ready(snap.prompt_uid)
+            if finalized_group is not None:
+                await ctx.put_generated_group(finalized_group)
+                stats["finalized"] += 1
+                continue
+
+            fresh = await self._aggregator.get_snapshot(snap.prompt_uid)
+            if fresh is None:
+                continue
+
+            n_completed = len(fresh.completed)
+            n_pending = len(fresh.pending_keep)
+            committed = n_completed + n_pending
+            gap_max = max(0, self._policy.max_repeat - committed)
+
+            if n_completed < self._policy.min_repeat:
+                # COLLECTING: spawn enough new trajectories so total
+                # commitment (completed + pending + new) reaches min_repeat.
+                n_new_spawn = max(0, self._policy.min_repeat - committed)
+                # NEEDS_MORE distinction below applies only when completed
+                # >= min_repeat; here the new spawns are still COLLECTING.
+                new_spawn_priority = PRIORITY_COLLECTING
+            else:
+                # completed >= min_repeat but not READY (try_finalize_if_ready
+                # already caught READY above). Treat as NEEDS_MORE: spawn
+                # one min_repeat-sized chunk capped by remaining headroom.
+                n_new_spawn = min(self._policy.min_repeat, gap_max)
+                new_spawn_priority = PRIORITY_NEEDS_MORE
+
+            # Resume slots first (pending_keep), then fresh siblings. Both
+            # go through submit_front but into different priority buckets,
+            # so the scheduler will drain pending_keep first within this
+            # prompt and across all prompts.
+            for _ in range(n_pending):
+                await self._scheduler.submit_front(
+                    PromptRequest(
+                        prompt_uid=fresh.prompt_uid,
+                        task_name=ctx.task_name,
+                        prompt=fresh.original_prompt,
+                        priority=PRIORITY_PARTIAL_RESUME,
+                    )
+                )
+            for _ in range(n_new_spawn):
+                await self._scheduler.submit_front(
+                    PromptRequest(
+                        prompt_uid=fresh.prompt_uid,
+                        task_name=ctx.task_name,
+                        prompt=fresh.original_prompt,
+                        priority=new_spawn_priority,
+                    )
+                )
+            stats["resubmitted"] += n_pending + n_new_spawn
+            stats["resubmitted_partial_resume"] += n_pending
+            if new_spawn_priority == PRIORITY_NEEDS_MORE:
+                stats["resubmitted_needs_more"] += n_new_spawn
+            else:
+                stats["resubmitted_collecting"] += n_new_spawn
+
+        return stats
 
     async def _preload_prompts(self, ctx: ProduceContext, available: int) -> None:
         """Top up the scheduler queue with fresh prompts.
@@ -812,8 +983,22 @@ class TrajectoryProduceStrategy(ProduceStrategy):
             )
             return
         prompts_to_add = slots_available // per_prompt
+        # No additional target-gap cap: ``slots_available = max_on_fly -
+        # (pending + queue)`` already guarantees ``inflight + queue <=
+        # max_on_fly``, so the inference engine stays saturated. A cap
+        # based on ``target_with_oversample`` would actively contradict
+        # this when the user sets ``max_on_fly > target_with_oversample``
+        # — the producer would refuse to keep the rollout engine fed
+        # even though inflight is below the configured cap. Cross-step
+        # reuse already shows up in ``queue`` (cross-step resume puts
+        # PromptRequests there), so saturating's existing slots_available
+        # cap implicitly avoids over-sampling fresh prompts on top of
+        # carry-over commitments.
+        if prompts_to_add <= 0:
+            return
         logger.info(
             f"[{ctx.task_name}] preload (saturating): pending={pending}, queue={queue}, "
+            f"queue_by_pri=[{format_queue_breakdown(self._scheduler.queue_lens_by_priority())}], "
             f"capacity={capacity}, slots_available={slots_available}, "
             f"per_prompt={per_prompt}, prompts_to_add={prompts_to_add}"
         )
@@ -824,7 +1009,19 @@ class TrajectoryProduceStrategy(ProduceStrategy):
                     f"[{ctx.task_name}] preload aborted after {preloaded}/{prompts_to_add} prompts"
                 )
                 return
-            prompt_req = await ctx.sampler.sample_prompt(task_name=ctx.task_name)
+            try:
+                prompt_req = await ctx.sampler.sample_prompt(task_name=ctx.task_name)
+            except SamplerExhausted:
+                # Single-epoch sampler (e.g. eval) has yielded its last item.
+                # Stop topping up the queue; the produce_batch main loop's
+                # stalled-detection path will exit once the in-flight tasks
+                # drain. This guarantees the producer never sends more
+                # trajectories than the dataset contains.
+                logger.info(
+                    f"[{ctx.task_name}] sampler exhausted after {preloaded} preloads "
+                    f"this round; stopping further preload."
+                )
+                return
             await self._aggregator.register_prompt(prompt_req.prompt, ctx.task_name)
             for _ in range(per_prompt):
                 await self._scheduler.submit(prompt_req)
@@ -860,15 +1057,34 @@ class TrajectoryProduceStrategy(ProduceStrategy):
                     f"[{ctx.task_name}] preload aborted after {preloaded}/{to_preload} prompts"
                 )
                 return
-            prompt_req = await ctx.sampler.sample_prompt(task_name=ctx.task_name)
+            try:
+                prompt_req = await ctx.sampler.sample_prompt(task_name=ctx.task_name)
+            except SamplerExhausted:
+                logger.info(
+                    f"[{ctx.task_name}] sampler exhausted after {preloaded} preloads "
+                    f"this round; stopping further preload."
+                )
+                return
             await self._aggregator.register_prompt(prompt_req.prompt, ctx.task_name)
             await self._scheduler.submit(prompt_req)
             preloaded += 1
 
-    def _build_runner(self, ctx: ProduceContext) -> Callable[[PromptRequest], Awaitable[None]]:
-        async def runner(req: PromptRequest) -> None:
+    def _build_pipeline(self, ctx: ProduceContext) -> Pipeline:
+        """Build the per-prompt pipeline passed to the scheduler.
+
+        The pipeline has two phases. The inference phase (deepcopy +
+        ``generate_group``) runs while the scheduler's ``max_on_fly`` slot
+        is held; the post phase (aggregator + replay buffer dispatch) runs
+        after :func:`release_slot` so a new inference can be spawned in
+        parallel. ``mark_in_flight`` brackets the whole pipeline because
+        the policy's ``should_spawn_more`` reads the in-flight count to
+        cap commitment at ``max_repeat``.
+        """
+
+        async def pipeline(req: PromptRequest, release_slot: Callable[[], None]) -> None:
+            await self._aggregator.mark_in_flight(req.prompt_uid, +1)
             try:
-                await self._aggregator.mark_in_flight(req.prompt_uid, +1)
+                # Phase 1: inference (holds a max_on_fly slot)
                 pending: RolloutState | None = None
                 if self._scheduler.config.enable_partial_rollout:
                     pending = await self._aggregator.pop_pending_keep(req.prompt_uid)
@@ -886,24 +1102,22 @@ class TrajectoryProduceStrategy(ProduceStrategy):
                         f"[{ctx.task_name}] runner spawning prompt_uid={req.prompt_uid} "
                         f"-> traj_uid={input_state.uid}"
                     )
-                result_list = await ctx.generate_group(
-                    [input_state],
-                    enable_partial_rollout=self._scheduler.config.enable_partial_rollout,
-                )
+                try:
+                    result_list = await ctx.generate_group(
+                        [input_state],
+                        enable_partial_rollout=self._scheduler.config.enable_partial_rollout,
+                    )
+                finally:
+                    # Slot is freed regardless of success / failure so the
+                    # next inference can start while we run the post phase.
+                    release_slot()
                 traj = result_list[0]
+                # Phase 2: dispatch (no slot held)
                 await self._dispatch_trajectory(ctx, req, traj)
-            except asyncio.CancelledError:
-                raise
-            except Exception as exc:  # noqa: BLE001 - must not break scheduler state
-                logger.error(
-                    f"[{ctx.task_name}] trajectory runner failed for prompt_uid={req.prompt_uid}: "
-                    f"{type(exc).__name__}: {exc}",
-                    exc_info=exc,
-                )
             finally:
                 await self._aggregator.mark_in_flight(req.prompt_uid, -1)
 
-        return runner
+        return pipeline
 
     async def _dispatch_trajectory(
         self,
@@ -918,6 +1132,10 @@ class TrajectoryProduceStrategy(ProduceStrategy):
                     f"[{ctx.task_name}] dispatch orphan: prompt_uid={req.prompt_uid}, "
                     f"traj_uid={traj.uid} (aggregation already finalized or dropped)"
                 )
+                # The trajectory never entered an aggregation, so plasma
+                # refs (routed_experts / pixel_values) won't be reached by
+                # any later READY / STOPPED cleanup. Free them here.
+                free_rollout_state_refs(traj)
                 return
             logger.debug(
                 f"[{ctx.task_name}] dispatch COMPLETED: prompt_uid={req.prompt_uid}, "
@@ -952,6 +1170,10 @@ class TrajectoryProduceStrategy(ProduceStrategy):
                     f"[{ctx.task_name}] NEEDS_MORE: prompt_uid={req.prompt_uid} "
                     f"submitting {n_to_submit} more trajectories (headroom={headroom})"
                 )
+                # NEEDS_MORE retries sit below COLLECTING / PARTIAL_RESUME so
+                # the first round of any new prompt's min_repeat fills before
+                # we re-roll an all-equal-reward group.
+                req.priority = PRIORITY_NEEDS_MORE
                 for _ in range(n_to_submit):
                     await self._scheduler.submit_front(req)
             elif state is GroupState.COLLECTING:
@@ -965,20 +1187,40 @@ class TrajectoryProduceStrategy(ProduceStrategy):
             return
 
         if traj.status == Status.ABORTED:
-            logger.info(
-                f"[{ctx.task_name}] dispatch ABORTED: prompt_uid={req.prompt_uid}, "
-                f"traj_uid={traj.uid}, partial_rollout={self._scheduler.config.enable_partial_rollout}"
-            )
+            # logger.info(
+            #     f"[{ctx.task_name}] dispatch ABORTED: prompt_uid={req.prompt_uid}, "
+            #     f"traj_uid={traj.uid}, partial_rollout={self._scheduler.config.enable_partial_rollout}"
+            # )
             if self._scheduler.config.enable_partial_rollout:
+                # The aggregator owns the trajectory's plasma refs once
+                # push_pending_keep accepts it; it will free them in drop().
                 await self._aggregator.push_pending_keep(traj)
+                # Resume of a partial trajectory is the highest-value reuse;
+                # keep it ahead of fresh siblings and NEEDS_MORE retries.
+                req.priority = PRIORITY_PARTIAL_RESUME
+            else:
+                # Without partial rollout the ABORTED trajectory is
+                # discarded outright, so its routed_experts / pixel_values
+                # ObjectRefs would otherwise stay pinned in plasma.
+                free_rollout_state_refs(traj)
+                # Equivalent to a COLLECTING fresh sibling: same prompt
+                # still owes min_repeat completed trajectories.
+                req.priority = PRIORITY_COLLECTING
             await self._scheduler.submit_front(req)
             return
 
         logger.warning(
             f"[{ctx.task_name}] dispatch {traj.status.name}: prompt_uid={req.prompt_uid}, "
-            f"traj_uid={traj.uid}; dropping aggregation."
+            f"traj_uid={traj.uid}; dropping trajectory only."
         )
-        await self._aggregator.drop(req.prompt_uid)
+        # Free the failed trajectory's plasma refs but keep the surrounding
+        # aggregation alive. Sibling completed / pending_keep trajectories
+        # of the same prompt are still valid; the cross-step
+        # _resubmit_unfinished_aggregations path (or in-flight siblings of
+        # this round) will top the aggregation back up to min_repeat /
+        # NEEDS_MORE-target. Dropping the whole aggregation here would
+        # waste already-completed trajectories for one peer's failure.
+        free_rollout_state_refs(traj)
 
 
 # Backward-compatibility aliases. Phase 2 collapses Sync / Async strategies

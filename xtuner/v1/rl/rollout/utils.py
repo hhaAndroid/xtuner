@@ -233,24 +233,57 @@ async def send_abort_request(client: httpx.AsyncClient, url: str, timeout: float
         return url, False
 
 
-async def pause_generation(rollout_ctl: "RolloutControllerProxy", pause_time_out: float = 60.0) -> None:
+async def pause_generation(
+    rollout_ctl: "RolloutControllerProxy",
+    pause_time_out: float = 60.0,
+    abort_retries: int = 3,
+    abort_retry_interval_s: float = 30.0,
+) -> None:
+    """Pause rollout generation and abort all in-flight requests.
+
+    Inference engines have been observed to occasionally drop a single
+    abort_request call (request lost in transit, server busy on a long
+    running batch, etc.), so the abort is sent ``abort_retries`` times
+    with ``abort_retry_interval_s`` seconds between attempts. Every attempt
+    fires the abort to every server in parallel; per-attempt success /
+    failure is logged so a partial recovery can be diagnosed from logs.
+    The total pause cost is therefore approximately
+    ``(abort_retries - 1) * abort_retry_interval_s + last_request_latency``.
+
+    Args:
+        rollout_ctl: Controller actor proxy whose remote ``pause_generation``
+            sets the worker-side ``receive_abort_request`` event.
+        pause_time_out: HTTP timeout for each individual abort request.
+        abort_retries: Total number of abort rounds (>=1). Default 3.
+        abort_retry_interval_s: Delay between rounds. Default 30s.
+    """
     await rollout_ctl.pause_generation.remote()  # type: ignore[attr-defined]
     rollout_ctl_metadata = await rollout_ctl.get_rollout_metadata.remote()  # type: ignore[attr-defined]
     infer_server_url = list(rollout_ctl_metadata["server_url_dict"].values())
+    if abort_retries < 1:
+        raise ValueError(f"abort_retries must be >= 1, got {abort_retries}.")
+
     async with httpx.AsyncClient() as client:
-        tasks = [send_abort_request(client, url, timeout=pause_time_out) for url in infer_server_url]
-        results = await asyncio.gather(*tasks)
+        for attempt in range(1, abort_retries + 1):
+            tasks = [send_abort_request(client, url, timeout=pause_time_out) for url in infer_server_url]
+            results = await asyncio.gather(*tasks)
+            failed_workers = [url for url, success in results if not success]
+            succeeded_count = len(infer_server_url) - len(failed_workers)
 
-    failed_workers = [url for url, success in results if not success]
-    succeeded_count = len(infer_server_url) - len(failed_workers)
+            if failed_workers:
+                logger.warning(
+                    f"Abort attempt {attempt}/{abort_retries} completed. "
+                    f"Succeeded: {succeeded_count}, Failed: {len(failed_workers)}. "
+                    f"Failed workers: {failed_workers}"
+                )
+            else:
+                logger.info(
+                    f"Abort attempt {attempt}/{abort_retries}: "
+                    f"all {succeeded_count} abort requests sent successfully."
+                )
 
-    if failed_workers:
-        logger.warning(
-            f"Abort requests completed. Succeeded: {succeeded_count}, "
-            f"Failed: {len(failed_workers)}. Failed workers: {failed_workers}"
-        )
-    else:
-        logger.info(f"All {succeeded_count} abort requests sent successfully.")
+            if attempt < abort_retries:
+                await asyncio.sleep(abort_retry_interval_s)
 
 
 async def continue_generation(rollout_ctl: "RolloutControllerProxy") -> None:

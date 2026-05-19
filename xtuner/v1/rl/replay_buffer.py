@@ -27,6 +27,7 @@ from xtuner.v1.rl.utils import (
     ScalarNode,
     SetNode,
     clear_rollout_response_for_rerun,
+    free_rollout_state_refs,
     parse_query,
 )
 from xtuner.v1.utils import get_logger
@@ -494,8 +495,18 @@ class ReplayBuffer:
 
         status = get_group_status(items)
         if status == Status.EXPIRED:
+            # EXPIRED groups will be re-rolled by the sampler, so keep the
+            # prompt-side mm_info intact and only drop the response-side
+            # routed_experts ObjectRef.
             for item in items:
                 clear_rollout_response_for_rerun(item)
+        elif status == Status.FILTERED:
+            # FILTERED groups stay in the buffer for diagnostic counters
+            # (leftover_filtered) but are never consumed by training. Drop
+            # both routed_experts and mm_info pixel_values now so plasma
+            # does not leak for every group rejected by is_valid_sample_fn.
+            for item in items:
+                free_rollout_state_refs(item)
         storage_item = StorageItem(
             item=items,
             uid=0,

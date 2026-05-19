@@ -42,8 +42,11 @@ from .ray_utils import (
     close_ray,
     find_master_addr_and_port,
     free_object_refs,
+    free_rollout_state_list_refs,
+    free_rollout_state_refs,
     get_accelerator_ids,
     get_ray_accelerator,
+    partial_rollout_postprocess,
     register_cleanup,
 )
 
@@ -66,7 +69,10 @@ __all__ = [
     "find_master_addr_and_port",
     "get_accelerator_ids",
     "free_object_refs",
+    "free_rollout_state_refs",
+    "free_rollout_state_list_refs",
     "clear_rollout_response_for_rerun",
+    "partial_rollout_postprocess",
     "bind_train_rollout",
     "handle_task_exception",
     "create_task",

@@ -21,6 +21,18 @@ from xtuner.v1.utils.logger import get_logger
 logger = get_logger(__name__)
 
 
+class SamplerExhausted(Exception):
+    """Raised by :class:`Sampler` when ``single_epoch=True`` and the
+    dataloader has yielded its last item.
+
+    Producers running an evaluation pass should catch this and stop
+    requesting new prompts so they never sample past the dataset size.
+    Async callers must use a custom exception (instead of letting
+    ``StopIteration`` escape) because PEP 479 turns a ``StopIteration``
+    raised inside a coroutine into ``RuntimeError``.
+    """
+
+
 class SamplerConfig(BaseModel):
     """Configuration for sampling prompts into rollout groups.
 
@@ -48,6 +60,12 @@ class SamplerConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", arbitrary_types_allowed=True)
     dataloader_cfg: DataloaderConfig
     prompt_repeat_k: int = 1
+    single_epoch: bool = False
+    """When True, the sampler stops at the end of one dataloader pass and
+    raises :class:`SamplerExhausted`. Use for evaluation (so the producer
+    cannot oversample the val set when ``max_on_fly`` is much larger than
+    the dataset). Default ``False`` keeps the legacy training behaviour of
+    rolling into the next epoch."""
 
     def build(
         self, tokenizer: PreTrainedTokenizer | PreTrainedTokenizerFast | str, replay_buffer: ReplayBuffer
@@ -68,7 +86,12 @@ class SamplerConfig(BaseModel):
         dataloader = self.dataloader_cfg.build(
             tokenizer=tokenizer_obj, dp_mesh=None, global_batch_size=1, micro_batch_size=1, seed=1
         )
-        return Sampler(dataloader=dataloader, prompt_repeat_k=self.prompt_repeat_k, replay_buffer=replay_buffer)
+        return Sampler(
+            dataloader=dataloader,
+            prompt_repeat_k=self.prompt_repeat_k,
+            replay_buffer=replay_buffer,
+            single_epoch=self.single_epoch,
+        )
 
 
 # TODO: The best solution is to put it in the fake_collator,
@@ -83,12 +106,14 @@ def put_to_ray(data: RolloutState) -> RolloutState:
 
 
 class _DatasetSampler:
-    def __init__(self, dataloader: Dataloader, prompt_repeat_k: int):
+    def __init__(self, dataloader: Dataloader, prompt_repeat_k: int, single_epoch: bool = False):
         self.dataloader = dataloader
         self.dataloader_iter: Optional[Iterator] = None
         self.cur_epoch = 0
         self.prompt_repeat_k = prompt_repeat_k
         self._consumed_samples: int = 0
+        self._single_epoch = single_epoch
+        self._exhausted = False
 
     def __len__(self) -> int:
         return len(self.dataloader)
@@ -111,12 +136,21 @@ class _DatasetSampler:
         # Returns (data, seq_index) where seq_index is the pre-increment
         # _consumed_samples value. The counter is advanced before return so
         # callers that do not use seq_index still see the new position.
+        # Single-epoch mode (eval) must never roll into the next epoch:
+        # otherwise the producer's ``max_on_fly`` saturation will pull the
+        # same val sample multiple times whenever ``max_on_fly`` exceeds the
+        # dataset size.
+        if self._exhausted:
+            raise SamplerExhausted("Sampler is exhausted; single_epoch=True.")
         if self.dataloader_iter is None:
             self.dataloader_iter = iter(self.dataloader)
         assert self.dataloader_iter is not None
         try:
             data = cast(RolloutState, next(self.dataloader_iter)[0])
         except StopIteration:
+            if self._single_epoch:
+                self._exhausted = True
+                raise SamplerExhausted("Dataloader exhausted in single_epoch mode.") from None
             self.cur_epoch += 1
             self.dataloader.set_epoch(self.cur_epoch)
             self.dataloader_iter = iter(self.dataloader)
@@ -137,9 +171,26 @@ class Sampler(_DatasetSampler):
         dataloader: Dataloader,
         prompt_repeat_k: int,
         replay_buffer: ReplayBuffer,
+        single_epoch: bool = False,
     ):
-        super().__init__(dataloader, prompt_repeat_k)
+        super().__init__(dataloader, prompt_repeat_k, single_epoch=single_epoch)
         self.replay_buffer = replay_buffer
+
+    @property
+    def exhausted(self) -> bool:
+        """True once a single-epoch sampler has yielded its last item."""
+        return self._exhausted
+
+    def reset(self) -> None:
+        """Reset the iterator and the exhausted flag for a new pass.
+
+        Evaluation runs should call this before each pass so the second
+        call to :meth:`sample_prompt` does not see a stale exhausted flag.
+        """
+        self.dataloader_iter = None
+        self._exhausted = False
+        self._consumed_samples = 0
+        self.cur_epoch = 0
 
     async def sample(self, task_name: str, group_status: list[Status] | None = None) -> list[RolloutState]:
         for status in group_status or []:

@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from xtuner.v1.data_proto.rl_data import RolloutState, SampleParams, Status, refresh_seq_staleness
 from xtuner.v1.rl.agent_loop.single_turn_agent_loop import SingleTurnAgentLoop
-from xtuner.v1.rl.agent_loop.utils import PartialRolloutHandler
+from xtuner.v1.rl.utils import partial_rollout_postprocess
 
 
 def _make_rollout_state(
@@ -45,7 +45,6 @@ class TestAgentLoopUtils(unittest.TestCase):
         self.assertEqual(group[0].seq_staleness, 0)
 
     def test_partial_rollout_postprocess_only_concatenates_history(self):
-        handler = PartialRolloutHandler(max_tokens=8)
         rollout_state = _make_rollout_state(
             response_ids=[30, 31],
             response_model_steps=[2, 2],
@@ -61,7 +60,7 @@ class TestAgentLoopUtils(unittest.TestCase):
             },
         )
 
-        result = handler.postprocess(rollout_state)
+        result = partial_rollout_postprocess(rollout_state)
 
         self.assertEqual(result.response_ids, [10, 11, 30, 31])
         self.assertEqual(result.response_model_steps, [2, 2])

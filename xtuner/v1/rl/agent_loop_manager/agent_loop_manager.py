@@ -784,6 +784,15 @@ class AgentLoopManager:
             #
             # 共卡路径下，produce_batch() 对应 rollout worker 当前持有的权重版本。
             self.continue_produce(model_step=model_step)
+            # Single-epoch samplers (e.g. evaluation) drain after one pass and
+            # raise SamplerExhausted on further requests. Each produce_batch
+            # call on a colocated path is a fresh pass, so reset the iterator
+            # before producing. Training samplers never set the exhausted
+            # flag, so this is a no-op for them.
+            for task in self.task_runners:
+                sampler = task.sampler
+                if getattr(sampler, "exhausted", False):
+                    sampler.reset()
             # 共卡 produce_batch 也是消费入口；生产前先刷新 buffer 中已有 completed / aborted。
             await self._refresh_for_all_tasks(train_step, [Status.COMPLETED, Status.ABORTED])
             local_progress = ProduceProgress.build_local(self.task_names, current_sizes, train_step)

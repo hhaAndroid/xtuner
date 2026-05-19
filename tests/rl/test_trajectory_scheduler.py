@@ -70,44 +70,75 @@ class TestSchedulerSpawn(unittest.IsolatedAsyncioTestCase):
         scheduler = self._build(max_on_fly=2)
         release = asyncio.Event()
 
-        async def runner(req):
+        async def pipeline(req, release_slot):
+            # Hold the slot until the test releases the gate, so we can probe capacity.
             await release.wait()
+            release_slot()
 
         for i in range(4):
             await scheduler.submit(_make_req(i))
-        self.assertTrue(await scheduler.spawn_if_slot(runner))
-        self.assertTrue(await scheduler.spawn_if_slot(runner))
+        self.assertTrue(await scheduler.spawn_if_slot(pipeline))
+        self.assertTrue(await scheduler.spawn_if_slot(pipeline))
         # Third attempt exceeds max_on_fly
-        self.assertFalse(await scheduler.spawn_if_slot(runner))
+        self.assertFalse(await scheduler.spawn_if_slot(pipeline))
+        self.assertEqual(scheduler.inflight_count(), 2)
         self.assertEqual(scheduler.pending_count(), 2)
         release.set()
         await scheduler.drain()
+        self.assertEqual(scheduler.inflight_count(), 0)
         self.assertEqual(scheduler.pending_count(), 0)
 
     async def test_spawn_returns_false_when_queue_empty(self):
         scheduler = self._build()
 
-        async def runner(req):
-            pass
+        async def pipeline(req, release_slot):
+            release_slot()
 
-        self.assertFalse(await scheduler.spawn_if_slot(runner))
+        self.assertFalse(await scheduler.spawn_if_slot(pipeline))
 
     async def test_front_priority_runs_first(self):
         scheduler = self._build(max_on_fly=1)
         seen: list[int] = []
 
-        async def runner(req):
+        async def pipeline(req, release_slot):
             seen.append(req.prompt_uid)
+            release_slot()
 
         await scheduler.submit(_make_req(1))
         await scheduler.submit(_make_req(2))
         await scheduler.submit_front(_make_req(99))
-        await scheduler.spawn_if_slot(runner)
+        await scheduler.spawn_if_slot(pipeline)
         await scheduler.drain()
         self.assertEqual(seen, [99])
-        await scheduler.spawn_if_slot(runner)
+        await scheduler.spawn_if_slot(pipeline)
         await scheduler.drain()
         self.assertEqual(seen, [99, 1])
+
+    async def test_release_slot_unblocks_next_inference(self):
+        # Inference releases its slot promptly while the post phase is
+        # still running; the next spawn must be admitted while pending_count
+        # is still 1 (the post-phase task).
+        scheduler = self._build(max_on_fly=1)
+        post_gate = asyncio.Event()
+        seen: list[int] = []
+
+        async def pipeline(req, release_slot):
+            seen.append(req.prompt_uid)
+            release_slot()
+            await post_gate.wait()  # post phase blocks until the test releases it
+
+        await scheduler.submit(_make_req(1))
+        await scheduler.submit(_make_req(2))
+        self.assertTrue(await scheduler.spawn_if_slot(pipeline))
+        # Post phase of #1 is still pending, but its inference slot is freed.
+        await asyncio.sleep(0)  # let pipeline run to release_slot
+        self.assertEqual(scheduler.inflight_count(), 0)
+        self.assertEqual(scheduler.pending_count(), 1)
+        self.assertTrue(await scheduler.spawn_if_slot(pipeline))
+        self.assertEqual(scheduler.inflight_count(), 1)
+        post_gate.set()
+        await scheduler.drain()
+        self.assertEqual(seen, [1, 2])
 
 
 class TestSchedulerDrainAndCleanup(unittest.IsolatedAsyncioTestCase):
@@ -118,13 +149,14 @@ class TestSchedulerDrainAndCleanup(unittest.IsolatedAsyncioTestCase):
     async def test_drain_waits_for_pending(self):
         scheduler = self._build()
 
-        async def runner(req):
+        async def pipeline(req, release_slot):
             await asyncio.sleep(0.05)
+            release_slot()
 
         for i in range(2):
             await scheduler.submit(_make_req(i))
-        await scheduler.spawn_if_slot(runner)
-        await scheduler.spawn_if_slot(runner)
+        await scheduler.spawn_if_slot(pipeline)
+        await scheduler.spawn_if_slot(pipeline)
         await scheduler.drain()
         self.assertEqual(scheduler.pending_count(), 0)
 
@@ -132,19 +164,21 @@ class TestSchedulerDrainAndCleanup(unittest.IsolatedAsyncioTestCase):
         scheduler = self._build(cleanup_timeout_s=0.2)
         cancelled = asyncio.Event()
 
-        async def runner(req):
+        async def pipeline(req, release_slot):
             try:
                 await asyncio.sleep(10)
             except asyncio.CancelledError:
                 cancelled.set()
                 raise
+            release_slot()
 
         await scheduler.submit(_make_req(1))
-        await scheduler.spawn_if_slot(runner)
+        await scheduler.spawn_if_slot(pipeline)
         elapsed = await scheduler.pause_and_cleanup()
         self.assertLess(elapsed, 2.0)
         self.assertTrue(cancelled.is_set())
         self.assertEqual(scheduler.pending_count(), 0)
+        self.assertEqual(scheduler.inflight_count(), 0)
 
     async def test_pause_and_cleanup_returns_quickly_if_empty(self):
         scheduler = self._build()
@@ -169,17 +203,19 @@ class TestClearQueueAndStaleness(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(scheduler.is_model_expired(train_step=0, model_step=0))
         self.assertTrue(scheduler.is_model_expired(train_step=100, model_step=0))
 
-    async def test_runner_exception_removes_from_pending(self):
+    async def test_pipeline_exception_removes_from_pending(self):
         cfg = TrajectorySchedulerConfig(max_on_fly=2)
         scheduler = cfg.build(sync_weights_interval=10)
 
-        async def bad_runner(req):
+        async def bad_pipeline(req, release_slot):
             raise RuntimeError("boom")
 
         await scheduler.submit(_make_req(1))
-        await scheduler.spawn_if_slot(bad_runner)
+        await scheduler.spawn_if_slot(bad_pipeline)
         await scheduler.drain()
+        # Wrapper's safety net releases the slot even when the pipeline raises.
         self.assertEqual(scheduler.pending_count(), 0)
+        self.assertEqual(scheduler.inflight_count(), 0)
 
 
 if __name__ == "__main__":

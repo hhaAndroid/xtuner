@@ -7,6 +7,7 @@ import torch
 
 from xtuner.v1.data_proto.sequence_context import SequenceContext
 from xtuner.v1.model.compose.base import BaseComposeConfig
+from xtuner.v1.rl.utils import free_object_refs
 from xtuner.v1.train.trainer import LoadCheckpointConfig
 from xtuner.v1.utils import get_logger
 
@@ -258,13 +259,16 @@ class TrainingController:
         try:
             log_infos = ray.get(handles, timeout=TRAIN_RAY_GET_TIMEOUT)
         finally:
-            # free pixel values ref
+            # Free pixel_values ObjectRefs put by Sampler.put_to_ray. The
+            # workers' fit() already ray.get'd them into local tensors, so
+            # plasma copies are no longer needed and otherwise leak across
+            # every train step (one ref per packed sample, including padding).
             free_pixel_value_refs: list[ray.ObjectRef] = []
             for data in packed_data_batches:
                 if data["seq_ctx"].pixel_values is not None:
                     free_pixel_value_refs.extend(data["seq_ctx"].pixel_values)
-            # if len(free_pixel_value_refs) > 0:
-            #     free_object_refs(free_pixel_value_refs)
+            if len(free_pixel_value_refs) > 0:
+                free_object_refs(free_pixel_value_refs)
             del packed_data_batches
         return log_infos
 

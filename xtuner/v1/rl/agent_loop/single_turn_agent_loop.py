@@ -73,15 +73,15 @@ class SingleTurnAgentLoop(AgentLoop):
     ) -> RolloutState:
         enable_partial_rollout = kwargs.get("enable_partial_rollout", False)
 
-        # rollout state 预处理, enable_partial_rollout = True 会在这里拼接 token 和修正 max_token
+        # rollout state 预处理, enable_partial_rollout = True 会在这里拼接 token 和修正 max_token。
+        # postprocess（含 routed_experts 同步 ray.get / ray.put）已下沉到 RolloutWorker.generate
+        # 内执行，分散到每个 GPU worker，避免在中心化的 agent_loop 进程里串行成为瓶颈。
         rollout_state = self.partial_rollout_handler.preprocess(rollout_state, enable_partial_rollout)
         if not rollout_state.tokens:
             rollout_state.tokens = rollout_state.prompt_ids
 
-        # 推理引擎generate, 生成的结果会覆盖到 rollout_state.response_ids 上
+        # 推理引擎 generate；返回时 rollout_state 已经合并了 partial-rollout 历史。
         rollout_state = await self.rollout_ctl.generate.remote(rollout_state)  # type: ignore[attr-defined]
-        # rollout state 后处理: 合并 partial rollout 的历史上下文
-        rollout_state = self.partial_rollout_handler.postprocess(rollout_state)
         # 非 COMPLETED 状态（如被截断、放弃等）直接早退，不触发打分
         if rollout_state.status != Status.COMPLETED:
             return rollout_state

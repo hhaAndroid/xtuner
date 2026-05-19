@@ -186,7 +186,7 @@ class DefaultGroupPolicy(GroupPolicy):
 
         scores = [self._extract_score(traj) for traj in completed]
         if max(scores) - min(scores) > self._config.score_tol:
-            logger.info(f"scores: {scores}, group is ready")
+            # logger.info(f"scores: {scores}, group is ready")
             return GroupState.READY
 
         # All-equal: drop only once the aggregation has collected
@@ -206,9 +206,9 @@ class DefaultGroupPolicy(GroupPolicy):
         # ``max_repeat`` via ``should_spawn_more``; otherwise this check would
         # spin forever on additional submits.
         if n_completed >= self._config.max_repeat:
-            logger.info(f"scores: {scores}, group reached max_repeat, drop group")
+            # logger.info(f"scores: {scores}, group reached max_repeat, drop group")
             return GroupState.STOPPED
-        logger.info(f"scores: {scores}, group is not ready, need more trajectories")
+        # logger.info(f"scores: {scores}, group is not ready, need more trajectories")
         return GroupState.NEEDS_MORE
 
     def should_spawn_more(self, agg: "GroupAggregation") -> int:

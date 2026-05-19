@@ -18,8 +18,9 @@ import asyncio
 import time
 from dataclasses import dataclass, field, replace
 
-from xtuner.v1.data_proto.rl_data import RolloutState
+from xtuner.v1.data_proto.rl_data import RolloutState, refresh_seq_staleness
 from xtuner.v1.rl.agent_loop_manager.group_policy import GroupPolicy, GroupState
+from xtuner.v1.rl.utils import free_rollout_state_list_refs
 from xtuner.v1.utils import get_logger
 
 
@@ -95,6 +96,14 @@ class GroupAggregator:
     def __init__(self, policy: GroupPolicy) -> None:
         self._policy = policy
         self._groups: dict[int, GroupAggregation] = {}
+        # Cached count of trajectories sitting in any aggregation's
+        # ``completed`` list. Used by the producer (Q3) to fold partial-
+        # progress into ``available_for_unit`` in O(1) without walking every
+        # aggregation each iter. Maintained by add_trajectory / drop / clear /
+        # refresh_aggregation_staleness / try_finalize_if_ready /
+        # load_state_dict; ``register_prompt`` does not bump it because new
+        # aggregations start with empty ``completed``.
+        self._completed_trajectory_count = 0
         self._lock = asyncio.Lock()
 
     @property
@@ -165,12 +174,17 @@ class GroupAggregator:
                 )
                 return None, None
             agg.completed.append(traj)
+            self._completed_trajectory_count += 1
             state = self._policy.on_trajectory_done(agg)
             if state is GroupState.READY:
                 finalized = agg.completed
                 # Remove the aggregation atomically so late in-flight
                 # trajectories for this prompt are treated as orphans.
                 self._groups.pop(prompt_uid)
+                # The finalized group is leaving the aggregator and entering
+                # the replay buffer; its trajectories should no longer count
+                # toward the producer's "in-flight progress" view.
+                self._completed_trajectory_count -= len(finalized)
                 return state, finalized
             return state, None
 
@@ -234,9 +248,54 @@ class GroupAggregator:
                 )
 
     async def drop(self, prompt_uid: int) -> None:
-        """Remove an aggregation unconditionally, for example on STOPPED."""
+        """Remove an aggregation unconditionally, for example on STOPPED.
+
+        Frees plasma ObjectRefs (``routed_experts`` / ``mm_info`` pixel
+        values) on every completed and pending-keep trajectory inside the
+        aggregation before letting Python GC reclaim the rest. Distributed
+        ref counting in Ray is unreliable for tensors that have travelled
+        across actor boundaries, so dropping silently would otherwise leak
+        the per-token routing tensor into plasma until process exit.
+        """
         async with self._lock:
-            self._groups.pop(prompt_uid, None)
+            agg = self._groups.pop(prompt_uid, None)
+            if agg is not None:
+                self._completed_trajectory_count -= len(agg.completed)
+        if agg is None:
+            return
+        # Released outside the lock so plasma free does not serialise with
+        # other aggregator mutations.
+        free_rollout_state_list_refs(list(agg.completed) + list(agg.pending_keep))
+
+    async def clear(self) -> int:
+        """Drop every aggregation and free their trajectory ObjectRefs.
+
+        Used by the producer's pause_produce path: when a colocated
+        produce_batch returns target_met (or pause_and_cleanup cancels
+        in-flight trajectories ahead of a weight sync), every aggregation
+        still in COLLECTING / NEEDS_MORE without a finalising trajectory
+        on the way becomes a zombie — no future trajectory will arrive to
+        flip it to READY or STOPPED, so it would otherwise sit in
+        ``_groups`` forever. Each carries up to ``min_repeat - 1``
+        completed trajectories with their ``routed_experts`` ObjectRefs
+        pinned in plasma; clearing them out keeps active_aggregations
+        bounded across train steps and stops the producer's per-iter lock
+        traffic from growing without bound.
+
+        Returns the number of aggregations removed.
+        """
+        async with self._lock:
+            groups = list(self._groups.values())
+            self._groups.clear()
+            self._completed_trajectory_count = 0
+        if not groups:
+            return 0
+        all_trajs: list[RolloutState] = []
+        for agg in groups:
+            all_trajs.extend(agg.completed)
+            all_trajs.extend(agg.pending_keep)
+        free_rollout_state_list_refs(all_trajs)
+        return len(groups)
 
     async def exists(self, prompt_uid: int) -> bool:
         async with self._lock:
@@ -257,6 +316,125 @@ class GroupAggregator:
     async def active_count(self) -> int:
         async with self._lock:
             return len(self._groups)
+
+    async def completed_trajectory_count(self) -> int:
+        """O(1) total of trajectories sitting in any aggregation's ``completed`` list.
+
+        The producer folds this into ``available_for_unit`` so an
+        in-progress trajectory that has already finished generating but
+        not yet finalised into a group counts toward ``target_abs``. This
+        avoids over-sampling fresh prompts when most of the work for the
+        next batch is already done — the same prompt's other trajectories
+        will eventually finalise the group and write it to the buffer.
+        """
+        async with self._lock:
+            return self._completed_trajectory_count
+
+    async def list_unfinished_snapshots(self) -> list[GroupAggregation]:
+        """Return shallow snapshots of every active aggregation.
+
+        Used by the producer at the start of each colocated produce_batch
+        to resume aggregations whose in-flight trajectories were cancelled
+        by the previous step's pause_produce. Each returned snapshot owns
+        its own ``completed`` / ``pending_keep`` lists, so the caller can
+        iterate without holding the aggregator lock.
+        """
+        async with self._lock:
+            return [
+                replace(
+                    agg,
+                    completed=list(agg.completed),
+                    pending_keep=list(agg.pending_keep),
+                )
+                for agg in self._groups.values()
+            ]
+
+    async def refresh_aggregation_staleness(
+        self,
+        prompt_uid: int,
+        current_train_step: int,
+        stale_threshold: int,
+    ) -> tuple[int, int]:
+        """Drop stale trajectories from a single aggregation.
+
+        Recomputes ``seq_staleness`` for every trajectory in ``completed``
+        and ``pending_keep`` against ``current_train_step``, then removes
+        those whose staleness has reached ``stale_threshold``. Removed
+        trajectories' ``routed_experts`` ObjectRefs are freed.
+
+        The aggregation itself is **not** dropped even if both lists end
+        up empty — the original prompt is preserved so the producer can
+        re-spawn fresh trajectories under the same prompt_uid.
+
+        Args:
+            prompt_uid (int): Aggregation identifier.
+            current_train_step (int): Train step to recompute staleness against.
+            stale_threshold (int): Inclusive cap on per-token staleness; a
+                trajectory at or above this value is dropped.
+
+        Returns:
+            tuple[int, int]: ``(stale_completed, stale_pending_keep)`` —
+            the number of trajectories removed from each list.
+        """
+        if stale_threshold <= 0:
+            raise ValueError(f"stale_threshold must be positive, got {stale_threshold}.")
+        async with self._lock:
+            agg = self._groups.get(prompt_uid)
+            if agg is None:
+                return 0, 0
+            stale_completed: list[RolloutState] = []
+            kept_completed: list[RolloutState] = []
+            refresh_seq_staleness(agg.completed, current_train_step)
+            for traj in agg.completed:
+                if getattr(traj, "seq_staleness", 0) >= stale_threshold:
+                    stale_completed.append(traj)
+                else:
+                    kept_completed.append(traj)
+            stale_pending: list[RolloutState] = []
+            kept_pending: list[RolloutState] = []
+            refresh_seq_staleness(agg.pending_keep, current_train_step)
+            for traj in agg.pending_keep:
+                if getattr(traj, "seq_staleness", 0) >= stale_threshold:
+                    stale_pending.append(traj)
+                else:
+                    kept_pending.append(traj)
+            agg.completed = kept_completed
+            agg.pending_keep = kept_pending
+            self._completed_trajectory_count -= len(stale_completed)
+        # Free outside the lock to avoid stalling other aggregator mutations.
+        if stale_completed or stale_pending:
+            free_rollout_state_list_refs(stale_completed + stale_pending)
+        return len(stale_completed), len(stale_pending)
+
+    async def try_finalize_if_ready(self, prompt_uid: int) -> list[RolloutState] | None:
+        """Re-evaluate the policy on an aggregation; finalise if READY.
+
+        Used by the producer's cross-step resume path: after staleness
+        refresh, an aggregation may already satisfy the policy
+        (``completed >= min_repeat`` with non-zero reward variance). In
+        that case there's no point spawning more trajectories — emit the
+        group now so it lands in the replay buffer.
+
+        STOPPED is *not* handled here because the producer's resume path
+        decides separately whether to drop or re-spawn; this method's
+        contract is "if it can become a buffer-ready group right now,
+        give it to me, otherwise leave the aggregation alone."
+
+        Returns:
+            list[RolloutState] | None: The finalised group, or ``None``
+            when the aggregation is missing or not yet READY.
+        """
+        async with self._lock:
+            agg = self._groups.get(prompt_uid)
+            if agg is None or not agg.completed:
+                return None
+            state = self._policy.on_trajectory_done(agg)
+            if state is not GroupState.READY:
+                return None
+            finalized = agg.completed
+            self._groups.pop(prompt_uid)
+            self._completed_trajectory_count -= len(finalized)
+            return finalized
 
     async def state_dict(self) -> dict:
         """Serialize aggregator state for checkpointing.
@@ -287,6 +465,7 @@ class GroupAggregator:
         """Restore aggregator state. Existing state is replaced."""
         async with self._lock:
             self._groups.clear()
+            self._completed_trajectory_count = 0
             for entry in state.get("groups", []):
                 original_prompt = RolloutState.model_validate(entry["original_prompt"])
                 agg = GroupAggregation(
@@ -303,3 +482,4 @@ class GroupAggregator:
                     created_ts=entry.get("created_ts", time.monotonic()),
                 )
                 self._groups[agg.prompt_uid] = agg
+                self._completed_trajectory_count += len(agg.completed)
