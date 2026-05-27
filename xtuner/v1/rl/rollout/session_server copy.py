@@ -3,7 +3,7 @@ from typing import Any, Optional
 
 import numpy as np
 import ray
-from aiohttp import ClientSession, ClientTimeout, TCPConnector, web
+from aiohttp import ClientSession, ClientTimeout, web
 
 from xtuner.v1.utils import get_logger
 
@@ -46,7 +46,6 @@ class SessionServer:
         self._runner: Optional[web.AppRunner] = None
         self._site: Optional[web.TCPSite] = None
         self._lmdeploy_actor: Optional[ray.actor.ActorHandle] = None
-        self._client_session: ClientSession | None = None
 
     async def on_request(self, req_body: dict) -> dict:
         """Hook for processing/modifying the request before forwarding."""
@@ -58,10 +57,15 @@ class SessionServer:
         if input_ids is None:
             raise web.HTTPBadRequest(text="Missing required field: prompt_ids")
 
-        # 透传 generate-style 请求。这里走 input_ids，避免在 SessionServer 内做 chat template 和 tokenize。
+        # 组装 OpenAI chat completions 请求。这里走 input_ids，避免在 SessionServer 内做 chat template 和 tokenize。
         worker_req = {
-            **{k: v for k, v in req_body.items() if k not in ["messages", "prompt_ids"]},
+            **{k: v for k, v in req_body.items() if k not in ["session_id", "messages", "prompt_ids"]},
+            "messages": [],
             "input_ids": input_ids,
+            "return_token_ids": True,
+            "return_routed_experts": True,
+            "logprobs": True,
+            "include_stop_str_in_output": True,
         }
         return worker_req
 
@@ -159,26 +163,12 @@ class SessionServer:
 
     async def stop(self):
         """Cleanly stop the SessionServer application."""
-        if self._client_session is not None:
-            await self._client_session.close()
-            self._client_session = None
         if self._runner:
             await self._runner.cleanup()
         self._site = None
         self._runner = None
         self._app = None
         get_logger().info("SessionServer stopped.")
-
-    def _get_client_session(self) -> ClientSession:
-        if self._client_session is None or self._client_session.closed:
-            timeout = ClientTimeout(total=None, sock_connect=30)
-            connector = TCPConnector(limit=0, limit_per_host=0, keepalive_timeout=30.0)
-            self._client_session = ClientSession(
-                read_bufsize=self.read_bufsize,
-                timeout=timeout,
-                connector=connector,
-            )
-        return self._client_session
 
     async def _handle_request(self, request: web.Request) -> web.Response:
         try:
@@ -198,15 +188,12 @@ class SessionServer:
     async def _handle_request_impl(self, request: web.Request) -> web.Response:
         """Proxy handler for the worker API."""
 
-        req_path = request.match_info["path"]
-        is_generate_request = req_path.strip("/") == "generate"
-
         # Read the request body
         request_body = await request.read()
         request_data = session_id = messages = None
         orig_logprobs = orig_return_token_ids = orig_return_routed_experts = False
 
-        if request_body and not is_generate_request:
+        if request_body:
             try:
                 request_data = json.loads(request_body)
 
@@ -234,6 +221,7 @@ class SessionServer:
         forward_headers.pop("content-length", None)
 
         # Re-build Path
+        req_path = request.match_info["path"]
         target_url = f"{self.worker_base_url}/{req_path.lstrip('/')}"
         if request.query_string:
             target_url += f"?{request.query_string}"
@@ -272,8 +260,11 @@ class SessionServer:
         # read_bufsize controls StreamReader's line buffer limit; SSE events with large
         # tool_calls/reasoning_content payloads can exceed the 64KB default and trigger
         # "Chunk too big" from readuntil(b"\n").
-        client = self._get_client_session()
-        async with client.request(method=request.method, url=target_url, headers=forward_headers, data=request_body) as resp:
+        timeout = ClientTimeout(total=None, sock_connect=30)
+        async with ClientSession(read_bufsize=self.read_bufsize, timeout=timeout) as client:
+            async with client.request(
+                method=request.method, url=target_url, headers=forward_headers, data=request_body
+            ) as resp:
                 # Setup proper stream vs sync response objects
                 if is_stream:
                     response_chunks = []
@@ -309,7 +300,7 @@ class SessionServer:
                     raw_response = await resp.read()
                     final_raw_response = raw_response
 
-                    if request_data is not None and not is_generate_request:
+                    if request_data is not None:
                         try:
                             clean_data = json.loads(raw_response)
                             if _clean_data(clean_data):
@@ -329,7 +320,7 @@ class SessionServer:
 
         # Apply abstract on_response processing
         response_data = None
-        if request_data and not is_generate_request:
+        if request_data:
             if is_stream:
                 response_data = self._parse_stream_response(raw_response)
             else:

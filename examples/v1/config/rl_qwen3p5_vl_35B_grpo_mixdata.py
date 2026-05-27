@@ -2,7 +2,7 @@ import json
 import os
 
 from transformers import AutoTokenizer
-
+from xtuner.v1.datasets.rl_tokenize_fn import RLTextTokenizeFnConfig
 from xtuner.v1.config import AdamWConfig, FSDPConfig, LRConfig
 from xtuner.v1.data_proto.rl_data import SampleParams
 from xtuner.v1.datasets.config import DataloaderConfig, DatasetConfig
@@ -27,6 +27,7 @@ def _as_list(value):
 
 work_dir = os.environ["WORK_DIR"]
 model_path = os.environ["MODEL_PATH"]
+model_name = os.environ["MODEL_NAME"]
 meta_data_path = os.environ["DATA_PATH"]
 eval_data_path = os.environ.get("EVAL_DATA_PATH", "")
 eval_media_root = os.environ.get("EVAL_MEDIA_ROOT", "")
@@ -60,6 +61,7 @@ resources = AcceleratorResourcesConfig(
 
 # 2. rollout
 rollout_config = RolloutConfig(
+    model_name=model_name,
     fp32_lm_head=True,
     env=experimental_name,
     device=resources.accelerator,
@@ -71,6 +73,7 @@ rollout_config = RolloutConfig(
     context_length=max_response_length + max_prompt_length,
     enable_return_routed_experts=True,
     rollout_max_batch_size_per_instance=512,
+    # extra_rollout_config=dict(lmdeploy_log_level="INFO", lmdeploy_uvicorn_log_level="INFO"),
 )
 
 # sampling params
@@ -106,14 +109,7 @@ for name, data in ds_collections.items():
                     sample_ratio=data.get("sample_ratio", 1.0),
                     class_name="VLMJsonlDataset",
                 ),
-                "tokenize_fn": RLQwen3VLTokenizeFnConfig(
-                    processor_path=model_path,
-                    max_length=max_prompt_length,
-                    system_message=data.get("system_message", None),
-                    chat_template="qwen3.5-vl",
-                    add_generation_prompt=True,
-                    enable_thinking=True,
-                ),
+                "tokenize_fn": RLTextTokenizeFnConfig(max_length=max_prompt_length),
             }
         )
 

@@ -1322,9 +1322,25 @@ class BaseRLTrainer:
 
 
 def add_apiproxy(self):
-    info_dict = ray.get(self.rollout_controller.get_rollout_metadata.remote())
-    model_name = info_dict["rollout_config"].model_name
+    if os.environ.get("XTUNER_ENABLE_ROUTED_APIPROXY", "0") != "1":
+        self.logger.info("skip routedapiproxy registration; agent loop uses direct SessionServer URLs")
+        return
 
+    info_dict = ray.get(self.rollout_controller.get_rollout_metadata.remote())
+    rollout_config = info_dict["rollout_config"]
+    model_name = rollout_config.model_name
+    tokenizer = AutoTokenizer.from_pretrained(
+        rollout_config.tokenizer_path or rollout_config.model_path,
+        trust_remote_code=True,
+    )
+    raw_prompt_ids = tokenizer.apply_chat_template(
+        [{"role": "user", "content": "Reply with exactly: pong"}],
+        tokenize=True,
+        add_generation_prompt=True,
+    )
+    check_prompt_ids = raw_prompt_ids.get("input_ids") if hasattr(raw_prompt_ids, "get") else list(raw_prompt_ids)
+
+    delete_from_routedapiproxy('xtuner_qwen3p5_vl_35b')
     delete_from_routedapiproxy(model_name)
     self.logger.info(f"deleted {model_name} from routedapiproxy")
     self.logger.info("registering to routedapiproxy")
@@ -1337,13 +1353,13 @@ def add_apiproxy(self):
         register_to_routedapiproxy(model_name, worker_session_url)
 
         # test server url
-        recheck_status_orig = check_chat_completions(worker_session_url, model_name)
+        recheck_status_orig = check_chat_completions(worker_session_url, model_name, prompt_ids=check_prompt_ids)
         if not recheck_status_orig:
             raise ValueError(f"check chat completions failed for {worker_session_url}")
 
     # test routed url
     routed_url = "http://s-20260104203038-22bhb.ailab-evalservice.pjh-service.org.cn/v1"
-    recheck_status_routed = check_chat_completions(routed_url, model_name)
+    recheck_status_routed = check_chat_completions(routed_url, model_name, prompt_ids=check_prompt_ids)
     if not recheck_status_routed:
         raise ValueError(f"check chat completions failed for {routed_url}")
     self.logger.info("registered to routedapiproxy")

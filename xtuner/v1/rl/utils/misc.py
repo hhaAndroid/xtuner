@@ -388,7 +388,7 @@ def _post(url: str, payload: dict) -> dict:
         return json.loads(resp.read())
 
 
-def check_chat_completions(base_url: str, model: str) -> bool:
+def check_chat_completions(base_url: str, model: str, prompt_ids: list[int] | None = None) -> bool:
     normalized_base_url = base_url.rstrip("/")
     if normalized_base_url.endswith("/v1"):
         url = f"{normalized_base_url}/chat/completions"
@@ -402,6 +402,8 @@ def check_chat_completions(base_url: str, model: str) -> bool:
         "temperature": 0.0,
         "extra_body": {"spaces_between_special_tokens": False},
     }
+    if prompt_ids is not None:
+        payload["prompt_ids"] = prompt_ids
     print(f"========================POST {url}================================")
     t0 = time.time()
     try:
