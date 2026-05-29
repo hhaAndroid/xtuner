@@ -197,7 +197,8 @@ class LMDeployWorker(RolloutWorker):
         Returns:
             Namespace: A namespace object containing the server configuration.
         """
-        from lmdeploy.messages import PytorchEngineConfig, SpeculativeConfig, TurbomindEngineConfig
+        from lmdeploy import PytorchEngineConfig, TurbomindEngineConfig
+        from lmdeploy.messages import SpeculativeConfig
 
         accelerator_to_device_type = {
             "GPU": "cuda",
