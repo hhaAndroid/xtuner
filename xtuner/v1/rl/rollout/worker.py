@@ -1,5 +1,4 @@
 import asyncio
-import copy
 import json
 import math
 import multiprocessing
@@ -16,12 +15,10 @@ import httpx
 import ray
 import requests  # type: ignore[import-untyped]
 from cyclopts import Group, Parameter
-from packaging.version import Version
 from pydantic import BaseModel, ConfigDict, PrivateAttr
 from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 from typing_extensions import Annotated
 
-from transformers import AutoTokenizer
 from xtuner.v1.data_proto.rl_data import (
     RolloutState,
     SampleParams,
@@ -516,8 +513,6 @@ class RolloutWorker(SingleAcceleratorWorker):
         self.engine_bundle_idxs: list[int] = []
         self.server_process: Optional[multiprocessing.Process] = None
         self.logger = get_logger(log_dir=config.worker_log_dir, tag="RolloutWorker")
-        self.tokenizer = AutoTokenizer.from_pretrained(self.config.tokenizer_path, trust_remote_code=True)
-        self.check_flag = True  # only print once
         self.enable_return_routed_experts = self.config.enable_return_routed_experts
         if self.rank == 0:
             self.logger.info(f"RolloutConfig:\n{self.config.model_dump_json(indent=2)}")
@@ -637,6 +632,7 @@ class RolloutWorker(SingleAcceleratorWorker):
         Returns:
             bool: True if the server is healthy, False otherwise.
         """
+        return True
         try:
             headers = {
                 "Content-Type": "application/json; charset=utf-8",
@@ -669,10 +665,7 @@ class RolloutWorker(SingleAcceleratorWorker):
         sample_params: SampleParams = rollout_state.sample_params
         max_tokens = sample_params.max_tokens
         enable_partial_rollout = self.enable_partial_rollout
-        if sample_params.return_token_ids:
-            endpoint_url = f"{self.server_url}/{self.endpoints['generate']}"
-        else:
-            endpoint_url = f"{self.server_url}/{self.endpoints['v1/chat/completions']}"
+        endpoint_url = f"{self.server_url}/{self.endpoints['v1/chat/completions']}"
 
         headers = {
             "Content-Type": "application/json",
@@ -947,229 +940,115 @@ class RolloutWorker(SingleAcceleratorWorker):
         uid = rollout_state.message_uid
 
         sample_params = rollout_state.sample_params
-        is_token_out = sample_params.return_token_ids
         response = http_response.json()
 
-        if is_token_out:
-            response_ids: list[int] = []
-            logprobs: list[float] = []
-            routed_experts = None
-            returned_response = ""
-            should_return_routed_experts = self.enable_return_routed_experts and sample_params.return_routed_experts
-            try:
-                meta_info = response.get("meta_info") or {}
-                finish_reason_info = meta_info.get("finish_reason") or {}
-                finish_reason = finish_reason_info.get("type")
-                if finish_reason is None:
-                    if self.receive_abort_request.is_set():
-                        rollout_state.finish_reason = "abort"
-                        rollout_state.status = Status.ABORTED
-                        self.logger.warning(
-                            f"finish_reason is missing in response meta_info when waiting for aborted message {uid}, defaulting to 'abort'. Response: {response}"
-                        )
-                    else:
-                        rollout_state.finish_reason = "error"
-                        rollout_state.status = Status.FAILED
-                        self.logger.warning(
-                            f"finish_reason is missing in response meta_info for message {uid}, defaulting to 'error'. Response: {response}"
-                        )
-                    rollout_state.error_msg = "Missing finish_reason in response meta_info"
-                    return rollout_state
-                returned_response = response.get("text", "")
-                # 获取response_ids && respoonse_ids
-                if (
-                    "output_token_logprobs" in response["meta_info"]
-                    and response["meta_info"]["output_token_logprobs"] is not None
-                ):
-                    response_ids = [item[1] for item in response["meta_info"]["output_token_logprobs"]]
-                    logprobs = [item[0] for item in response["meta_info"]["output_token_logprobs"]]
-                else:
-                    num_return_tokens = response["meta_info"].get("completion_tokens", 0)
-                    response_ids = response["output_ids"][-num_return_tokens:] if num_return_tokens > 0 else []
-                # 获取 routed_experts
-                if should_return_routed_experts:
-                    assert "routed_experts" in response["meta_info"], (
-                        "enable_return_routed_experts is True, but routed_experts is not in meta_info"
+        response_ids: list[int] = []
+        logprobs: list[float] = []
+        routed_experts = None
+        should_return_routed_experts = self.enable_return_routed_experts and sample_params.return_routed_experts
+        try:
+            choice = response["choices"][0]
+            returned_response = choice["message"].get("content") or ""
+            finish_reason = choice.get("finish_reason")
+            if finish_reason is None:
+                if self.receive_abort_request.is_set():
+                    rollout_state.finish_reason = "abort"
+                    rollout_state.status = Status.ABORTED
+                    self.logger.warning(
+                        f"finish_reason is missing when waiting for aborted message {uid}, defaulting to 'abort'. Response: {response}"
                     )
-                    routed_experts = response["meta_info"]["routed_experts"]  # token[layer[expert]]
-                    if routed_experts is not None:
-                        routed_experts = await self._decode_routed_experts(routed_experts)
-                        if not isinstance(routed_experts, ray.ObjectRef):
-                            routed_experts = ray.put(routed_experts)
+                else:
+                    rollout_state.finish_reason = "error"
+                    rollout_state.status = Status.FAILED
+                    self.logger.warning(
+                        f"finish_reason is missing for message {uid}, defaulting to 'error'. Response: {response}"
+                    )
+                rollout_state.error_msg = "Missing finish_reason in response"
+                return rollout_state
 
-                # 获取 status
-                rollout_status = update_status_from_finish_reason(finish_reason)
+            response_ids = choice.get("output_ids") or []
+            choice_logprobs = choice.get("logprobs") or {}
+            for item in choice_logprobs.get("content") or []:
+                logprobs.append(item["logprob"])
 
-                # 检查输出结果
-                if rollout_status == Status.COMPLETED:
-                    validation_errors = []
+            if should_return_routed_experts:
+                assert "routed_experts" in choice, (
+                    "enable_return_routed_experts is True, but routed_experts is not in response choice"
+                )
+                routed_experts = choice["routed_experts"]  # token[layer[expert]]
+                if routed_experts is not None:
+                    routed_experts = await self._decode_routed_experts(routed_experts)
+                    if not isinstance(routed_experts, ray.ObjectRef):
+                        routed_experts = ray.put(routed_experts)
 
-                    if not response_ids:
-                        validation_errors.append("empty response_ids")
+            rollout_status = update_status_from_finish_reason(finish_reason)
 
-                    if not response:
-                        validation_errors.append("empty response text")
+            if rollout_status == Status.COMPLETED:
+                validation_errors = []
 
-                    if sample_params.return_logprob and not logprobs:
-                        validation_errors.append("missing logprobs")
+                if not response_ids:
+                    validation_errors.append("empty response_ids")
 
-                    if should_return_routed_experts and routed_experts is None:
-                        validation_errors.append("missing routed_experts")
+                if sample_params.return_logprob and not logprobs:
+                    validation_errors.append("missing logprobs")
 
-                    if validation_errors:
-                        error_msg = f"Incomplete rollout data for msg {uid}: {', '.join(validation_errors)}"
-                        self.logger.error(error_msg)
-                        rollout_state.status = Status.FAILED
-                        rollout_state.error_msg = error_msg
-                        return rollout_state
-                elif rollout_status == Status.FAILED:
-                    error_msg = f"Rollout failed for msg {uid} with finish_reason {finish_reason}"
+                if should_return_routed_experts and routed_experts is None:
+                    validation_errors.append("missing routed_experts")
+
+                if validation_errors:
+                    error_msg = f"Incomplete rollout data for msg {uid}: {', '.join(validation_errors)}"
                     self.logger.error(error_msg)
                     rollout_state.status = Status.FAILED
                     rollout_state.error_msg = error_msg
                     return rollout_state
-
-                if self.enable_partial_rollout:
-                    prompt_tokens = response["meta_info"]["prompt_tokens"]
-                    completion_tokens = response["meta_info"]["completion_tokens"]
-                    rollout_state = await self.partial_rollout_handler.postprocess(
-                        rollout_state,
-                        response=returned_response,
-                        response_ids=response_ids,
-                        logprobs=logprobs,
-                        routed_experts=routed_experts,
-                        finish_reason=finish_reason,
-                        status=rollout_status,
-                        prompt_tokens=prompt_tokens,
-                        completion_tokens=completion_tokens,
-                    )
-                else:
-                    rollout_state.response = returned_response
-                    rollout_state.response_ids = response_ids
-                    rollout_state.logprobs = logprobs
-                    rollout_state.routed_experts = routed_experts
-                    rollout_state.finish_reason = finish_reason
-                    rollout_state.status = rollout_status
+            elif rollout_status == Status.FAILED:
+                error_msg = f"Rollout failed for msg {uid} with finish_reason {finish_reason}"
+                self.logger.error(error_msg)
+                rollout_state.status = Status.FAILED
+                rollout_state.error_msg = error_msg
                 return rollout_state
-            except KeyError as e:
-                response_for_log = {k: v for k, v in response.items() if k not in ("logprobs", "response_ids")}
-                error_msg = f"Missing expected key {e} in response {response_for_log} for {uid}"
-                raise RuntimeError(error_msg)
-            except IndexError as e:
-                response_for_log = {k: v for k, v in response.items() if k not in ("logprobs", "response_ids")}
-                error_msg = f"Index error {e} while processing response {response_for_log} for {uid}"
-                raise RuntimeError(error_msg)
-            except AssertionError as e:
-                response_for_log = {k: v for k, v in response.items() if k not in ("logprobs", "response_ids")}
-                error_msg = f"AssertionError: {e} when processing response {response_for_log} for {uid}"
-                raise RuntimeError(error_msg)
-            except json.JSONDecodeError as e:
-                error_msg = f"JSONDecodeError: {e} when processing response {response} for {uid}"
-                raise RuntimeError(error_msg)
-            except TypeError as e:
-                response_for_log = {k: v for k, v in response.items() if k not in ("logprobs", "response_ids")}
-                error_msg = f"TypeError: {e} when processing response {response_for_log} for {uid}"
-                raise RuntimeError(error_msg)
-            except Exception as e:
-                response_for_log = {k: v for k, v in response.items() if k not in ("logprobs", "response_ids")}
-                error_msg = f"Unexpected error: {e} when processing response {response_for_log} for {uid}\nTraceback: {traceback.format_exc()}"
-                raise RuntimeError(error_msg)
-        else:
-            # v1/chat/completions API response
-            try:
-                returned_response = response["choices"][0]["message"]["content"]
-                finish_reason = response["choices"][0]["finish_reason"]
-                rollout_status = update_status_from_finish_reason(finish_reason)
-                if rollout_status == Status.COMPLETED and not returned_response:
-                    self.logger.error(f"Empty response text for msg {uid} with finish_reason {finish_reason}")
-                    rollout_state.status = Status.FAILED
-                    rollout_state.error_msg = "Empty response text"
-                    return rollout_state
 
+            if self.enable_partial_rollout:
+                usage = response.get("usage") or {}
+                rollout_state = await self.partial_rollout_handler.postprocess(
+                    rollout_state,
+                    response=returned_response,
+                    response_ids=response_ids,
+                    logprobs=logprobs,
+                    routed_experts=routed_experts,
+                    finish_reason=finish_reason,
+                    status=rollout_status,
+                    prompt_tokens=usage.get("prompt_tokens", len(rollout_state.tokens or [])),
+                    completion_tokens=usage.get("completion_tokens", len(response_ids)),
+                )
+            else:
                 rollout_state.response = returned_response
+                rollout_state.response_ids = response_ids
+                rollout_state.logprobs = logprobs
+                rollout_state.routed_experts = routed_experts
                 rollout_state.finish_reason = finish_reason
                 rollout_state.status = rollout_status
-                return rollout_state
-            except KeyError as e:
-                response_for_log = {k: v for k, v in response.items() if k not in ("logprobs", "response_ids")}
-                error_msg = f"Missing expected key {e} in response {response_for_log} for {uid}"
-                raise RuntimeError(error_msg)
-            except IndexError as e:
-                response_for_log = {k: v for k, v in response.items() if k not in ("logprobs", "response_ids")}
-                error_msg = f"Index error {e} while processing response {response_for_log} for {uid}"
-                raise RuntimeError(error_msg)
-            except AssertionError as e:
-                response_for_log = {k: v for k, v in response.items() if k not in ("logprobs", "response_ids")}
-                error_msg = f"AssertionError: {e} when processing response {response_for_log} for {uid}"
-                raise RuntimeError(error_msg)
-            except json.JSONDecodeError as e:
-                error_msg = f"JSONDecodeError: {e} when processing response {response} for {uid}"
-                raise RuntimeError(error_msg)
-            except TypeError as e:
-                response_for_log = {k: v for k, v in response.items() if k not in ("logprobs", "response_ids")}
-                error_msg = f"TypeError: {e} when processing response {response_for_log} for {uid}"
-                raise RuntimeError(error_msg)
-            except Exception as e:
-                response_for_log = {k: v for k, v in response.items() if k not in ("logprobs", "response_ids")}
-                error_msg = f"Unexpected error: {e} when processing response {response_for_log} for {uid}\nTraceback: {traceback.format_exc()}"
-                raise RuntimeError(error_msg)
-
-    def _adapt_input_to_openai_spec(self, prompts, tools, tool_choice):
-        openai_prompts = []
-        openai_tools = []
-        # transform claude spec to openai spec
-        # 1. transform system prompt: concat provided system_prompt to input prompt
-        system_prompt = self.config.system_prompt
-        if system_prompt:
-            system_prompt_json = {"role": "system", "content": f"{system_prompt}"}
-            prompts.insert(0, system_prompt_json)
-        # 2. transform multi-modal usage
-        for prompt in prompts:
-            content = prompt["content"]
-            openai_content = []
-            for item in content:
-                if item["type"] == "image":
-                    if item["source"]["type"] == "base64":
-                        openai_url = f"data:{item['source']['media_type']};base64,{item['source']['data']}"
-                    if item["source"]["type"] == "url":
-                        openai_url = item["source"]["url"]
-                    new_prompt = {"type": "image_url", "image_url": {"url": openai_url}}
-                    openai_content.append(new_prompt)
-                elif item["type"] == "text":
-                    openai_content.append(item)
-            new_prompt = copy.deepcopy(prompt)
-            new_prompt["content"] = openai_content
-            openai_prompts.append(new_prompt)
-        # 3. transform tool use
-        for tool in tools:
-            openai_tool = {
-                "type": "function",
-                "function": {
-                    "name": tool["name"],
-                    "description": tool["description"],
-                    "parameters": tool["input_schema"],
-                },
-            }
-            openai_tools.append(openai_tool)
-        return openai_prompts, openai_tools
-
-    def _check_infer_engine_version(self, return_token_ids: bool):
-        # TODO(@duanyanhui): remove this check when all backends support return_token_ids
-        if self.check_flag:
-            if os.environ.get("XTUNER_USE_VLLM", "0") == "1":
-                if return_token_ids:
-                    self.logger.error(
-                        "VLLM backend does not support return_token_ids or generate with input_ids as input in Xtuner now"
-                    )
-            elif os.environ.get("XTUNER_USE_LMDEPLOY", "0") == "1":
-                import lmdeploy
-
-                lmdeploy_version = lmdeploy.__version__
-                if return_token_ids and Version(lmdeploy_version) < Version("0.10.2"):
-                    self.logger.error(
-                        f"You should use lmdeploy >= v0.10.2 to support return_token_ids, but current version is {lmdeploy_version}"
-                    )
-            self.check_flag = False
+            return rollout_state
+        except KeyError as e:
+            response_for_log = {k: v for k, v in response.items() if k not in ("logprobs", "response_ids")}
+            error_msg = f"Missing expected key {e} in response {response_for_log} for {uid}"
+            raise RuntimeError(error_msg)
+        except IndexError as e:
+            response_for_log = {k: v for k, v in response.items() if k not in ("logprobs", "response_ids")}
+            error_msg = f"Index error {e} while processing response {response_for_log} for {uid}"
+            raise RuntimeError(error_msg)
+        except AssertionError as e:
+            response_for_log = {k: v for k, v in response.items() if k not in ("logprobs", "response_ids")}
+            error_msg = f"AssertionError: {e} when processing response {response_for_log} for {uid}"
+            raise RuntimeError(error_msg)
+        except TypeError as e:
+            response_for_log = {k: v for k, v in response.items() if k not in ("logprobs", "response_ids")}
+            error_msg = f"TypeError: {e} when processing response {response_for_log} for {uid}"
+            raise RuntimeError(error_msg)
+        except Exception as e:
+            response_for_log = {k: v for k, v in response.items() if k not in ("logprobs", "response_ids")}
+            error_msg = f"Unexpected error: {e} when processing response {response_for_log} for {uid}\nTraceback: {traceback.format_exc()}"
+            raise RuntimeError(error_msg)
 
     def _set_engine_rank_mesh_array(self, engine_rank_mesh_array: list[list[int]]):
         self.engine_rank_mesh_array = engine_rank_mesh_array

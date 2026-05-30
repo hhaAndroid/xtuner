@@ -8,7 +8,6 @@ import ray
 import requests
 from ray.util.placement_group import placement_group_table
 
-from transformers import AutoTokenizer
 from xtuner.v1.data_proto.rl_data import RolloutState, SampleParams
 
 from .worker import RolloutConfig, RolloutWorker
@@ -68,13 +67,9 @@ class LMDeployWorker(RolloutWorker):
         self.server_func = run_lmdeploy_server_wrapper
         self.router_func_str = "lmdeploy.serve.proxy.proxy.proxy"
         self.endpoints["health_generate"] = "health"
-        self.endpoints["generate"] = "generate"
         self.endpoints["v1/chat/completions"] = "v1/chat/completions"
-        self.endpoints["output_ids"] = "output_ids"
-        self.endpoints["response"] = "text"
         self.endpoints["sleep"] = "sleep"
         self.endpoints["wake_up"] = "wakeup"
-        self.tokenizer = AutoTokenizer.from_pretrained(self.config.tokenizer_path, trust_remote_code=True)
         self.api_keys = self.config.api_key
         self.model_name = self.config.model_name
         self.enable_return_routed_experts = self.config.enable_return_routed_experts
@@ -96,8 +91,9 @@ class LMDeployWorker(RolloutWorker):
         tools = rollout_state.tools
         tool_choice = rollout_state.tool_choice
         sample_params = rollout_state.sample_params
-        message = rollout_state.message
         input_tokens = rollout_state.tokens
+        assert input_tokens is not None, "LMDeploy rollout requires token ids as input."
+        assert sample_params.return_token_ids, "LMDeploy rollout requires token ids as output."
 
         optional_fields: dict[str, object] = {}
         if tools is not None:
@@ -105,50 +101,24 @@ class LMDeployWorker(RolloutWorker):
         if tool_choice is not None:
             optional_fields["tool_choice"] = tool_choice
 
-        if sample_params.return_token_ids:
-            payload = {"model": self.model_name, **optional_fields}
+        payload = {
+            "model": self.model_name,
+            "messages": [],
+            "input_ids": input_tokens,
+            **optional_fields,
+        }
+        if "image_data" in rollout_state.extra_fields:
+            payload["image_data"] = rollout_state.extra_fields["image_data"]
 
-            if "image_data" in rollout_state.extra_fields:
-                assert input_tokens is not None, "input_tokens is required when image_data is provided."
-                payload["image_data"] = rollout_state.extra_fields["image_data"]
-
-            if input_tokens is not None:
-                payload["input_ids"] = input_tokens
-            else:
-                text_prompt = self.tokenizer.apply_chat_template(message, tokenize=False, add_generation_prompt=True)
-                prompt_token_ids = self.tokenizer(text_prompt, add_special_tokens=False)["input_ids"]
-                payload["input_ids"] = prompt_token_ids
-            lmdeploy_sample_params = self._transform_sample_params(
-                sample_params.model_copy(
-                    update={
-                        "return_routed_experts": (
-                            self.enable_return_routed_experts and sample_params.return_routed_experts
-                        )
-                    }
-                )
+        lmdeploy_sample_params = self._transform_sample_params(
+            sample_params.model_copy(
+                update={
+                    "return_routed_experts": self.enable_return_routed_experts
+                    and sample_params.return_routed_experts
+                }
             )
-            payload.update(lmdeploy_sample_params)
-        else:
-            payload = {
-                "model": self.model_name,
-                "messages": rollout_state.message,
-                **optional_fields,
-            }
-            lmdeploy_sample_params = {
-                "temperature": sample_params.temperature,
-                "top_p": sample_params.top_p,
-                "n": sample_params.n,
-                "stream": sample_params.stream,
-                "max_tokens": sample_params.max_tokens,
-                "repetition_penalty": sample_params.repetition_penalty,
-                "top_k": sample_params.top_k,
-                "skip_special_tokens": sample_params.skip_special_tokens,
-            }
-            if sample_params.stops:
-                lmdeploy_sample_params["stop"] = sample_params.stops
-            if sample_params.min_tokens > 0:
-                lmdeploy_sample_params["min_new_tokens"] = sample_params.min_tokens
-            payload.update(lmdeploy_sample_params)
+        )
+        payload.update(lmdeploy_sample_params)
         return payload
 
     def _sleep(self, level: int = 1):
@@ -383,4 +353,26 @@ class LMDeployWorker(RolloutWorker):
         )
 
     def _transform_sample_params(self, sample_params: SampleParams) -> dict:
-        return sample_params.model_dump(exclude_none=True)
+        lmdeploy_sample_params = {
+            "temperature": sample_params.temperature,
+            "top_p": sample_params.top_p,
+            "n": sample_params.n,
+            "stream": sample_params.stream,
+            "max_tokens": sample_params.max_tokens,
+            "repetition_penalty": sample_params.repetition_penalty,
+            "top_k": sample_params.top_k,
+            "skip_special_tokens": sample_params.skip_special_tokens,
+            "spaces_between_special_tokens": sample_params.spaces_between_special_tokens,
+            "include_stop_str_in_output": sample_params.include_stop_str_in_output,
+            "return_token_ids": sample_params.return_token_ids,
+            "logprobs": sample_params.return_logprob,
+            "top_logprobs": sample_params.top_logprobs,
+            "return_routed_experts": sample_params.return_routed_experts,
+        }
+        if sample_params.stops:
+            lmdeploy_sample_params["stop"] = sample_params.stops
+        if sample_params.min_tokens > 0:
+            lmdeploy_sample_params["min_new_tokens"] = sample_params.min_tokens
+        if sample_params.sampling_seed is not None:
+            lmdeploy_sample_params["seed"] = sample_params.sampling_seed
+        return lmdeploy_sample_params
