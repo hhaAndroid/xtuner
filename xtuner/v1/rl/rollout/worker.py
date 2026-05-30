@@ -967,10 +967,9 @@ class RolloutWorker(SingleAcceleratorWorker):
                 return rollout_state
 
             response_ids = choice.get("output_ids") or []
-            choice_logprobs = choice.get("logprobs") or {}
-            for item in choice_logprobs.get("content") or []:
-                logprobs.append(item["logprob"])
-
+            for logprob, _token_id in choice.get("output_token_logprobs") or []:
+                logprobs.append(logprob)
+ 
             if should_return_routed_experts:
                 assert "routed_experts" in choice, (
                     "enable_return_routed_experts is True, but routed_experts is not in response choice"

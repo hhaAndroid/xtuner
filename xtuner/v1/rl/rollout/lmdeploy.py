@@ -365,8 +365,7 @@ class LMDeployWorker(RolloutWorker):
             "spaces_between_special_tokens": sample_params.spaces_between_special_tokens,
             "include_stop_str_in_output": sample_params.include_stop_str_in_output,
             "return_token_ids": sample_params.return_token_ids,
-            "logprobs": sample_params.return_logprob,
-            "top_logprobs": sample_params.top_logprobs,
+            "return_logprob": sample_params.return_logprob,
             "return_routed_experts": sample_params.return_routed_experts,
         }
         if sample_params.stops:
