@@ -8,8 +8,6 @@ import ray
 import requests
 from ray.util.placement_group import placement_group_table
 
-from xtuner.v1.data_proto.rl_data import RolloutState, SampleParams
-
 from .worker import RolloutConfig, RolloutWorker
 
 
@@ -72,7 +70,6 @@ class LMDeployWorker(RolloutWorker):
         self.endpoints["wake_up"] = "wakeup"
         self.api_keys = self.config.api_key
         self.model_name = self.config.model_name
-        self.enable_return_routed_experts = self.config.enable_return_routed_experts
         self.lmdeploy_actor = None
 
     def offload(self):
@@ -86,40 +83,6 @@ class LMDeployWorker(RolloutWorker):
     def onload_kvcache(self):
         """Onloads the KV cache by waking up the model."""
         return self._wake_up(tags=["kv_cache"])
-
-    def _get_request_payload(self, rollout_state: RolloutState) -> dict:
-        tools = rollout_state.tools
-        tool_choice = rollout_state.tool_choice
-        sample_params = rollout_state.sample_params
-        input_tokens = rollout_state.tokens
-        assert input_tokens is not None, "LMDeploy rollout requires token ids as input."
-        assert sample_params.return_token_ids, "LMDeploy rollout requires token ids as output."
-
-        optional_fields: dict[str, object] = {}
-        if tools is not None:
-            optional_fields["tools"] = tools
-        if tool_choice is not None:
-            optional_fields["tool_choice"] = tool_choice
-
-        payload = {
-            "model": self.model_name,
-            "messages": [],
-            "input_ids": input_tokens,
-            **optional_fields,
-        }
-        if "image_data" in rollout_state.extra_fields:
-            payload["image_data"] = rollout_state.extra_fields["image_data"]
-
-        lmdeploy_sample_params = self._transform_sample_params(
-            sample_params.model_copy(
-                update={
-                    "return_routed_experts": self.enable_return_routed_experts
-                    and sample_params.return_routed_experts
-                }
-            )
-        )
-        payload.update(lmdeploy_sample_params)
-        return payload
 
     def _sleep(self, level: int = 1):
         """Put the model into a sleep state to save resources.
@@ -351,27 +314,3 @@ class LMDeployWorker(RolloutWorker):
             speculative_config=speculative_config,
             **lmdeploy_config_kwargs,
         )
-
-    def _transform_sample_params(self, sample_params: SampleParams) -> dict:
-        lmdeploy_sample_params = {
-            "temperature": sample_params.temperature,
-            "top_p": sample_params.top_p,
-            "n": sample_params.n,
-            "stream": sample_params.stream,
-            "max_tokens": sample_params.max_tokens,
-            "repetition_penalty": sample_params.repetition_penalty,
-            "top_k": sample_params.top_k,
-            "skip_special_tokens": sample_params.skip_special_tokens,
-            "spaces_between_special_tokens": sample_params.spaces_between_special_tokens,
-            "include_stop_str_in_output": sample_params.include_stop_str_in_output,
-            "return_token_ids": sample_params.return_token_ids,
-            "return_logprob": sample_params.return_logprob,
-            "return_routed_experts": sample_params.return_routed_experts,
-        }
-        if sample_params.stops:
-            lmdeploy_sample_params["stop"] = sample_params.stops
-        if sample_params.min_tokens > 0:
-            lmdeploy_sample_params["min_new_tokens"] = sample_params.min_tokens
-        if sample_params.sampling_seed is not None:
-            lmdeploy_sample_params["seed"] = sample_params.sampling_seed
-        return lmdeploy_sample_params

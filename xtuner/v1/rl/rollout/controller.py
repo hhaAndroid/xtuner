@@ -1,27 +1,19 @@
-import asyncio
 import math
 import os
 import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, TypeAlias, TypedDict
-from uuid import uuid4
 
 import ray
 from ray.actor import ActorProxy
 from ray.util.placement_group import PlacementGroup
 
-from transformers import AutoTokenizer
-from xtuner.v1.data_proto.rl_data import RolloutState, Status
 from xtuner.v1.rl.utils import AutoAcceleratorWorkers
-from xtuner.v1.utils import XTUNER_DETERMINISTIC, get_logger
+from xtuner.v1.utils import get_logger
 
-from .parser.factory import build_reasoning_parser, build_tool_call_parser
-from .parser.reasoning_parser import ReasoningParser
-from .parser.tool_parser import ToolCallParser
-from .utils import ROLLOUT_RAY_GET_TIMEOUT, RolloutHealthChecker, SessionRouter
+from .utils import ROLLOUT_RAY_GET_TIMEOUT, RolloutHealthChecker
 from .worker import (
-    ROLLOUT_CONCURRENCY_GROUP_GENERATE,
     RolloutConfig,
     RolloutWorker,
 )
@@ -99,18 +91,12 @@ class RolloutController:
         self.engine_rank_mesh_array, self.worker_server_urls_map, self.rank2info = self._init_workers(placement_group)
         self.num_active_workers = len(self.rank2info)
         self.worker_info_lock = threading.RLock()
-        # The timeout for the environment to wait for the rollout controller's response.
-        # This should be longer than the controller's internal timeout (`rollout_timeout`)
-        # to account for potential queuing delays and other overheads.
-        self.timeout_multiplier = 2.0
-        self.router = SessionRouter(self.rank2info, worker_infos_lock=self.worker_info_lock)
         self.health_checker = RolloutHealthChecker(
             config=self.config,
             workers_info=self.rank2info,
             worker_infos_lock=self.worker_info_lock,
         )
         self.health_checker.start()
-        self._tool_call_parser, self._reasoning_parser = self._build_output_parsers()
         self._gateway_url: str | None = None
 
     def start_gateway(self, config: "GatewayConfig") -> str | None:
@@ -164,20 +150,6 @@ class RolloutController:
         }
         return rollout_metadata
 
-    def _build_output_parsers(self) -> tuple[ToolCallParser | None, ReasoningParser | None]:
-        tool_call_parser = None
-        reasoning_parser = None
-
-        if self.config.tool_call_parser != "none":
-            tool_call_parser = build_tool_call_parser(self.config.tool_call_parser)
-
-        if self.config.reasoning_parser != "none":
-            tokenizer_path = self.config.tokenizer_path or self.config.model_path
-            tokenizer = AutoTokenizer.from_pretrained(tokenizer_path, trust_remote_code=True)
-            reasoning_parser = build_reasoning_parser(self.config.reasoning_parser, tokenizer)
-
-        return tool_call_parser, reasoning_parser
-
     def get_ready_status(self) -> tuple[bool, dict[str, Any]]:
         with self.worker_info_lock:
             active_workers = sum(1 for info in self.rank2info.values() if info.is_active)
@@ -197,62 +169,6 @@ class RolloutController:
         with self.worker_info_lock:
             active_workers = sum(1 for info in self.rank2info.values() if info.is_active)
         return active_workers * concurrency_per_worker
-
-    @ray.method(concurrency_group=ROLLOUT_CONCURRENCY_GROUP_GENERATE)
-    async def generate(self, rollout_state: RolloutState) -> RolloutState:
-        if XTUNER_DETERMINISTIC:
-            sample_params = rollout_state.sample_params.model_copy(deep=True)
-            sample_params.sampling_seed = self.config.random_seed + (
-                (rollout_state.uid or 0) - (rollout_state.message_uid or 0)
-            )
-            rollout_state.sample_params = sample_params
-
-        session_id = rollout_state.session_uid if rollout_state.session_uid is not None else uuid4().int
-        worker = await self.router.get_worker(session_id)
-        if worker is None:
-            rollout_state.status = Status.FAILED
-            rollout_state.error_msg = "No active rollout worker available."
-            return rollout_state
-
-        response_ref = worker.generate.remote(rollout_state=rollout_state)  # type: ignore[attr-defined]
-        try:
-            response_rollout_state = await asyncio.wait_for(
-                response_ref,
-                timeout=self.config.rollout_timeout * self.timeout_multiplier,
-            )
-            self._apply_output_parsers(response_rollout_state)
-            return response_rollout_state
-        except asyncio.TimeoutError:
-            self.logger.error(
-                f"RolloutController.generate timed out waiting for worker: session_id={session_id}, "
-                f"timeout={self.config.rollout_timeout * self.timeout_multiplier}"
-            )
-            rollout_state.status = Status.FAILED
-            rollout_state.error_msg = (
-                f"Rollout request timed out after {self.config.rollout_timeout * self.timeout_multiplier} seconds."
-            )
-            return rollout_state
-
-    def _apply_output_parsers(self, rollout_state: RolloutState) -> None:
-        """Apply tool-call and reasoning parsers to the rollout state in-
-        place."""
-        if self._tool_call_parser is not None:
-            parsed = self._tool_call_parser.parse(rollout_state)
-            rollout_state.tool_calls = parsed.tool_calls
-            rollout_state.response = parsed.remaining_text or None
-        if self._reasoning_parser is not None:
-            parsed_reasoning = self._reasoning_parser.parse(rollout_state)
-            rollout_state.response = parsed_reasoning.remaining_text
-            if parsed_reasoning.reasoning_text:
-                rollout_state.extra_fields["reasoning_text"] = parsed_reasoning.reasoning_text
-            else:
-                rollout_state.extra_fields.pop("reasoning_text", None)
-
-    def set_enable_partial_rollout(self, enable: bool) -> None:
-        """Propagate enable_partial_rollout flag to all active workers."""
-        with self.worker_info_lock:
-            active_actors = [info.actor for info in self.rank2info.values() if info.is_active]
-            ray.get([actor.set_enable_partial_rollout.remote(enable) for actor in active_actors])  # type: ignore[attr-defined]
 
     def pause_generation(self):
         self.health_checker.pause()
@@ -399,15 +315,7 @@ class RolloutController:
         assert self.config.rollout_max_batch_size_per_instance is not None, (
             "rollout_max_batch_size_per_instance must be set before building RolloutWorker."
         )
-        worker_generate_max_concurrency = max(
-            1000,  # Ray async actor default max_concurrency.
-            math.ceil(self.config.rollout_max_batch_size_per_instance * self.config.allow_over_concurrency_ratio),
-        )
-        return ray.remote(
-            concurrency_groups={
-                ROLLOUT_CONCURRENCY_GROUP_GENERATE: worker_generate_max_concurrency,
-            },
-        )(worker_cls)
+        return ray.remote(worker_cls)
 
     def _get_rank_by_actor(self, actor: RolloutWorker) -> Optional[int]:
         """Get rank by actor object.

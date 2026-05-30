@@ -9,7 +9,7 @@ from ray.actor import ActorHandle
 
 from transformers import AutoTokenizer, PreTrainedTokenizer, PreTrainedTokenizerFast
 from xtuner.v1.data_proto.rl_data import RolloutState, RolloutToolCall, SampleParams, Status
-from xtuner.v1.rl.rollout.parser.factory import build_tool_call_parser
+# from xtuner.v1.rl.rollout.parser.factory import build_tool_call_parser
 from xtuner.v1.rl.rollout.worker import RolloutConfig
 
 from ..adapters.base import coerce_content_to_text

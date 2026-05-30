@@ -1,15 +1,12 @@
-import asyncio
 import json
-import math
 import multiprocessing
 import os
 import socket
 import threading
 import time
-import traceback
 from abc import abstractmethod
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, List, Literal, Optional, Union, cast
+from typing import TYPE_CHECKING, Any, Callable, List, Literal, Optional, Union
 
 import httpx
 import ray
@@ -19,26 +16,14 @@ from pydantic import BaseModel, ConfigDict, PrivateAttr
 from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 from typing_extensions import Annotated
 
-from xtuner.v1.data_proto.rl_data import (
-    RolloutState,
-    SampleParams,
-    Status,
-    reset_rollout_response,
-    update_status_from_finish_reason,
-)
 from xtuner.v1.rl.utils import (
     AutoAcceleratorWorkers,
     CPUResourcesConfig,
     SingleAcceleratorWorker,
-    cancel_and_drain,
     find_master_addr_and_port,
-    get_eos_token,
     register_cpu_resources,
 )
 from xtuner.v1.utils import get_logger
-from xtuner.v1.utils.httpx_utils import HttpRequestErrorType, HttpRequestResult
-
-from .utils import PartialRolloutHandler
 
 
 if TYPE_CHECKING:
@@ -46,7 +31,6 @@ if TYPE_CHECKING:
 
 
 infer_group = Group("inference", help="Inference worker configuration.")
-ROLLOUT_CONCURRENCY_GROUP_GENERATE = "generate"
 
 
 class RolloutConfig(BaseModel):
@@ -371,17 +355,6 @@ class RolloutConfig(BaseModel):
         )
         return active_servers_count, nodes_per_engine
 
-    def get_controller_generate_concurrency(self, placement_group: "PlacementGroup") -> int:
-        active_worker_count, _ = self.get_active_servers_count(len(placement_group.bundle_specs))
-        assert self.rollout_max_batch_size_per_instance is not None, (
-            "rollout_max_batch_size_per_instance must be set before building RolloutController."
-        )
-        concurrency_per_worker = math.ceil(
-            self.rollout_max_batch_size_per_instance * self.allow_over_concurrency_ratio
-        )
-        generate_max_concurrency = active_worker_count * concurrency_per_worker
-        return generate_max_concurrency
-
     def model_post_init(self, __context: Any) -> None:
         if self.model_name is None:
             model_name_from_config = None
@@ -452,25 +425,14 @@ class RolloutConfig(BaseModel):
             name="rollout_controller",
             cpu_resources=CPUResourcesConfig(num_workers=num_workers),
         )
-        generate_max_concurrency = self.get_controller_generate_concurrency(placement_group)
-        get_logger().info(f"Calculated RolloutController generate concurrency: {generate_max_concurrency}")
-        return (
-            ray.remote(
-                concurrency_groups={
-                    ROLLOUT_CONCURRENCY_GROUP_GENERATE: generate_max_concurrency,
-                },
-            )(RolloutController)
-            .options(num_cpus=num_workers)
-            .remote(self, placement_group)
-        )
+        return ray.remote(RolloutController).options(num_cpus=num_workers).remote(self, placement_group)
 
 
 class RolloutWorker(SingleAcceleratorWorker):
     """Base class for a rollout worker that runs an inference server.
 
-    This class manages the lifecycle of a distributed inference server, including initialization, launching, and
-    handling generation requests. It is designed to be subclassed for specific inference backends like LMDeploy, vLLM
-    or SGLang.
+    This class manages the lifecycle of a distributed inference server, including initialization, launching, pausing,
+    and shutdown. SingleTurnAgentLoop sends generation HTTP requests directly to the server URL.
     """
 
     def __init__(
@@ -506,9 +468,6 @@ class RolloutWorker(SingleAcceleratorWorker):
         assert config.rollout_max_batch_size_per_instance, (
             "rollout_max_batch_size_per_instance must be set in RolloutConfig"
         )
-        http_concurrency = math.ceil(config.rollout_max_batch_size_per_instance * config.allow_over_concurrency_ratio)
-        limits = httpx.Limits(max_connections=http_concurrency, max_keepalive_connections=100)
-        self.client = httpx.AsyncClient(limits=limits, timeout=self.config.rollout_timeout)
         self.server_task = None
         self.engine_bundle_idxs: list[int] = []
         self.server_process: Optional[multiprocessing.Process] = None
@@ -516,20 +475,12 @@ class RolloutWorker(SingleAcceleratorWorker):
         self.enable_return_routed_experts = self.config.enable_return_routed_experts
         if self.rank == 0:
             self.logger.info(f"RolloutConfig:\n{self.config.model_dump_json(indent=2)}")
-        eos_token = get_eos_token(self.config.model_path)
-        self.logger.info(f"Using eos_token: {eos_token} for model at {self.config.model_path}")
-        self.eos_token: List[int] = [eos_token] if isinstance(eos_token, int) else eos_token
         self.receive_abort_request = threading.Event()
         # After an abort signal, wait this long for an in-flight rollout request to return before cancelling the
         # client-side request task.
         self.abort_timeout = 10.0
         self.dist_init_addr: str = ""
         self.serverl_url: str = ""
-        self.partial_rollout_handler = PartialRolloutHandler()
-        self.enable_partial_rollout: bool = False
-
-    def set_enable_partial_rollout(self, enable: bool) -> None:
-        self.enable_partial_rollout = enable
 
     def init(self, dist_init_addr: str) -> tuple[int, str]:
         """Initialize the worker and launch the server.
@@ -618,10 +569,6 @@ class RolloutWorker(SingleAcceleratorWorker):
         except Exception:
             return False
 
-    async def _wait_abort_request(self) -> None:
-        while not self.receive_abort_request.is_set():
-            await asyncio.sleep(1)
-
     def continue_generation(self):
         """Resume the worker's generation process."""
         self.receive_abort_request.clear()
@@ -645,148 +592,6 @@ class RolloutWorker(SingleAcceleratorWorker):
         except requests.RequestException as e:
             self.logger.error(f"Health check failed for server {self.server_url}: {e}")
             return False
-
-    async def _decode_routed_experts(self, routed_experts: Any) -> Any:
-        return routed_experts
-
-    @ray.method(concurrency_group=ROLLOUT_CONCURRENCY_GROUP_GENERATE)
-    async def generate(self, rollout_state: RolloutState) -> RolloutState:
-        # TODO(@duanyanhui):
-        # 1. support claude format input
-        # 2. 需要看下新的输入输出(RolloutState)怎么适配PartialRollout的逻辑，先跑起来
-        # 3. 对于流式返回的response先删掉，目前还用不上，等需要的时候再加上
-
-        if self.receive_abort_request.is_set():
-            rollout_state.finish_reason = "abort"
-            rollout_state.status = Status.ABORTED
-            return rollout_state
-
-        uid = rollout_state.uid
-        sample_params: SampleParams = rollout_state.sample_params
-        max_tokens = sample_params.max_tokens
-        enable_partial_rollout = self.enable_partial_rollout
-        endpoint_url = f"{self.server_url}/{self.endpoints['v1/chat/completions']}"
-
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {self.config.api_key}",
-        }
-
-        if enable_partial_rollout:
-            rollout_state = self.partial_rollout_handler.preprocess(rollout_state, max_tokens)
-        elif rollout_state.status == Status.ABORTED:
-            # ABORTED samples can be replayed; without partial rollout, rerun from the original prompt.
-            rollout_state = reset_rollout_response(rollout_state)
-            rollout_state.sample_params = rollout_state.sample_params.model_copy(update={"max_tokens": max_tokens})
-            rollout_state.status = Status.INIT
-        payload = self._get_request_payload(rollout_state)
-        max_retries = self.config.max_retry_per_sample
-
-        # 早退逻辑 1：检查是否已被标记为完成
-        if rollout_state.status == Status.COMPLETED:
-            self.logger.debug(f"Request {uid} is already marked as COMPLETED, skipping generation.")
-            return rollout_state
-
-        # 早退逻辑 2：检测输入是否还需要 generation (安全获取变量)
-        input_ids = payload.get("input_ids", [])
-        max_tokens = cast(int, payload.get("max_tokens"))
-
-        last_id = input_ids[-1] if len(input_ids) > 0 else "None"
-        is_max_tokens_zero = max_tokens is not None and max_tokens <= 0
-        is_eos_reached = len(input_ids) > 0 and input_ids[-1] in self.eos_token
-
-        if is_max_tokens_zero or is_eos_reached:
-            self.logger.debug(
-                f"No generation needed for request {uid}: max_tokens={max_tokens} or last input_id={last_id} is in eos_token."
-            )
-            finish_reason = "stop" if is_eos_reached else "length"
-            # 对于是否开 partial rollout 的情况都直接标记为完成并返回，因为本轮 rollout 未开始，也不需要拼接
-            rollout_state.finish_reason = finish_reason
-            rollout_state.status = Status.COMPLETED
-            return rollout_state
-
-        for attempt in range(max_retries + 1):
-            is_last_attempt = attempt == max_retries
-            http_result = await self._safe_post_request(endpoint_url, headers=headers, payload=payload)
-
-            # Case 1: HTTP Request is Successful
-            if http_result.response:
-                # Case 1.1: Valid rollout response
-                rollout_state = await self._safe_handle_response(rollout_state, http_result.response)
-                if self.receive_abort_request.is_set():
-                    rollout_state.finish_reason = "abort"
-                    rollout_state.status = Status.ABORTED
-                    return rollout_state
-                if rollout_state.status in [Status.COMPLETED, Status.ABORTED]:
-                    return rollout_state
-
-                if is_last_attempt:
-                    # Case 1.2: Invalid rollout response and no retries left, so we return FAILED
-                    self.logger.warning(
-                        f"Invalid rollout response for request {uid} after {max_retries} attempts, marking as FAILED."
-                    )
-                    rollout_state.status = Status.FAILED
-                    rollout_state.error_msg = f"Invalid rollout response after {max_retries} attempts."
-                    return rollout_state
-
-                # Case 1.3: Invalid rollout response but we have retries left
-                self.logger.warning(
-                    f"Invalid rollout response for request {uid}, retrying {attempt + 1}/{max_retries}."
-                )
-                await asyncio.sleep(0.1)
-                continue
-
-            # Case 2: Error occurred during HTTP Request
-            if http_result.error_type == HttpRequestErrorType.REQUEST_ABORTED:
-                # Case 2.1: The request was aborted due to an signal set by `receive_abort_request`
-                rollout_state.finish_reason = "abort"
-                rollout_state.status = update_status_from_finish_reason("abort")
-                return rollout_state
-
-            if http_result.is_client_error:
-                # Case 2.2: A non-retryable client error occurred (such as 4xx HTTP status)
-                self.logger.warning(
-                    f"rollout request {uid} to {http_result.url} was skipped due to client error {http_result.error_type} with {http_result.error_msg}"
-                )
-                rollout_state.error_msg = (
-                    f"Client error {http_result.error_type} with message: {http_result.error_msg}"
-                )
-                rollout_state.status = Status.FAILED
-                return rollout_state
-
-            if http_result.is_server_error:
-                # Case 2.3: A non-retryable server error occurred (such as 5xx HTTP status)
-                self.logger.warning(
-                    f"rollout request {uid} to {http_result.url} failed due to server error {http_result.error_type} with {http_result.error_msg}"
-                )
-                rollout_state.error_msg = (
-                    f"Server error {http_result.error_type} with message: {http_result.error_msg}"
-                )
-                rollout_state.status = Status.FAILED
-                return rollout_state
-
-            # Case 3: Retryable error occurred during HTTP Request
-            if http_result.is_retryable:
-                if is_last_attempt:
-                    self.logger.warning(
-                        f"rollout request {uid} to {http_result.url} failed after {max_retries} attempts due to retryable error {http_result.error_type} with {http_result.error_msg}"
-                    )
-                    rollout_state.error_msg = f"Request failed after {max_retries} attempts due to retryable error {http_result.error_type} with message: {http_result.error_msg}"
-                    rollout_state.status = Status.FAILED
-                    return rollout_state
-
-                self.logger.warning(
-                    f"rollout request {uid} to {http_result.url} failed due to retryable error {http_result.error_type} with {http_result.error_msg}, retrying {attempt + 1}/{max_retries}."
-                )
-                await asyncio.sleep(0.1)
-                continue
-
-            # Case 4: Unknown error occurred during HTTP Request and stop the rollout
-            if http_result.is_unknown_error:
-                raise RuntimeError(
-                    f"Unexpected error during rollout request {uid} to {http_result.url}: {http_result.exception}"
-                )
-        return rollout_state
 
     def _launch_server(self):
         """Launch the inference server as a separate process or Ray task.
@@ -891,164 +696,6 @@ class RolloutWorker(SingleAcceleratorWorker):
             ray.cancel(self.server_task)
             raise TimeoutError("Server failed to start within the timeout period.")
 
-    async def _safe_post_request(self, url, headers, payload) -> HttpRequestResult:
-        send_task = None
-        abort_task = None
-
-        try:
-            if self.receive_abort_request.is_set():
-                return HttpRequestResult(error_type=HttpRequestErrorType.REQUEST_ABORTED, url=url, payload=payload)
-            req = self.client.build_request(
-                "POST",
-                url,
-                headers=headers,
-                json=payload,
-            )
-            send_task = asyncio.create_task(self.client.send(req))
-            abort_task = asyncio.create_task(self._wait_abort_request())
-            done, _ = await asyncio.wait(
-                {send_task, abort_task},
-                return_when=asyncio.FIRST_COMPLETED,
-            )
-            if send_task in done:
-                r = await send_task
-            else:
-                try:
-                    r = await asyncio.wait_for(asyncio.shield(send_task), timeout=self.abort_timeout)
-                except asyncio.TimeoutError:
-                    await cancel_and_drain([send_task])
-                    return HttpRequestResult(
-                        error_type=HttpRequestErrorType.REQUEST_ABORTED,
-                        url=url,
-                        payload=payload,
-                    )
-            r.raise_for_status()
-            return HttpRequestResult(response=r)
-
-        except asyncio.CancelledError:
-            await cancel_and_drain([send_task, abort_task])
-            self.receive_abort_request.set()
-            return HttpRequestResult(error_type=HttpRequestErrorType.REQUEST_ABORTED, url=url, payload=payload)
-        except Exception as e:
-            error_type = HttpRequestErrorType.from_exception(e)
-            result = HttpRequestResult(error_type=error_type, exception=e, url=url, payload=payload)
-            return result
-        finally:
-            await cancel_and_drain([abort_task])
-
-    async def _safe_handle_response(self, rollout_state: RolloutState, http_response: httpx.Response) -> RolloutState:
-        uid = rollout_state.message_uid
-
-        sample_params = rollout_state.sample_params
-        response = http_response.json()
-
-        response_ids: list[int] = []
-        logprobs: list[float] = []
-        routed_experts = None
-        should_return_routed_experts = self.enable_return_routed_experts and sample_params.return_routed_experts
-        try:
-            choice = response["choices"][0]
-            returned_response = choice["message"].get("content") or ""
-            finish_reason = choice.get("finish_reason")
-            if finish_reason is None:
-                if self.receive_abort_request.is_set():
-                    rollout_state.finish_reason = "abort"
-                    rollout_state.status = Status.ABORTED
-                    self.logger.warning(
-                        f"finish_reason is missing when waiting for aborted message {uid}, defaulting to 'abort'. Response: {response}"
-                    )
-                else:
-                    rollout_state.finish_reason = "error"
-                    rollout_state.status = Status.FAILED
-                    self.logger.warning(
-                        f"finish_reason is missing for message {uid}, defaulting to 'error'. Response: {response}"
-                    )
-                rollout_state.error_msg = "Missing finish_reason in response"
-                return rollout_state
-
-            response_ids = choice.get("output_ids") or []
-            for logprob, _token_id in choice.get("output_token_logprobs") or []:
-                logprobs.append(logprob)
- 
-            if should_return_routed_experts:
-                assert "routed_experts" in choice, (
-                    "enable_return_routed_experts is True, but routed_experts is not in response choice"
-                )
-                routed_experts = choice["routed_experts"]  # token[layer[expert]]
-                if routed_experts is not None:
-                    routed_experts = await self._decode_routed_experts(routed_experts)
-                    if not isinstance(routed_experts, ray.ObjectRef):
-                        routed_experts = ray.put(routed_experts)
-
-            rollout_status = update_status_from_finish_reason(finish_reason)
-
-            if rollout_status == Status.COMPLETED:
-                validation_errors = []
-
-                if not response_ids:
-                    validation_errors.append("empty response_ids")
-
-                if sample_params.return_logprob and not logprobs:
-                    validation_errors.append("missing logprobs")
-
-                if should_return_routed_experts and routed_experts is None:
-                    validation_errors.append("missing routed_experts")
-
-                if validation_errors:
-                    error_msg = f"Incomplete rollout data for msg {uid}: {', '.join(validation_errors)}"
-                    self.logger.error(error_msg)
-                    rollout_state.status = Status.FAILED
-                    rollout_state.error_msg = error_msg
-                    return rollout_state
-            elif rollout_status == Status.FAILED:
-                error_msg = f"Rollout failed for msg {uid} with finish_reason {finish_reason}"
-                self.logger.error(error_msg)
-                rollout_state.status = Status.FAILED
-                rollout_state.error_msg = error_msg
-                return rollout_state
-
-            if self.enable_partial_rollout:
-                usage = response.get("usage") or {}
-                rollout_state = await self.partial_rollout_handler.postprocess(
-                    rollout_state,
-                    response=returned_response,
-                    response_ids=response_ids,
-                    logprobs=logprobs,
-                    routed_experts=routed_experts,
-                    finish_reason=finish_reason,
-                    status=rollout_status,
-                    prompt_tokens=usage.get("prompt_tokens", len(rollout_state.tokens or [])),
-                    completion_tokens=usage.get("completion_tokens", len(response_ids)),
-                )
-            else:
-                rollout_state.response = returned_response
-                rollout_state.response_ids = response_ids
-                rollout_state.logprobs = logprobs
-                rollout_state.routed_experts = routed_experts
-                rollout_state.finish_reason = finish_reason
-                rollout_state.status = rollout_status
-            return rollout_state
-        except KeyError as e:
-            response_for_log = {k: v for k, v in response.items() if k not in ("logprobs", "response_ids")}
-            error_msg = f"Missing expected key {e} in response {response_for_log} for {uid}"
-            raise RuntimeError(error_msg)
-        except IndexError as e:
-            response_for_log = {k: v for k, v in response.items() if k not in ("logprobs", "response_ids")}
-            error_msg = f"Index error {e} while processing response {response_for_log} for {uid}"
-            raise RuntimeError(error_msg)
-        except AssertionError as e:
-            response_for_log = {k: v for k, v in response.items() if k not in ("logprobs", "response_ids")}
-            error_msg = f"AssertionError: {e} when processing response {response_for_log} for {uid}"
-            raise RuntimeError(error_msg)
-        except TypeError as e:
-            response_for_log = {k: v for k, v in response.items() if k not in ("logprobs", "response_ids")}
-            error_msg = f"TypeError: {e} when processing response {response_for_log} for {uid}"
-            raise RuntimeError(error_msg)
-        except Exception as e:
-            response_for_log = {k: v for k, v in response.items() if k not in ("logprobs", "response_ids")}
-            error_msg = f"Unexpected error: {e} when processing response {response_for_log} for {uid}\nTraceback: {traceback.format_exc()}"
-            raise RuntimeError(error_msg)
-
     def _set_engine_rank_mesh_array(self, engine_rank_mesh_array: list[list[int]]):
         self.engine_rank_mesh_array = engine_rank_mesh_array
 
@@ -1064,23 +711,7 @@ class RolloutWorker(SingleAcceleratorWorker):
         self.engine_bundle_idxs = engine_bundle_idxs
 
     @abstractmethod
-    def _get_request_payload(self, rollout_state: RolloutState) -> dict:
-        """Abstract method to create a generation request.
-
-        Must be implemented by subclasses.
-        """
-        raise NotImplementedError("_create_request must be implemented in subclass")
-
-    @abstractmethod
     def _transform_rollout_config_to_server_configs(self):
-        """Abstract method to transform rollout config to server configs.
-
-        Must be implemented by subclasses.
-        """
-        raise NotImplementedError("_transform_rollout_config_to_server_configs must be implemented in subclass")
-
-    @abstractmethod
-    def _transform_sample_params(self, sample_params: SampleParams) -> dict:
         """Abstract method to transform rollout config to server configs.
 
         Must be implemented by subclasses.
