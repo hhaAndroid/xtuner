@@ -1,10 +1,8 @@
 from .agent_loop import (
     AgentLoop,
-    AgentLoopActor,
+    AgentLoopActorProxy,
     AgentLoopConfig,
     AgentLoopSpec,
-    RayAgentLoop,
-    RayAgentLoopProxy,
     RouterAgentLoop,
     get_agent_loop_rollout_ctl,
 )
@@ -16,10 +14,8 @@ __all__ = [
     "SingleTurnAgentLoopConfig",
     "AgentLoop",
     "AgentLoopSpec",
-    "AgentLoopActor",
+    "AgentLoopActorProxy",
     "RouterAgentLoop",
-    "RayAgentLoop",
-    "RayAgentLoopProxy",
     "SingleTurnAgentLoop",
     "get_agent_loop_rollout_ctl",
 ]

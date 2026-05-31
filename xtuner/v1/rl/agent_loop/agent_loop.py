@@ -1,29 +1,23 @@
 from __future__ import annotations
 
 import asyncio
-import math
 from abc import ABC, abstractmethod
-from typing import TypeAlias, cast
+from typing import Any, TypeAlias
 
 import ray
 from pydantic import BaseModel, ConfigDict
 from ray.actor import ActorClass, ActorProxy
-from ray.util.placement_group import PlacementGroup
+from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 
 from xtuner.v1.data_proto.rl_data import RolloutState, SampleParams
 from xtuner.v1.rl.judger import Judger
 from xtuner.v1.rl.rollout import RolloutController
-from xtuner.v1.rl.utils import (
-    CPUActorLauncher,
-    CPUResourcesConfig,
-    create_task,
-    register_cpu_resources,
-)
-from xtuner.v1.utils import get_logger, ray_method
+from xtuner.v1.rl.utils import CPUResourcesConfig, create_task
+from xtuner.v1.utils import get_logger
 from xtuner.v1.utils.processing_utils import load_processor, load_tokenizer
 
 
-AGENT_LOOP_CONCURRENCY_GROUP_GENERATE = "generate"
+AGENT_LOOP_ACTOR_MAX_CONCURRENCY = 1000000
 DEFAULT_JUDGER_CANCEL_TIMEOUT_S = 5.0
 
 
@@ -32,149 +26,102 @@ class AgentLoopConfig(ABC, BaseModel):
     hf_checkpoint: str
     sample_params: SampleParams
     cpu_resources: CPUResourcesConfig | None = None
+    bound_worker_url: str | None = None
 
-    def build(self, rollout_controller, judger: Judger | None = None, logger=None) -> AgentLoopSpec:
-        if self.cpu_resources is None:
-            return self.build_local(
-                rollout_controller=rollout_controller,
-                judger=judger,
-                logger=logger,
+    def build(self, rollout_controller, judger: Judger | None = None, logger=None) -> "RouterAgentLoop":
+        metadata = _get_agent_loop_metadata(rollout_controller)
+        worker_entries = _get_active_worker_entries(metadata)
+        if not worker_entries:
+            raise RuntimeError(f"No active rollout worker URL available for {self.__class__.__name__} actors.")
+
+        placement_group = metadata["placement_group"]
+        workers = []
+        for entry in worker_entries:
+            actor_config = self.model_copy(update={"bound_worker_url": entry["url"]})
+            ray_actor_cls = actor_config.get_ray_actor_cls()
+            scheduling_strategy = PlacementGroupSchedulingStrategy(
+                placement_group=placement_group,
+                placement_group_bundle_index=entry["head_bundle_idx"],
+                placement_group_capture_child_tasks=True,
+            )
+            workers.append(
+                ray_actor_cls.options(
+                    num_cpus=1,
+                    scheduling_strategy=scheduling_strategy,
+                ).remote(config=actor_config, rollout_ctl=rollout_controller, judger=judger)
             )
 
-        get_generate_concurrency = rollout_controller.get_generate_concurrency
-        if hasattr(get_generate_concurrency, "remote"):
-            total_generate_concurrency = ray.get(get_generate_concurrency.remote())
-        else:
-            total_generate_concurrency = get_generate_concurrency()
-        concurrency = max(1, math.ceil(total_generate_concurrency / self.cpu_resources.num_workers))
-
-        register_cpu_resources(
-            name=f"agent_loop:{self.__class__.__name__}",
-            cpu_resources=self.cpu_resources,
-        )
-
-        if self.cpu_resources.num_workers > 1:
-            return self._build_router(
-                rollout_controller=rollout_controller,
-                cpu_resources=self.cpu_resources,
-                concurrency=concurrency,
-                judger=judger,
-                logger=logger,
+        if logger is not None:
+            logger.info(
+                f"{self.__class__.__name__} auto actor mode: "
+                f"active_workers={len(workers)}, urls={[entry['url'] for entry in worker_entries]}, "
+                f"num_cpus_per_actor=1, max_concurrency={AGENT_LOOP_ACTOR_MAX_CONCURRENCY}"
             )
-        return self._build_ray_actor(
-            rollout_controller=rollout_controller,
-            cpu_resources=self.cpu_resources,
-            concurrency=concurrency,
-            judger=judger,
-            logger=logger,
-        )
+        return RouterAgentLoop(workers=workers, rollout_ctl=rollout_controller)
+
+    def get_ray_actor_cls(self) -> ActorClass:
+        return get_ray_agent_loop_cls(self.get_agent_loop_cls())
 
     @abstractmethod
-    def build_local(
-        self,
-        rollout_controller,
-        judger: Judger | None = None,
-        logger=None,
-    ) -> AgentLoop: ...
+    def get_agent_loop_cls(self) -> type["AgentLoop"]: ...
 
-    def _build_ray_actor(
-        self,
-        rollout_controller: RolloutController,
-        cpu_resources: CPUResourcesConfig,
-        concurrency: int,
-        pg: PlacementGroup | None = None,
-        judger: Judger | None = None,
-        logger=None,
-    ) -> RayAgentLoopProxy:
-        ray_agent_loop = ray.remote(
-            concurrency_groups={
-                AGENT_LOOP_CONCURRENCY_GROUP_GENERATE: concurrency,
-            },
-        )(AgentLoopActor)
-        return cast(
-            "RayAgentLoopProxy",
-            CPUActorLauncher.build_actor(
-                ray_agent_loop,
-                self,
-                rollout_controller,
-                judger,
-                pg=pg,
-                bundle_idx=0,
-                actor_num_cpus=cpu_resources.num_cpus_per_worker,
-                actor_memory=cpu_resources.cpu_memory_per_worker,
-                capture_child_tasks=True,
-            ),
-        )
 
-    def _build_ray_actors(
-        self,
-        rollout_controller: RolloutController,
-        cpu_resources: CPUResourcesConfig,
-        concurrency: int,
-        pg: PlacementGroup | None = None,
-        judger: Judger | None = None,
-        logger=None,
-        start_bundle_idx: int = 0,
-    ) -> list[RayAgentLoopProxy]:
-        ray_agent_loop = ray.remote(
-            concurrency_groups={
-                AGENT_LOOP_CONCURRENCY_GROUP_GENERATE: concurrency,
-            },
-        )(AgentLoopActor)
-        return cast(
-            list["RayAgentLoopProxy"],
-            CPUActorLauncher.build_actors(
-                ray_agent_loop,
-                self,
-                rollout_controller,
-                judger,
-                pg=pg,
-                start_bundle_idx=start_bundle_idx,
-                num_workers=cpu_resources.num_workers,
-                actor_num_cpus_per_worker=cpu_resources.num_cpus_per_worker,
-                actor_memory_per_worker=cpu_resources.cpu_memory_per_worker,
-                capture_child_tasks=True,
-            ),
-        )
+def _get_rollout_metadata(rollout_controller) -> dict[str, Any]:
+    get_rollout_metadata = rollout_controller.get_rollout_metadata
+    if hasattr(get_rollout_metadata, "remote"):
+        return ray.get(get_rollout_metadata.remote())  # type: ignore[attr-defined]
+    return get_rollout_metadata()
 
-    def _build_router(
-        self,
-        rollout_controller: RolloutController,
-        cpu_resources: CPUResourcesConfig,
-        concurrency: int,
-        pg: PlacementGroup | None = None,
-        judger: Judger | None = None,
-        logger=None,
-        start_bundle_idx: int = 0,
-    ) -> RouterAgentLoop:
-        return RouterAgentLoop(
-            workers=self._build_ray_actors(
-                rollout_controller=rollout_controller,
-                cpu_resources=cpu_resources,
-                concurrency=concurrency,
-                pg=pg,
-                judger=judger,
-                logger=logger,
-                start_bundle_idx=start_bundle_idx,
-            ),
-            rollout_ctl=rollout_controller,
-        )
+
+def _get_agent_loop_metadata(rollout_controller) -> dict[str, Any]:
+    get_agent_loop_metadata = getattr(rollout_controller, "get_agent_loop_metadata", None)
+    if get_agent_loop_metadata is None:
+        raise RuntimeError("RolloutController does not expose get_agent_loop_metadata().")
+    if hasattr(get_agent_loop_metadata, "remote"):
+        return ray.get(get_agent_loop_metadata.remote())  # type: ignore[attr-defined]
+    return get_agent_loop_metadata()
+
+
+def _get_active_worker_entries(metadata: dict[str, Any]) -> list[dict[str, Any]]:
+    server_url_dict = metadata["server_url_dict"]
+    worker_server_urls_status = metadata.get("worker_server_urls_status") or {}
+    worker_url_to_placement = metadata.get("worker_url_to_placement") or {}
+    worker_entries: list[dict[str, Any]] = []
+
+    for rank in sorted(server_url_dict, key=lambda value: int(value)):
+        urls = server_url_dict[rank]
+        urls = [urls] if isinstance(urls, str) else urls
+        for url in urls:
+            if not worker_server_urls_status.get(url, True):
+                continue
+            placement = worker_url_to_placement.get(url)
+            if placement is None:
+                raise RuntimeError(f"Missing rollout placement metadata for worker URL {url}.")
+            worker_entries.append(
+                {
+                    "url": url,
+                    "rank": placement["rank"],
+                    "head_bundle_idx": placement["head_bundle_idx"],
+                    "engine_bundle_idxs": placement["engine_bundle_idxs"],
+                }
+            )
+    return worker_entries
 
 
 class AgentLoop(ABC):
     def __init__(
         self,
+        config: AgentLoopConfig,
         rollout_ctl: RolloutController,
-        sample_params: SampleParams,
-        hf_checkpoint: str,
         judger: Judger | None = None,
         logger=None,
     ) -> None:
+        self.config = config
         self.rollout_ctl = rollout_ctl
-        self.hf_checkpoint = hf_checkpoint
-        self.tokenizer = load_tokenizer(hf_checkpoint, trust_remote_code=True)
-        self.processor = load_processor(hf_checkpoint, trust_remote_code=True)
-        self.sample_params = sample_params
+        self.hf_checkpoint = config.hf_checkpoint
+        self.tokenizer = load_tokenizer(config.hf_checkpoint, trust_remote_code=True)
+        self.processor = load_processor(config.hf_checkpoint, trust_remote_code=True)
+        self.sample_params = config.sample_params
         self.judger = judger
         if logger is None:
             self.logger = get_logger()
@@ -210,14 +157,14 @@ class AgentLoop(ABC):
 
 
 class RouterAgentLoop:
-    def __init__(self, workers: list[RayAgentLoopProxy], rollout_ctl: RolloutController):
+    def __init__(self, workers: list[AgentLoopActorProxy], rollout_ctl: RolloutController):
         self.workers = workers
         self.rollout_ctl = rollout_ctl
         self._worker_loads = dict.fromkeys(workers, 0)
         self._rr_index = 0
         self._lock = asyncio.Lock()
 
-    async def _pick_worker(self) -> RayAgentLoopProxy:
+    async def _pick_worker(self) -> AgentLoopActorProxy:
         async with self._lock:
             min_load = min(self._worker_loads.values())
             candidates = [worker for worker in self.workers if self._worker_loads[worker] == min_load]
@@ -226,7 +173,7 @@ class RouterAgentLoop:
             self._worker_loads[worker] += 1
             return worker
 
-    async def _release_worker(self, worker: RayAgentLoopProxy) -> None:
+    async def _release_worker(self, worker: AgentLoopActorProxy) -> None:
         async with self._lock:
             self._worker_loads[worker] -= 1
 
@@ -254,54 +201,19 @@ class RouterAgentLoop:
 
 
 async def get_agent_loop_rollout_ctl(agent_loop: AgentLoopSpec) -> RolloutController:
-    rollout_ctl = getattr(agent_loop, "rollout_ctl", None)
-    if rollout_ctl is not None:
-        return rollout_ctl
-
-    get_rollout_ctl = getattr(agent_loop, "get_rollout_ctl", None)
-    if get_rollout_ctl is None or not hasattr(get_rollout_ctl, "remote"):
-        raise AttributeError(f"Agent loop {type(agent_loop)} does not expose rollout_ctl or get_rollout_ctl().")
-    return await get_rollout_ctl.remote()
+    return agent_loop.rollout_ctl
 
 
-class AgentLoopActor:
-    def __init__(
-        self,
-        agent_loop_config: AgentLoopConfig,
-        rollout_controller: RolloutController,
-        judger: Judger | None = None,
-        logger=None,
-    ):
-        self.agent_loop = agent_loop_config.build_local(
-            rollout_controller=rollout_controller,
-            judger=judger,
-            logger=logger,
-        )
-
-    @ray_method(concurrency_group=AGENT_LOOP_CONCURRENCY_GROUP_GENERATE)
-    async def generate_sample(self, rollout_state: RolloutState, **kwargs) -> RolloutState:
-        return await self.agent_loop.generate_sample(rollout_state, **kwargs)
-
-    @ray_method(concurrency_group=AGENT_LOOP_CONCURRENCY_GROUP_GENERATE)
-    async def generate_group(self, rollout_state: list[RolloutState], **kwargs) -> list[RolloutState]:
-        return await self.agent_loop.generate_group(rollout_state, **kwargs)
-
-    @ray_method
-    async def get_rollout_ctl(self):
-        return self.agent_loop.rollout_ctl
-
-    @ray_method
-    async def pause(self) -> None:
-        return await self.agent_loop.pause()
+_RAY_AGENT_LOOP_CLS_CACHE: dict[type[AgentLoop], ActorClass] = {}
 
 
-RayAgentLoop = cast(
-    ActorClass[AgentLoopActor],
-    ray.remote(
-        concurrency_groups={
-            AGENT_LOOP_CONCURRENCY_GROUP_GENERATE: 1000,
-        },
-    )(AgentLoopActor),
-)
-RayAgentLoopProxy: TypeAlias = ActorProxy[AgentLoopActor]
-AgentLoopSpec: TypeAlias = AgentLoop | RayAgentLoopProxy | RouterAgentLoop
+def get_ray_agent_loop_cls(agent_loop_cls: type[AgentLoop]) -> ActorClass:
+    if agent_loop_cls not in _RAY_AGENT_LOOP_CLS_CACHE:
+        _RAY_AGENT_LOOP_CLS_CACHE[agent_loop_cls] = ray.remote(
+            max_concurrency=AGENT_LOOP_ACTOR_MAX_CONCURRENCY
+        )(agent_loop_cls)
+    return _RAY_AGENT_LOOP_CLS_CACHE[agent_loop_cls]
+
+
+AgentLoopActorProxy: TypeAlias = ActorProxy[Any]
+AgentLoopSpec: TypeAlias = RouterAgentLoop

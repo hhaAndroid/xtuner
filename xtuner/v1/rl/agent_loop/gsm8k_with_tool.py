@@ -18,14 +18,8 @@ logger = get_logger()
 class GSM8KToolAgentLoopConfig(AgentLoopConfig):
     max_turns: int
 
-    def build_local(self, rollout_controller, judger: Judger | None = None, logger=None) -> "GSM8KToolAgentLoop":
-        return GSM8KToolAgentLoop(
-            max_turns=self.max_turns,
-            rollout_ctl=rollout_controller,
-            hf_checkpoint=self.hf_checkpoint,
-            sample_params=self.sample_params,
-            judger=judger,
-        )
+    def get_agent_loop_cls(self) -> type["GSM8KToolAgentLoop"]:
+        return GSM8KToolAgentLoop
 
 
 class FunctionCall(BaseModel):
@@ -38,16 +32,13 @@ class FunctionCall(BaseModel):
 class GSM8KToolAgentLoop(AgentLoop):
     def __init__(
         self,
-        max_turns: int,
+        config: GSM8KToolAgentLoopConfig,
         rollout_ctl: RolloutController,
-        hf_checkpoint: str,
-        sample_params: SampleParams,
         judger: Judger | None = None,
+        logger=None,
     ):
-        super().__init__(
-            rollout_ctl=rollout_ctl, hf_checkpoint=hf_checkpoint, sample_params=sample_params, judger=judger
-        )
-        self.max_turns = max_turns
+        super().__init__(config=config, rollout_ctl=rollout_ctl, judger=judger, logger=logger)
+        self.max_turns = config.max_turns
         self.tool_call_pattern = re.compile(r"\n*<tool_call>(.*?)</tool_call>", re.DOTALL)
         self.tool_call_start_token: str = "<tool_call>"
         self.tool_call_end_token: str = "</tool_call>"

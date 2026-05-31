@@ -25,7 +25,12 @@ from xtuner.v1.rl.utils.misc import get_eos_token
 from xtuner.v1.utils import XTUNER_DETERMINISTIC
 from xtuner.v1.utils.httpx_utils import HttpRequestErrorType, HttpRequestResult
 
-from .agent_loop import DEFAULT_JUDGER_CANCEL_TIMEOUT_S, AgentLoop, AgentLoopConfig
+from .agent_loop import (
+    DEFAULT_JUDGER_CANCEL_TIMEOUT_S,
+    AgentLoop,
+    AgentLoopConfig,
+    _get_rollout_metadata,
+)
 
 
 class _WorkerURLRouter:
@@ -63,9 +68,9 @@ class SingleTurnAgentLoopConfig(AgentLoopConfig):
             backend, such as temperature and maximum generation length.
         hf_checkpoint (str): Hugging Face checkpoint path used to identify the
             policy checkpoint for the agent loop.
-        cpu_resources (CPUResourcesConfig | None): PG-external CPU resources
-            used to run this agent loop as Ray actors. ``None`` runs the loop
-            in local mode. Defaults to None.
+        cpu_resources (CPUResourcesConfig | None): Deprecated. Agent loops now
+            always create one Ray actor per active rollout worker URL and bind
+            each actor to the rollout worker's placement-group bundle.
         enable_batch_judge (bool): Whether to judge a generated group in one
             batch in ``generate_group``. Defaults to False.
 
@@ -82,32 +87,23 @@ class SingleTurnAgentLoopConfig(AgentLoopConfig):
 
     enable_batch_judge: bool = False
 
-    def build_local(self, rollout_controller, judger: Judger | None = None, logger=None) -> "SingleTurnAgentLoop":
-        return SingleTurnAgentLoop(
-            rollout_ctl=rollout_controller,
-            sample_params=self.sample_params,
-            hf_checkpoint=self.hf_checkpoint,
-            judger=judger,
-            logger=logger,
-            enable_batch_judge=self.enable_batch_judge,
-        )
+    def get_agent_loop_cls(self) -> type["SingleTurnAgentLoop"]:
+        return SingleTurnAgentLoop
 
 
 class SingleTurnAgentLoop(AgentLoop):
     def __init__(
         self,
+        config: SingleTurnAgentLoopConfig,
         rollout_ctl: RolloutController,
-        sample_params: SampleParams,
-        hf_checkpoint: str,
         judger: Judger | None = None,
         logger=None,
-        enable_batch_judge: bool = False,
     ):
-        super().__init__(rollout_ctl, sample_params, hf_checkpoint, judger, logger)
-        self.enable_batch_judge = enable_batch_judge
+        super().__init__(config=config, rollout_ctl=rollout_ctl, judger=judger, logger=logger)
+        self.enable_batch_judge = config.enable_batch_judge
         self._pause_event = asyncio.Event()
         self._generation_abort_counter = 0
-        self.rollout_config, worker_urls = self._load_rollout_metadata()
+        self.rollout_config, worker_urls = self._load_rollout_metadata(bound_worker_url=config.bound_worker_url)
         self.worker_url_router = _WorkerURLRouter(worker_urls)
         self.partial_rollout_handler = PartialRolloutHandler()
         self.lmdeploy_actor = None
@@ -118,30 +114,29 @@ class SingleTurnAgentLoop(AgentLoop):
         worker_count = max(1, len(worker_urls))
         per_worker_http_concurrency = max(1, int(max_batch_size * self.rollout_config.allow_over_concurrency_ratio))
         http_concurrency = worker_count * per_worker_http_concurrency
+        self.request_semaphore = asyncio.Semaphore(http_concurrency)
         self.logger.info(
             "SingleTurnAgentLoop direct rollout HTTP concurrency: "
-            f"worker_count={worker_count}, per_worker={per_worker_http_concurrency}, total={http_concurrency}"
+            f"worker_count={worker_count}, per_worker={per_worker_http_concurrency}, total={http_concurrency}, "
+            "queue=agentloop_semaphore"
         )
         limits = httpx.Limits(max_connections=http_concurrency, max_keepalive_connections=http_concurrency)
         self.client = httpx.AsyncClient(limits=limits, timeout=self.rollout_config.rollout_timeout)
 
-    def _load_rollout_metadata(self) -> tuple[RolloutConfig, list[str]]:
-        get_rollout_metadata = self.rollout_ctl.get_rollout_metadata
-        if hasattr(get_rollout_metadata, "remote"):
-            metadata = ray.get(get_rollout_metadata.remote())  # type: ignore[attr-defined]
-        else:
-            metadata = get_rollout_metadata()
+    def _load_rollout_metadata(self, bound_worker_url: str | None = None) -> tuple[RolloutConfig, list[str]]:
+        metadata = _get_rollout_metadata(self.rollout_ctl)
 
-        server_url_dict = metadata["server_url_dict"]
         worker_server_urls_status = metadata.get("worker_server_urls_status") or {}
-        worker_urls: list[str] = []
-        for rank in sorted(server_url_dict, key=lambda value: int(value)):
-            urls = server_url_dict[rank]
-            if isinstance(urls, str):
-                worker_urls.append(urls)
-            else:
-                worker_urls.extend(urls)
-        active_worker_urls = [url for url in worker_urls if worker_server_urls_status.get(url, True)]
+        if bound_worker_url is not None:
+            active_worker_urls = [bound_worker_url] if worker_server_urls_status.get(bound_worker_url, True) else []
+            self.logger.info(f"SingleTurnAgentLoop bound rollout worker URLs: {active_worker_urls}")
+            return metadata["rollout_config"], active_worker_urls
+
+        active_worker_urls = []
+        for rank in sorted(metadata["server_url_dict"], key=lambda value: int(value)):
+            urls = metadata["server_url_dict"][rank]
+            urls = [urls] if isinstance(urls, str) else urls
+            active_worker_urls.extend(url for url in urls if worker_server_urls_status.get(url, True))
         self.logger.info(f"SingleTurnAgentLoop direct rollout worker URLs: {active_worker_urls}")
         return metadata["rollout_config"], active_worker_urls
 
@@ -192,6 +187,32 @@ class SingleTurnAgentLoop(AgentLoop):
 
     async def _wait_pause_request(self) -> None:
         await self._pause_event.wait()
+
+    async def _acquire_request_slot(self) -> bool:
+        if self._pause_event.is_set():
+            return False
+
+        acquire_task = asyncio.create_task(self.request_semaphore.acquire())
+        pause_task = asyncio.create_task(self._wait_pause_request())
+        try:
+            done, _ = await asyncio.wait(
+                {acquire_task, pause_task},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if acquire_task in done:
+                await acquire_task
+                if self._pause_event.is_set():
+                    self.request_semaphore.release()
+                    return False
+                return True
+
+            await cancel_and_drain([acquire_task])
+            return False
+        except asyncio.CancelledError:
+            await cancel_and_drain([acquire_task, pause_task])
+            raise
+        finally:
+            await cancel_and_drain([pause_task])
 
     async def _safe_post_request(self, url: str, headers: dict[str, str], payload: dict) -> HttpRequestResult:
         send_task = None
@@ -467,7 +488,16 @@ class SingleTurnAgentLoop(AgentLoop):
         }
         for attempt in range(max_retries + 1):
             is_last_attempt = attempt == max_retries
-            http_result = await self._safe_post_request(endpoint_url, headers=headers, payload=payload)
+            has_request_slot = await self._acquire_request_slot()
+            if not has_request_slot:
+                rollout_state.finish_reason = "abort"
+                rollout_state.status = update_status_from_finish_reason("abort")
+                return rollout_state
+
+            try:
+                http_result = await self._safe_post_request(endpoint_url, headers=headers, payload=payload)
+            finally:
+                self.request_semaphore.release()
 
             if http_result.response:
                 rollout_state = await self._safe_handle_response(

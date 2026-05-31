@@ -29,7 +29,15 @@ class WorkerInfo:
 
     actor: RolloutWorker
     url: str
+    head_bundle_idx: int
+    engine_bundle_idxs: list[int]
     is_active: bool = True
+
+
+class RolloutWorkerPlacement(TypedDict):
+    rank: int
+    head_bundle_idx: int
+    engine_bundle_idxs: list[int]
 
 
 class RolloutWorkerMetadata(TypedDict):
@@ -64,6 +72,17 @@ class RolloutWorkerMetadata(TypedDict):
     api_server_url: Optional[str]
 
 
+class AgentLoopRolloutMetadata(RolloutWorkerMetadata):
+    """Rollout metadata only needed when constructing Ray AgentLoop actors."""
+
+    # The rollout placement group used to launch rollout workers and servers.
+    placement_group: PlacementGroup
+
+    # Per-server placement metadata used by SingleTurnAgentLoop actors to bind
+    # themselves to the same placement group bundle as the rollout server head.
+    worker_url_to_placement: Dict[str, RolloutWorkerPlacement]
+
+
 # Keep this as a Ray actor because Ray AgentLoop actors need a shared, cross-process handle to the same controller
 # state; passing a normal Python object would serialize a separate copy into each actor.
 class RolloutController:
@@ -85,6 +104,7 @@ class RolloutController:
         self.config = infer_config
         self.num_gpus_per_engine = self.config.num_gpus_per_engine
         self.logger = get_logger(log_dir=infer_config.worker_log_dir, tag="RolloutController")
+        self.placement_group = placement_group
         self.engine_rank_mesh_array: List[List[int]] = []
         self.worker_server_urls_map: dict[str, List[str]] = {}
         self.rank2info: dict[int, WorkerInfo] = {}
@@ -149,6 +169,24 @@ class RolloutController:
             "api_server_url": self._gateway_url,
         }
         return rollout_metadata
+
+    def get_agent_loop_metadata(self) -> AgentLoopRolloutMetadata:
+        """Get rollout metadata required to bind AgentLoop actors to rollout workers."""
+        rollout_metadata = self.get_rollout_metadata()
+        with self.worker_info_lock:
+            worker_url_to_placement = {
+                info.url: {
+                    "rank": rank,
+                    "head_bundle_idx": info.head_bundle_idx,
+                    "engine_bundle_idxs": info.engine_bundle_idxs,
+                }
+                for rank, info in self.rank2info.items()
+            }
+        return {
+            **rollout_metadata,
+            "placement_group": self.placement_group,
+            "worker_url_to_placement": worker_url_to_placement,
+        }
 
     def get_ready_status(self) -> tuple[bool, dict[str, Any]]:
         with self.worker_info_lock:
@@ -375,6 +413,7 @@ class RolloutController:
 
         set_bundle_idxs_objectref = []
         engine_rank_mesh_array = []
+        active_worker_placement_by_rank = {}
         activate_worker_idx = 0
         for active_worker in active_rollout_workers:
             head_rank, _ = rank_bundle_idx_list[activate_worker_idx]
@@ -382,6 +421,10 @@ class RolloutController:
             engine_bundle_idxs = [meta[1] for meta in engine_workers_meta]  # meta: (rank, bundle_idx)
             set_bundle_idxs_objectref.append(active_worker._set_engine_bundle_idxs.remote(engine_bundle_idxs))  # type: ignore[attr-defined]
             engine_rank_mesh_array.append([meta[0] for meta in engine_workers_meta])
+            active_worker_placement_by_rank[head_rank] = {
+                "head_bundle_idx": engine_bundle_idxs[0],
+                "engine_bundle_idxs": engine_bundle_idxs,
+            }
             activate_worker_idx += interval
         ray.get(set_bundle_idxs_objectref)
         # set engine mesh list for each worker
@@ -402,9 +445,16 @@ class RolloutController:
         )
         workers_info = {}
         for i in range(len(active_rollout_workers)):
-            rank = list(worker_server_urls_map.keys())[i]
-            url = worker_server_urls_map[rank]
-            workers_info[rank] = WorkerInfo(actor=active_rollout_workers[i], url=url)
+            rank_key = list(worker_server_urls_map.keys())[i]
+            rank = int(rank_key)
+            url = worker_server_urls_map[rank_key]
+            placement = active_worker_placement_by_rank[rank]
+            workers_info[rank] = WorkerInfo(
+                actor=active_rollout_workers[i],
+                url=url,
+                head_bundle_idx=placement["head_bundle_idx"],
+                engine_bundle_idxs=placement["engine_bundle_idxs"],
+            )
         self.logger.info(f"Rollout worker server URLs: {[info.url for info in workers_info.values()]}")
         return engine_rank_mesh_array, worker_server_urls_map, workers_info
 
