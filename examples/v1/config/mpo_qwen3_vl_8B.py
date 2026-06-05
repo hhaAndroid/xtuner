@@ -30,17 +30,16 @@ from xtuner.v1.config import AdamWConfig, FSDPConfig, LRConfig
 from xtuner.v1.datasets import Qwen3VLDPOTokenizeFnConfig
 from xtuner.v1.datasets.config import DatasetConfig, DataloaderConfig
 from xtuner.v1.datasets.mllm_tokenize_fn import OSSLoaderConfig
-from xtuner.v1.model import Qwen3VLDense8BConfig
+from xtuner.v1.model import Qwen3VLDense4BConfig
 from xtuner.v1.rl.dpo import DPOLossConfig
 from xtuner.v1.train.dpo_trainer import DPOTrainerConfig
 import os
 
 
-ceph_config = os.environ["CEPH_CONFIG"]
+ceph_config = os.environ.get("CEPH_CONFIG", None)
 meta_data_path = os.environ["META_DATA_PATH"]
 model_path = os.environ["MODEL_PATH"]
 work_dir = os.environ["WORK_DIR"]
-tokenizer_cache_dir = os.environ["TOKENIZER_CACHE_DIR"]
 
 # basic settings
 # global_batch_size = num_gpus × per_device_batch_size × gradient_accumulation_steps x sp_size
@@ -62,7 +61,7 @@ lr_min = 0
 warmup_ratio = 0.05
 weight_decay = 0.05
 
-model_cfg = Qwen3VLDense8BConfig()
+model_cfg = Qwen3VLDense4BConfig(compile_cfg=False)
 
 # DPO Loss Configuratio
 # Option 1: Standard DPO (sigmoid only)
@@ -86,7 +85,10 @@ loss_cfg = DPOLossConfig(
 )
 
 # Dataset Configuration - refer to sft_internvl3.5_8B_config_tiny.py)
-oss_loader_cfg = OSSLoaderConfig(backend_kwargs={"conf_path": ceph_config})
+if ceph_config is not None:
+    oss_loader_cfg = OSSLoaderConfig(backend_kwargs={"conf_path": ceph_config})
+else:
+    oss_loader_cfg = None
 ds_collections = json.loads(open(meta_data_path).read())
 dataset_config = []
 for name, _data in ds_collections.items():
@@ -98,8 +100,6 @@ for name, _data in ds_collections.items():
             sample_ratio=_data.get('sample_ratio', 1.0),
             class_name='VLMPreferenceJsonlDataset',  # use preference dataset class
             enable_sequential_sampler=True,
-            cache_tag='cache_tags_dpo_v1',
-            cache_dir=tokenizer_cache_dir,
         ),
         "tokenize_fn": Qwen3VLDPOTokenizeFnConfig(
             processor_path=model_path,

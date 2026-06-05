@@ -728,6 +728,18 @@ class DPOTrainer:
                 else:
                     raise ValueError(f"Unsupported loss_type: {loss_type}")
 
+            chosen_rewards = self.config.loss_cfg.beta * (policy_chosen_logps - ref_chosen_logps).detach()
+            rejected_rewards = self.config.loss_cfg.beta * (policy_rejected_logps - ref_rejected_logps).detach()
+            reward_accuracies = (chosen_rewards > rejected_rewards).float()
+            extra_info.update({
+                "chosen_rewards": chosen_rewards.mean(),
+                "rejected_rewards": rejected_rewards.mean(),
+                "reward_margin": (chosen_rewards - rejected_rewards).mean(),
+                "reward_accuracy": reward_accuracies.mean(),
+                "policy_chosen_logps": policy_chosen_logps.mean().detach(),
+                "policy_rejected_logps": policy_rejected_logps.mean().detach(),
+            })
+
             total_loss = total_loss + loss
 
             # Collect metrics
@@ -761,6 +773,33 @@ class DPOTrainer:
 
         return metrics
 
+    def _format_metrics(self, metrics: Dict[str, float]) -> str:
+        """Format metrics for compact per-step console logging."""
+        preferred_order = [
+            "loss",
+            "lr",
+            "dpo_sigmoid_loss",
+            "bco_pair_loss",
+            "sft_loss",
+            "reward_accuracy",
+            "reward_margin",
+            "chosen_rewards",
+            "rejected_rewards",
+            "policy_chosen_logps",
+            "policy_rejected_logps",
+        ]
+        ordered_keys = [key for key in preferred_order if key in metrics]
+        ordered_keys.extend(key for key in metrics if key not in ordered_keys)
+
+        log_parts = []
+        for key in ordered_keys:
+            value = metrics[key]
+            if key == "lr":
+                log_parts.append(f"{key}={value:.2e}")
+            else:
+                log_parts.append(f"{key}={value:.4f}")
+        return ", ".join(log_parts)
+
     def fit(self):
         """Run the DPO training loop."""
         self.logger.info("Starting DPO training")
@@ -790,21 +829,24 @@ class DPOTrainer:
                 metrics = self._train_step(batch)
                 epoch_metrics.append(metrics)
                 self._cur_step += 1
+                step_metrics = dict(metrics)
+                step_metrics["lr"] = self.lr_scheduler.get_last_lr()[0]
+
+                if get_rank() == 0:
+                    postfix_metrics = {
+                        key: step_metrics[key]
+                        for key in ("loss", "reward_accuracy", "lr")
+                        if key in step_metrics
+                    }
+                    progress_bar.set_postfix(postfix_metrics)
+                    progress_bar.write(f"Step {self._cur_step}: {self._format_metrics(step_metrics)}")
 
                 # Logging
                 if self._cur_step % self.config.log_interval == 0:
                     avg_metrics = self._average_metrics(epoch_metrics[-self.config.log_interval:])
                     avg_metrics["lr"] = self.lr_scheduler.get_last_lr()[0]
-                    # Format lr with scientific notation, other metrics with 4 decimal places
-                    log_parts = []
-                    for k, v in avg_metrics.items():
-                        if k == "lr":
-                            log_parts.append(f"{k}={v:.2e}")
-                        else:
-                            log_parts.append(f"{k}={v:.4f}")
-                    log_str = f"Step {self._cur_step}: " + ", ".join(log_parts)
+                    log_str = f"Step {self._cur_step} average: {self._format_metrics(avg_metrics)}"
                     self.logger.info(log_str)
-                    progress_bar.set_postfix(avg_metrics)
 
                 # Save checkpoint
                 if self.config.save_interval and self._cur_step % self.config.save_interval == 0:

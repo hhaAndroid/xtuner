@@ -13,12 +13,17 @@ config_file="examples/v1/config/mpo_qwen3_vl_8B.py"
 # NODE_COUNT=1
 # NODE_RANK=0
 # MASTER_ADDR=127.0.0.1
-# PROC_PER_NODE=8
+PROC_PER_NODE=8
+
+#  --nnodes=$NODE_COUNT \
+# --node_rank=$NODE_RANK \
+# --master_addr=$MASTER_ADDR \
+# --master_port=$MASTER_PORT \
+
+export META_DATA_PATH="/mnt/shared-storage-user/llmrazor-share/a3_data/dpo_meta_data.json"
+export MODEL_PATH="/mnt/shared-storage-user/llmrazor-share/model/Qwen3-VL-4B-Instruct"
+export WORK_DIR="/mnt/shared-storage-user/huanghaian/code/xtuner/work_dirs/dpo"
 
 torchrun \
-  --nnodes=$NODE_COUNT \
-  --node_rank=$NODE_RANK \
-  --master_addr=$MASTER_ADDR \
-  --master_port=$MASTER_PORT \
   --nproc_per_node=$PROC_PER_NODE \
   xtuner/v1/train/cli/dpo.py --config ${config_file}
