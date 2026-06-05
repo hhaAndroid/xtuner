@@ -149,6 +149,14 @@ AgentLoop 的重试和 router 的重试边界：
 - 没有统一 router 时，AgentLoop retry 只能重试同一个 `rollout_url`。
 - 有统一 router 时，AgentLoop retry 仍然请求同一个 router URL，由 router 决定是否换后端 endpoint。
 
+流式响应处理不能在 AgentLoop 和 SessionServer 中各实现一套。后续如果支持 streaming，
+必须抽出共享的 OpenAI-compatible response parser/client：
+
+- AgentLoop 可以直接请求 raw worker 或 router URL，但不直接手写 SSE 聚合逻辑。
+- SessionServer 继续负责 trace/prefix store，但复用同一套 SSE/JSON response parser。
+- 非流式 JSON response 也应走同一套 parser/result schema，避免 non-stream 和 stream 两套字段校验。
+- `[DONE]`、断流、错误 chunk、finish_reason、usage、output_ids、logprobs、routed_experts 聚合和校验只实现一次。
+
 ## 6. Router 类型与目标 Endpoint 类型
 
 `RolloutRouter` 需要区分两个维度：
@@ -187,7 +195,7 @@ XTuner 自己启动一个内部 router，对 AgentLoop 暴露统一 URL。
 如果 agent 内部会拿到 `rollout_url` 后自行请求并重试，那么统一 URL 的价值会变高：
 
 - `url_pool` 返回的是具体 worker/session_server URL，agent 内部 retry 只能重试同一个 URL。
-- `third_party` 或 `xtuner` 返回统一 URL，router 可以在服务端做健康检查、失败重试和 sticky session。
+- `third_party` 或 `xtuner` 返回统一 URL，router 可ky session以在服务端做健康检查、失败重试和 stic。
 - 后续接入健康检测时，统一 router 能在每次请求时基于最新健康状态跳过 inactive endpoint；`url_pool` 只能在外层 acquire 时判断一次，无法管理 agent 内部后续请求。
 
 因此：
@@ -227,13 +235,13 @@ XTuner 自己启动一个内部 router，对 AgentLoop 暴露统一 URL。
 ### 6.3 推荐组合
 
 
-| router 类型     | 目标 endpoint 类型   | 用途                                            |
-| ------------- | ---------------- | --------------------------------------------- |
-| `url_pool`    | `worker`         | `SingleTurnAgentLoop` 最小验证，不走 SessionServer   |
-| `url_pool`    | `session_server` | 简单 agentic 验证；不支持 agent 内部透明 failover        |
-| `xtuner`      | `worker`         | XTuner 统一 router 转发到 raw worker                 |
+| router 类型     | 目标 endpoint 类型   | 用途                                                |
+| ------------- | ---------------- | ------------------------------------------------- |
+| `url_pool`    | `worker`         | `SingleTurnAgentLoop` 最小验证，不走 SessionServer       |
+| `url_pool`    | `session_server` | 简单 agentic 验证；不支持 agent 内部透明 failover             |
+| `xtuner`      | `worker`         | XTuner 统一 router 转发到 raw worker                   |
 | `xtuner`      | `session_server` | XTuner 统一 router 转发到 SessionServer，agentic 目标形态之一 |
-| `third_party` | `session_server` | 当前第三方 routedapiproxy 模式，agentic 目标形态之一        |
+| `third_party` | `session_server` | 当前第三方 routedapiproxy 模式，agentic 目标形态之一            |
 
 
 第一版不支持：
@@ -514,7 +522,101 @@ class XTunerRolloutRouter:
 - endpoint 失败计数、熔断和恢复。
 - 错误响应格式。
 
-### 9.6 ProduceContext
+### 9.6 OpenAI-compatible Client / Parser
+
+为了避免 `SingleTurnAgentLoop` 和 `SessionServer` 各自维护一套 response 解析逻辑，
+需要抽一个共享模块。建议文件位置：
+
+```text
+xtuner/v1/rl/rollout/openai_compat.py
+```
+
+核心数据结构：
+
+```python
+class OpenAICompatResult(BaseModel):
+    content: str | None = None
+    finish_reason: str | None = None
+    output_ids: list[int] | None = None
+    output_logprobs: list[float] | None = None
+    routed_experts: Any | None = None
+    usage: dict | None = None
+    raw_response: dict
+```
+
+response parser：
+
+```python
+class OpenAICompatResponseParser:
+    @staticmethod
+    def parse_json(response: dict) -> OpenAICompatResult:
+        choice = response["choices"][0]
+        message = choice.get("message") or {}
+        output_token_logprobs = choice.get("output_token_logprobs") or []
+        return OpenAICompatResult(
+            content=message.get("content") or "",
+            finish_reason=choice.get("finish_reason"),
+            output_ids=choice.get("output_ids"),
+            output_logprobs=[logprob for logprob, _token_id in output_token_logprobs],
+            routed_experts=choice.get("routed_experts"),
+            usage=response.get("usage"),
+            raw_response=response,
+        )
+
+    @staticmethod
+    async def collect_sse(lines: AsyncIterator[bytes]) -> OpenAICompatResult:
+        message = {
+            "choices": [{"message": {"role": "assistant", "content": ""}}],
+        }
+        # Parse SSE data lines, merge delta/content/tool_calls, collect usage,
+        # require terminal finish_reason and [DONE], and preserve output_ids/logprobs.
+        ...
+        return OpenAICompatResponseParser.parse_json(message)
+```
+
+非流式和流式的最终出口都应该是 `OpenAICompatResult`：
+
+```text
+non-stream JSON -> parse_json(...) -> OpenAICompatResult
+stream SSE -> collect_sse(...) -> parse_json(merged_message) -> OpenAICompatResult
+```
+
+这样后续增加字段或修复 schema 兼容问题时，只需要改 parser，不需要分别修改
+`SingleTurnAgentLoop` 和 `SessionServer`。
+
+HTTP client：
+
+```python
+class OpenAICompatClient:
+    async def chat_completions(
+        self,
+        *,
+        base_url: str,
+        payload: dict,
+        headers: dict[str, str],
+        timeout: float,
+        pause_event: asyncio.Event | None = None,
+    ) -> OpenAICompatResult:
+        # Send POST {base_url}/v1/chat/completions.
+        # If payload["stream"] is true, use collect_sse().
+        # Otherwise use parse_json().
+        # Respect pause_event so abort can stop waiting for current request.
+        ...
+```
+
+使用方式：
+
+```python
+# SingleTurnAgentLoop
+result = await openai_client.chat_completions(...)
+rollout_state = self._result_to_rollout_state(rollout_state, result)
+
+# SessionServer
+result = await OpenAICompatResponseParser.collect_sse(resp.content)
+await self.on_response(result.raw_response, trace_enabled=True)
+```
+
+### 9.7 ProduceContext
 
 ```python
 class ProduceContext:
@@ -535,7 +637,7 @@ class ProduceContext:
         return await asyncio.gather(*tasks)
 ```
 
-### 9.7 AgentLoop Actor
+### 9.8 AgentLoop Actor
 
 ```python
 class AgentLoopActor:
@@ -546,7 +648,7 @@ class AgentLoopActor:
         return await self.agent_loop.generate_group(rollout_states, **kwargs)
 ```
 
-### 9.8 SingleTurnAgentLoop
+### 9.9 SingleTurnAgentLoop
 
 `SingleTurnAgentLoop` 作为最小验证，把 remove_generate_v1 中直接 HTTP 请求后端的逻辑放到这里。
 
@@ -564,18 +666,20 @@ class SingleTurnAgentLoop(AgentLoop):
 
         payload = self._get_request_payload(rollout_state)
         for attempt in range(self.max_retry_per_sample + 1):
-            http_result = await self._safe_post_request(
-                url=f"{rollout_url.rstrip('/')}/v1/chat/completions",
+            result = await self.openai_client.chat_completions(
+                base_url=rollout_url,
                 headers={
                     "Content-Type": "application/json",
                     "Authorization": f"Bearer {self.rollout_config.api_key}",
                 },
                 payload=payload,
+                timeout=self.rollout_config.rollout_timeout,
+                pause_event=self._pause_event,
             )
-            if not self._should_retry(http_result, attempt):
+            if not self._should_retry(result, attempt):
                 break
 
-        rollout_state = await self._handle_http_result(rollout_state, http_result, **kwargs)
+        rollout_state = await self._result_to_rollout_state(rollout_state, result, **kwargs)
         if rollout_state.status != Status.COMPLETED:
             return rollout_state
 
@@ -839,3 +943,4 @@ Trainer 不直接注册第三方 router，只负责 build config。
 5. 有 `session_uid` 且 sticky enabled 时，同 session 返回同 URL。
 6. 没有 `session_uid` 时 round-robin。
 7. abort 仍然通过 `RolloutController.pause_generation -> RolloutWorker.pause_generation -> /abort_request` 生效。
+
