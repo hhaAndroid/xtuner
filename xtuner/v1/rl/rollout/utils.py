@@ -113,11 +113,23 @@ class RolloutHealthChecker:
         self._worker_infos_lock = worker_infos_lock
         self._check_interval = config.health_check_interval_seconds
         self._check_failure_threshold = config.health_check_failure_threshold
+        self._enabled = self._check_interval > 0 and self._check_failure_threshold > 0
         self._stop_event: Optional[threading.Event] = None
         self._pause_event: Optional[threading.Event] = None
         self._thread: Optional[threading.Thread] = None
 
+    @property
+    def enabled(self) -> bool:
+        return self._enabled
+
     def start(self) -> None:
+        if not self._enabled:
+            logger.info(
+                "RolloutHealthChecker disabled: "
+                f"health_check_interval_seconds={self._check_interval}, "
+                f"health_check_failure_threshold={self._check_failure_threshold}."
+            )
+            return
         if self._thread and self._thread.is_alive():
             return
 
@@ -129,6 +141,8 @@ class RolloutHealthChecker:
         logger.info("RolloutHealthChecker started.")
 
     def stop(self) -> None:
+        if not self._enabled:
+            return
         if not self._thread:
             return
 
@@ -143,21 +157,28 @@ class RolloutHealthChecker:
         logger.info("RolloutHealthChecker stopped.")
 
     def pause(self) -> None:
+        if not self._enabled:
+            return
         if self._pause_event is None:
             return
         self._pause_event.set()
         logger.info("RolloutHealthChecker paused.")
 
     def is_paused(self) -> bool:
-        return self._pause_event is None or self._pause_event.is_set()
+        return not self._enabled or self._pause_event is None or self._pause_event.is_set()
 
     def resume(self) -> None:
+        if not self._enabled:
+            return
         if self._pause_event is None:
             return
         self._pause_event.clear()
         logger.info("RolloutHealthChecker restarted.")
 
     def run_once(self) -> None:
+        if not self._enabled:
+            logger.debug("RolloutHealthChecker run_once skipped because checker is disabled.")
+            return
         logger.debug("RolloutHealthChecker running health checks for all workers.")
         if self._worker_infos_lock is None:
             workers_snapshot = {

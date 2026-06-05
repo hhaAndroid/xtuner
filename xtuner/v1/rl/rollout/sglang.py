@@ -150,7 +150,7 @@ class SGLangWorker(RolloutWorker):
         # flush cache will not return status_code 200 when there are pending requests
         while True:
             try:
-                response = requests.get(f"{self.server_url}/flush_cache", timeout=60)
+                response = requests.get(f"{self.server_url}/flush_cache", timeout=600)
                 if response.status_code == 200:
                     break
             except requests.exceptions.Timeout:
