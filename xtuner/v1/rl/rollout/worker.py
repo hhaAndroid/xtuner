@@ -497,7 +497,7 @@ class RolloutWorker(SingleAcceleratorWorker):
         self._launch_server()
         return (self.rank, self.server_url)
 
-    def init_dist_port(self) -> str:
+    def init_dist_port(self):
         """Initialize distributed communication ports.
 
         This method acquires three free ports for the distributed setup:
@@ -512,22 +512,17 @@ class RolloutWorker(SingleAcceleratorWorker):
             placement_group_capture_child_tasks=True,
             placement_group_bundle_index=self.engine_bundle_idxs[0],
         )
-
         local_rank = int(ray.get_runtime_context().get_accelerator_ids()[self.accelerator][0])
-        interval = 1024
-        start_port = self.config.dist_port_base + local_rank * interval
-        end_port = start_port + interval
+        start_port = self.config.dist_port_base + local_rank * 1024
         self.host, self.ports = ray.get(
             find_master_addr_and_port.options(scheduling_strategy=scheduling_strategy).remote(
-                nums=3,
-                start_port=start_port,
-                end_port=end_port,
+                nums=3, start_port=start_port, end_port=start_port + 1024
             )
         )
-
-        self.dist_port = self.ports[0]
-        self.server_port = self.ports[1]
-        self.nccl_port = self.ports[2]
+        base_port = self.rank * 20 + 12388
+        self.dist_port = base_port + 0
+        self.server_port = base_port + 1
+        self.nccl_port = base_port + 2
         self.dist_init_addr = f"{self.host}:{self.dist_port}"
         self.server_url = f"http://{self.host}:{self.server_port}"
         return self.dist_init_addr

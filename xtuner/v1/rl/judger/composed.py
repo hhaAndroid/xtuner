@@ -139,7 +139,7 @@ class ComposedJudger(Judger):
         for key in selected_keys:
             if key not in self.branches:
                 raise KeyError(f"Unknown judger branch: {key}, available={sorted(self.branches)}")
-            judged[key] = await self.branches[key].judge(deepcopy(rollout_state))
+            judged[key] = await self.branches[key].judge(rollout_state)
         return self.merge_fn(rollout_state, judged)
 
 

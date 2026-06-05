@@ -336,6 +336,7 @@ class LMDeployWorker(RolloutWorker):
                 )
             elif ep_size > 1:
                 dist_addr, dist_port = self.dist_init_addr.split(":")[:2]
+                speculative_num_draft_tokens = speculative_num_draft_tokens if speculative_num_draft_tokens is not None else 0
                 env.update(
                     {
                         "LMDEPLOY_DP_MASTER_ADDR": dist_addr,
@@ -345,7 +346,7 @@ class LMDeployWorker(RolloutWorker):
                         # lmdeploy will fail during warmup.
                         # Ref: https://github.com/DeepLink-org/DLBlas/blob/aae23445/dlblas/layers/moe/token_dispatcher.py#L81
                         # Ref: https://github.com/InternLM/lmdeploy/blob/81627e3d/lmdeploy/utils.py#L375
-                        "DEEPEP_MAX_TOKENS_PER_RANK": str(max_batch_size),
+                        "DEEPEP_MAX_TOKENS_PER_RANK": str(max_batch_size* (1 + speculative_num_draft_tokens)),
                     }
                 )
             if "uvicorn_log_level" in lmdeploy_config_kwargs:
