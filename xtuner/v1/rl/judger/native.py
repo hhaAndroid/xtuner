@@ -26,16 +26,6 @@ Judger 体系关系图
                          │ NativeJudger │
                          └──────────────┘
 
-     ┌──────────────────────────────────────┐
-     │         ComposedJudger               │
-     │                                      │
-     │  select_fn → 选 branch → judge       │
-     │  merge_fn  → 合并多个 branch 的结果  │
-     │                                      │
-     │  branches: dict[str, Judger]         │
-     │  (每个 branch 可以是上面任意一种)      │
-     └──────────────────────────────────────┘
-
 构建模式
 --------
 未配置 external CPU resources → NativeJudger                     （纯本地，无 Ray）
@@ -79,6 +69,8 @@ logger = get_logger()
 
 
 class Judger(ABC):
+    is_batch_judger: bool = False
+
     @overload
     async def judge(self, rollout_state: RolloutState) -> RolloutState: ...
     @overload
@@ -97,11 +89,13 @@ class NativeJudger(Judger):
         reward_handler: Callable | str | None = None,
         extra_info: dict | None = None,
         request_timeout: float = 30.0,
+        is_batch_judger: bool = False,
     ):
         self._judger_name = judger_name
         self.extra_info = extra_info or {}
         self.reward_handler = reward_handler
         self.request_timeout = request_timeout
+        self.is_batch_judger = is_batch_judger
 
     @ray_method
     async def judge(self, rollout_state: RolloutState) -> RolloutState:  # type: ignore[override]
@@ -142,9 +136,10 @@ class NativeJudger(Judger):
 
 
 class RemoteJudger(Judger):
-    def __init__(self, actor: RayJudgerProxy, judger_name: str):
+    def __init__(self, actor: RayJudgerProxy, judger_name: str, is_batch_judger: bool = False):
         self.actor = actor
         self._judger_name = judger_name
+        self.is_batch_judger = is_batch_judger
 
     @ray_method
     async def judge(self, rollout_state: RolloutState | list[RolloutState]) -> RolloutState | list[RolloutState]:  # type: ignore[override]
@@ -157,11 +152,12 @@ class RemoteJudger(Judger):
 class JudgerPool(Judger):
     """Round-robin dispatch across replicas of the same judger type."""
 
-    def __init__(self, replicas: list[Judger], judger_name: str):
+    def __init__(self, replicas: list[Judger], judger_name: str, is_batch_judger: bool = False):
         if not replicas:
             raise ValueError("JudgerPool requires at least one replica.")
         self.replicas = replicas
         self._judger_name = judger_name
+        self.is_batch_judger = is_batch_judger
         self._rr_index = 0
         self._lock = asyncio.Lock()
         self._worker_loads = dict.fromkeys(range(len(replicas)), 0)
@@ -228,6 +224,7 @@ class JudgerConfig(BaseModel):
     request_timeout: float = 30.0
     extra_info: dict = Field(default_factory=dict, exclude=True)
     cpu_resources: CPUResourcesConfig | None = None
+    is_batch_judger: bool = False
 
     def build_local(self) -> Judger:
         return NativeJudger(
@@ -235,6 +232,7 @@ class JudgerConfig(BaseModel):
             reward_handler=self.reward_handler,
             request_timeout=self.request_timeout,
             extra_info=self.extra_info,
+            is_batch_judger=self.is_batch_judger,
         )
 
     def _build_remote_actor(self, cpu_resources: CPUResourcesConfig) -> RayJudgerProxy:
@@ -252,14 +250,19 @@ class JudgerConfig(BaseModel):
         return [self._build_remote_actor(cpu_resources) for _ in range(cpu_resources.num_workers)]
 
     def _build_remote_judger(self, cpu_resources: CPUResourcesConfig) -> Judger:
-        return RemoteJudger(self._build_remote_actor(cpu_resources), judger_name=self.judger_name)
+        return RemoteJudger(
+            self._build_remote_actor(cpu_resources),
+            judger_name=self.judger_name,
+            is_batch_judger=self.is_batch_judger,
+        )
 
     def _build_remote_judgers(
         self,
         cpu_resources: CPUResourcesConfig,
     ) -> list[Judger]:
         return [
-            RemoteJudger(actor, judger_name=self.judger_name) for actor in self._build_remote_actors(cpu_resources)
+            RemoteJudger(actor, judger_name=self.judger_name, is_batch_judger=self.is_batch_judger)
+            for actor in self._build_remote_actors(cpu_resources)
         ]
 
     def build(self) -> Judger:

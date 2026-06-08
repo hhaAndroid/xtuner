@@ -69,6 +69,7 @@ class GroupAggregation:
     pending_keep: list[RolloutState] = field(default_factory=list)
     in_flight: int = 0
     created_ts: float = field(default_factory=time.monotonic)
+    is_batch_judger: bool = False
 
 
 class GroupAggregator:
@@ -110,7 +111,12 @@ class GroupAggregator:
     def policy(self) -> GroupPolicy:
         return self._policy
 
-    async def register_prompt(self, prompt: RolloutState, task_name: str) -> GroupAggregation:
+    async def register_prompt(
+        self,
+        prompt: RolloutState,
+        task_name: str,
+        is_batch_judger: bool = False,
+    ) -> GroupAggregation:
         """Create a new aggregation keyed by ``prompt.message_uid``.
 
         Args:
@@ -118,6 +124,11 @@ class GroupAggregator:
                 reference; the scheduler deep-copies it at each spawn, so
                 callers must not mutate it after this call.
             task_name (str): Task owning this prompt.
+            is_batch_judger (bool): When True the aggregation's judger
+                expects to receive the whole completed group at once, so
+                trajectories arriving via :meth:`add_trajectory` will not
+                yet have ``reward`` populated. The policy short-circuits to
+                ``READY`` once ``len(completed) >= min_repeat``.
 
         Returns:
             GroupAggregation: The newly registered aggregation.
@@ -137,6 +148,7 @@ class GroupAggregator:
                 original_prompt=prompt,
                 min_repeat=self._policy.min_repeat,
                 max_repeat=self._policy.max_repeat,
+                is_batch_judger=is_batch_judger,
             )
             self._groups[prompt_uid] = agg
             return agg
@@ -456,6 +468,7 @@ class GroupAggregator:
                         "completed": [item.model_dump() for item in agg.completed],
                         "pending_keep": [item.model_dump() for item in agg.pending_keep],
                         "created_ts": agg.created_ts,
+                        "is_batch_judger": agg.is_batch_judger,
                     }
                     for agg in self._groups.values()
                 ],
@@ -480,6 +493,7 @@ class GroupAggregator:
                     ],
                     in_flight=0,
                     created_ts=entry.get("created_ts", time.monotonic()),
+                    is_batch_judger=entry.get("is_batch_judger", False),
                 )
                 self._groups[agg.prompt_uid] = agg
                 self._completed_trajectory_count += len(agg.completed)

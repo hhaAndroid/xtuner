@@ -91,7 +91,7 @@ class RolloutState(BaseModel):
     prompt_ids: list[int] | None = None  # 原始 prompt的token ids
     num_tokens: int | None = None
     proxy_attn_flops: float | None = None
-    data_source: dict[str, Any] | str | None = None
+    data_source: str | None = None
     mm_info: MultimodalInfo | None = None
     reward_model: dict[str, Any] | None = None
 

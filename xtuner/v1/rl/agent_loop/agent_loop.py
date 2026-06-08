@@ -27,11 +27,13 @@ class AgentLoopConfig(ABC, BaseModel):
     sample_params: SampleParams
     cpu_resources: CPUResourcesConfig | None = None
 
-    def build(self, rollout_controller, judger: Judger | None = None, logger=None) -> AgentLoopSpec:
+    def build(
+        self, rollout_controller, judgers: dict[str, Judger] | None = None, logger=None
+    ) -> AgentLoopSpec:
         if self.cpu_resources is None:
             return self.build_local(
                 rollout_controller=rollout_controller,
-                judger=judger,
+                judgers=judgers,
                 logger=logger,
             )
 
@@ -44,13 +46,13 @@ class AgentLoopConfig(ABC, BaseModel):
             return self._build_router(
                 rollout_controller=rollout_controller,
                 cpu_resources=self.cpu_resources,
-                judger=judger,
+                judgers=judgers,
                 logger=logger,
             )
         return self._build_ray_actor(
             rollout_controller=rollout_controller,
             cpu_resources=self.cpu_resources,
-            judger=judger,
+            judgers=judgers,
             logger=logger,
         )
 
@@ -58,7 +60,7 @@ class AgentLoopConfig(ABC, BaseModel):
     def build_local(
         self,
         rollout_controller,
-        judger: Judger | None = None,
+        judgers: dict[str, Judger] | None = None,
         logger=None,
     ) -> AgentLoop: ...
 
@@ -67,7 +69,7 @@ class AgentLoopConfig(ABC, BaseModel):
         rollout_controller: RolloutController,
         cpu_resources: CPUResourcesConfig,
         pg: PlacementGroup | None = None,
-        judger: Judger | None = None,
+        judgers: dict[str, Judger] | None = None,
         logger=None,
     ) -> RayAgentLoopProxy:
         return cast(
@@ -76,7 +78,7 @@ class AgentLoopConfig(ABC, BaseModel):
                 AgentLoopActor,
                 self,
                 rollout_controller,
-                judger,
+                judgers,
                 pg=pg,
                 bundle_idx=0,
                 actor_num_cpus=cpu_resources.num_cpus_per_worker,
@@ -90,7 +92,7 @@ class AgentLoopConfig(ABC, BaseModel):
         rollout_controller: RolloutController,
         cpu_resources: CPUResourcesConfig,
         pg: PlacementGroup | None = None,
-        judger: Judger | None = None,
+        judgers: dict[str, Judger] | None = None,
         logger=None,
         start_bundle_idx: int = 0,
     ) -> list[RayAgentLoopProxy]:
@@ -100,7 +102,7 @@ class AgentLoopConfig(ABC, BaseModel):
                 AgentLoopActor,
                 self,
                 rollout_controller,
-                judger,
+                judgers,
                 pg=pg,
                 start_bundle_idx=start_bundle_idx,
                 num_workers=cpu_resources.num_workers,
@@ -115,7 +117,7 @@ class AgentLoopConfig(ABC, BaseModel):
         rollout_controller: RolloutController,
         cpu_resources: CPUResourcesConfig,
         pg: PlacementGroup | None = None,
-        judger: Judger | None = None,
+        judgers: dict[str, Judger] | None = None,
         logger=None,
         start_bundle_idx: int = 0,
     ) -> RouterAgentLoop:
@@ -124,7 +126,7 @@ class AgentLoopConfig(ABC, BaseModel):
                 rollout_controller=rollout_controller,
                 cpu_resources=cpu_resources,
                 pg=pg,
-                judger=judger,
+                judgers=judgers,
                 logger=logger,
                 start_bundle_idx=start_bundle_idx,
             ),
@@ -138,7 +140,7 @@ class AgentLoop(ABC):
         rollout_ctl: RolloutController,
         sample_params: SampleParams,
         hf_checkpoint: str,
-        judger: Judger | None = None,
+        judgers: dict[str, Judger] | None = None,
         logger=None,
     ) -> None:
         self.rollout_ctl = rollout_ctl
@@ -146,7 +148,7 @@ class AgentLoop(ABC):
         self.tokenizer = load_tokenizer(hf_checkpoint, trust_remote_code=True)
         self.processor = load_processor(hf_checkpoint, trust_remote_code=True)
         self.sample_params = sample_params
-        self.judger = judger
+        self.judgers = judgers or {}
         if logger is None:
             self.logger = get_logger()
         else:
@@ -221,12 +223,12 @@ class AgentLoopActor:
         self,
         agent_loop_config: AgentLoopConfig,
         rollout_controller: RolloutController,
-        judger: Judger | None = None,
+        judgers: dict[str, Judger] | None = None,
         logger=None,
     ):
         self.agent_loop = agent_loop_config.build_local(
             rollout_controller=rollout_controller,
-            judger=judger,
+            judgers=judgers,
             logger=logger,
         )
 

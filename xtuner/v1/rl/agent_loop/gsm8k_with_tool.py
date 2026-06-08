@@ -18,13 +18,16 @@ logger = get_logger()
 class GSM8KToolAgentLoopConfig(AgentLoopConfig):
     max_turns: int
 
-    def build_local(self, rollout_controller, judger: Judger | None = None, logger=None) -> "GSM8KToolAgentLoop":
+    def build_local(
+        self, rollout_controller, judgers: dict[str, Judger] | None = None, logger=None
+    ) -> "GSM8KToolAgentLoop":
         return GSM8KToolAgentLoop(
             max_turns=self.max_turns,
             rollout_ctl=rollout_controller,
             hf_checkpoint=self.hf_checkpoint,
             sample_params=self.sample_params,
-            judger=judger,
+            judgers=judgers,
+            logger=logger,
         )
 
 
@@ -42,10 +45,15 @@ class GSM8KToolAgentLoop(AgentLoop):
         rollout_ctl: RolloutController,
         hf_checkpoint: str,
         sample_params: SampleParams,
-        judger: Judger | None = None,
+        judgers: dict[str, Judger] | None = None,
+        logger=None,
     ):
         super().__init__(
-            rollout_ctl=rollout_ctl, hf_checkpoint=hf_checkpoint, sample_params=sample_params, judger=judger
+            rollout_ctl=rollout_ctl,
+            hf_checkpoint=hf_checkpoint,
+            sample_params=sample_params,
+            judgers=judgers,
+            logger=logger,
         )
         self.max_turns = max_turns
         self.tool_call_pattern = re.compile(r"\n*<tool_call>(.*?)</tool_call>", re.DOTALL)
@@ -152,6 +160,16 @@ class GSM8KToolAgentLoop(AgentLoop):
         assert len(rollout_state.response_ids) == len(rollout_state.response_mask) == len(rollout_state.logprobs), (
             f"{len(rollout_state.response_ids)} vs {len(rollout_state.response_mask)} vs {len(rollout_state.logprobs)}"
         )
-        if self.judger is not None:
-            rollout_state = await self.judger.judge(rollout_state)
+        judger = self._resolve_judger(rollout_state)
+        if judger is not None and not judger.is_batch_judger:
+            judged = await judger.judge([rollout_state])
+            rollout_state = judged[0]
         return rollout_state
+
+    def _resolve_judger(self, rollout_state: RolloutState) -> Judger | None:
+        if not self.judgers:
+            return None
+        data_source = rollout_state.data_source
+        if data_source is None:
+            return None
+        return self.judgers.get(data_source)

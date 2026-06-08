@@ -1,9 +1,6 @@
-import asyncio
-
 from xtuner.v1.data_proto.rl_data import RolloutState, SampleParams, Status
 from xtuner.v1.rl.judger import Judger
 from xtuner.v1.rl.rollout import RolloutController
-from xtuner.v1.rl.utils import create_task
 
 from .agent_loop import AgentLoop, AgentLoopConfig
 from .utils import PartialRolloutHandler
@@ -13,8 +10,9 @@ class SingleTurnAgentLoopConfig(AgentLoopConfig):
     """Configuration for the built-in single-turn agent loop.
 
     ``SingleTurnAgentLoopConfig`` runs one model generation for each input
-    ``RolloutState`` and optionally sends the completed output to a judger. It
-    is the default choice for math, QA, and other single-response RL tasks.
+    ``RolloutState`` and optionally sends the completed output to a judger
+    selected via ``rollout_state.data_source``. It is the default choice for
+    math, QA, and other single-response RL tasks.
 
     Args:
         sample_params (SampleParams): Sampling parameters used by the rollout
@@ -24,8 +22,6 @@ class SingleTurnAgentLoopConfig(AgentLoopConfig):
         cpu_resources (CPUResourcesConfig | None): PG-external CPU resources
             used to run this agent loop as Ray actors. ``None`` runs the loop
             in local mode. Defaults to None.
-        enable_batch_judge (bool): Whether to judge a generated group in one
-            batch in ``generate_group``. Defaults to False.
 
     **Examples:**
 
@@ -34,20 +30,18 @@ class SingleTurnAgentLoopConfig(AgentLoopConfig):
         config = SingleTurnAgentLoopConfig(
             sample_params=SampleParams(max_tokens=1024, temperature=1.0),
             hf_checkpoint="Qwen/Qwen3-8B",
-            enable_batch_judge=True,
         )
     """
 
-    enable_batch_judge: bool = False
-
-    def build_local(self, rollout_controller, judger: Judger | None = None, logger=None) -> "SingleTurnAgentLoop":
+    def build_local(
+        self, rollout_controller, judgers: dict[str, Judger] | None = None, logger=None
+    ) -> "SingleTurnAgentLoop":
         return SingleTurnAgentLoop(
             rollout_ctl=rollout_controller,
             sample_params=self.sample_params,
             hf_checkpoint=self.hf_checkpoint,
-            judger=judger,
+            judgers=judgers,
             logger=logger,
-            enable_batch_judge=self.enable_batch_judge,
         )
 
 
@@ -57,14 +51,12 @@ class SingleTurnAgentLoop(AgentLoop):
         rollout_ctl: RolloutController,
         sample_params: SampleParams,
         hf_checkpoint: str,
-        judger: Judger | None = None,
+        judgers: dict[str, Judger] | None = None,
         logger=None,
-        enable_batch_judge: bool = False,
     ):
-        super().__init__(rollout_ctl, sample_params, hf_checkpoint, judger, logger)
+        super().__init__(rollout_ctl, sample_params, hf_checkpoint, judgers, logger)
         self.max_tokens = self.sample_params.max_tokens
         self.partial_rollout_handler = PartialRolloutHandler(max_tokens=self.max_tokens)
-        self.enable_batch_judge = enable_batch_judge
 
     async def generate_sample(
         self,
@@ -85,21 +77,17 @@ class SingleTurnAgentLoop(AgentLoop):
         # 非 COMPLETED 状态（如被截断、放弃等）直接早退，不触发打分
         if rollout_state.status != Status.COMPLETED:
             return rollout_state
-        if self.judger is not None and not self.enable_batch_judge:
-            # 如果开启了批量打分，则在 generate_group 里统一打分，不在这里逐条打分
-            rollout_state = await self.judger.judge([rollout_state])
-            rollout_state = rollout_state[0]
+        judger = self._resolve_judger(rollout_state)
+        # batch judger 由 producer 在 group 完成后统一打分，这里跳过
+        if judger is not None and not judger.is_batch_judger:
+            judged = await judger.judge([rollout_state])
+            rollout_state = judged[0]
         return rollout_state
 
-    async def generate_group(self, rollout_state: list[RolloutState], **kwargs) -> list[RolloutState]:
-        pending_tasks = []
-        for state in rollout_state:
-            state.sample_params = self.sample_params
-            task = create_task(self.generate_sample(state, **kwargs))
-            pending_tasks.append(task)
-        generated_samples = asyncio.gather(*pending_tasks)
-        group_samples = await generated_samples
-        if self.judger is not None and self.enable_batch_judge:
-            # 批量打分
-            group_samples = await self.judger.judge(group_samples)
-        return group_samples
+    def _resolve_judger(self, rollout_state: RolloutState) -> Judger | None:
+        if not self.judgers:
+            return None
+        data_source = rollout_state.data_source
+        if data_source is None:
+            return None
+        return self.judgers.get(data_source)

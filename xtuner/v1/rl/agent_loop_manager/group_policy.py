@@ -181,6 +181,12 @@ class DefaultGroupPolicy(GroupPolicy):
         if n_completed < self._config.min_repeat:
             return GroupState.COLLECTING
 
+        # Batch judgers haven't run yet at trajectory-arrival time — the
+        # whole completed group is scored together later. Skip reward
+        # inspection and finalize as soon as min_repeat is reached.
+        if agg.is_batch_judger:
+            return GroupState.READY
+
         if not self._config.stop_when_all_equal:
             return GroupState.READY
 

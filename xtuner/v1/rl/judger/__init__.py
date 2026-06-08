@@ -1,10 +1,4 @@
 from .compass_verifier_v2 import CompassVerifierV2Config
-from .composed import (
-    ComposedJudger,
-    ComposedJudgerConfig,
-    default_merge_fn,
-    default_select_fn,
-)
 from .dapo_math import DapoMathJudgerConfig
 from .factory import (
     build_judger,

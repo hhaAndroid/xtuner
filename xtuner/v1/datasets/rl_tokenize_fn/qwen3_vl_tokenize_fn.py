@@ -55,7 +55,13 @@ def replace_image_context_and_collect_media_data(
 
 
 class RLQwen3VLTokenizeFunction(Qwen3VLTokenizeFunction):
-    def __init__(self, *args, ignore_multimodal_info: bool = False, data_judger_mapping: dict | None = None, **kwargs):
+    def __init__(
+        self,
+        *args,
+        ignore_multimodal_info: bool = False,
+        data_judger_mapping: dict[str, str] | None = None,
+        **kwargs,
+    ):
         self.ignore_multimodal_info = ignore_multimodal_info
         self.data_judger_mapping = data_judger_mapping
         super().__init__(*args, **kwargs)
@@ -113,9 +119,9 @@ class RLQwen3VLTokenizeFunction(Qwen3VLTokenizeFunction):
             extra_info["origin_data_source"] = data_source
             data_judger_mapping = getattr(self, "data_judger_mapping", None)
             if data_judger_mapping is not None:
-                mapped_judger_name_and_weight = data_judger_mapping.get(data_source)
+                mapped_judger_name = data_judger_mapping.get(data_source)
             else:
-                mapped_judger_name_and_weight = {data_source: 1.0}
+                mapped_judger_name = data_source
 
             return RolloutState(
                 message=messages,
@@ -123,7 +129,7 @@ class RLQwen3VLTokenizeFunction(Qwen3VLTokenizeFunction):
                 proxy_attn_flops=data.get("proxy_attn_flops", float(data["num_tokens"])),
                 prompt_ids=prompt_token_ids,
                 position_ids=data["position_ids"],
-                data_source=mapped_judger_name_and_weight,
+                data_source=mapped_judger_name,
                 reward_model=item.get("reward_model", {}),
                 mm_info=mm_info,
                 extra_fields=extra_info,
@@ -135,7 +141,7 @@ class RLQwen3VLTokenizeFunction(Qwen3VLTokenizeFunction):
 
 class RLQwen3VLTokenizeFnConfig(Qwen3VLTokenizeFnConfig):
     ignore_multimodal_info: bool = False  # eval is True
-    data_judger_mapping: dict | None = None  # {origin_data_source: mapped_judger_name_and_weight}
+    data_judger_mapping: dict[str, str] | None = None  # {origin_data_source: judger_name}
 
     def build(
         self, tokenizer, tokenizer_hash: str | None = None, anno_name: str = "", **kwargs

@@ -12,7 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from transformers import PreTrainedTokenizer, PreTrainedTokenizerFast
 from xtuner.v1.data_proto.rl_data import RolloutState, Status
 from xtuner.v1.rl.agent_loop import AgentLoopConfig, AgentLoopSpec, get_agent_loop_rollout_ctl
-from xtuner.v1.rl.judger import ComposedJudgerConfig, JudgerConfig, build_judger
+from xtuner.v1.rl.judger import JudgerConfig, build_judger
 from xtuner.v1.rl.replay_buffer import ReplayBuffer
 from xtuner.v1.rl.rollout import RolloutController, continue_generation, pause_generation
 from xtuner.v1.rl.utils import asyncio_run
@@ -219,9 +219,10 @@ class TaskSpecConfig(BaseModel):
             multi-task training. Defaults to 1.0.
         agent_loop_config (AgentLoopConfig): Agent loop configuration used to
             generate rollout samples for this task.
-        judger_config (JudgerConfig | ComposedJudgerConfig | None): Optional
-            judger configuration used to score generated samples. Defaults to
-            None.
+        judger_config (dict[str, JudgerConfig] | None): Optional mapping from
+            judger name to judger configuration. The agent loop selects which
+            entry to use for a given rollout via ``rollout_state.data_source``.
+            Defaults to None.
         produce_strategy_config (ProduceStrategyConfig): Strategy used to
             produce rollout samples. Defaults to ``SyncProduceStrategyConfig``.
         sampler_config (SamplerConfig): Dataset sampler configuration for this
@@ -248,7 +249,7 @@ class TaskSpecConfig(BaseModel):
     task_name: str
     weight: float = Field(default=1.0, ge=0.0)
     agent_loop_config: AgentLoopConfig
-    judger_config: JudgerConfig | ComposedJudgerConfig | None = None
+    judger_config: dict[str, JudgerConfig] | None = None
     produce_strategy_config: ProduceStrategyConfig = SyncProduceStrategyConfig()
     sampler_config: SamplerConfig
 
@@ -305,14 +306,20 @@ class AgentLoopManagerConfig(BaseModel):
                 raise ValueError(f"Duplicate task_name found in AgentLoopManagerConfig: {task_cfg.task_name}")
             seen_task_names.add(task_cfg.task_name)
 
+            judgers = (
+                {name: build_judger(cfg) for name, cfg in task_cfg.judger_config.items()}
+                if task_cfg.judger_config
+                else None
+            )
             agent_loop = task_cfg.agent_loop_config.build(
                 rollout_controller=rollout_controller,
-                judger=build_judger(task_cfg.judger_config) if task_cfg.judger_config is not None else None,
+                judgers=judgers,
                 logger=logger,
             )
             produce_strategy = task_cfg.produce_strategy_config.build(
                 sync_weights_interval=sync_weights_interval,
                 prompt_repeat_k=task_cfg.sampler_config.prompt_repeat_k,
+                judgers=judgers,
             )
             sampler = task_cfg.sampler_config.build(tokenizer=tokenizer, replay_buffer=replay_buffer)
             task_runners.append(

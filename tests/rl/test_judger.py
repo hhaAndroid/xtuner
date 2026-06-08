@@ -197,28 +197,5 @@ class TestJudgerController(unittest.TestCase):
         finally:
             server.stop()
 
-    def test_composed_judger_config(self):
-        from xtuner.v1.rl.judger import ComposedJudgerConfig, JudgerConfig
-
-        def reward_a(response, label, extra_info):
-            return {"score": 1.0, "source": "a"}
-
-        def reward_b(response, label, extra_info):
-            return {"score": 0.25, "source": "b"}
-
-        judger_config = ComposedJudgerConfig(
-            branches={
-                "correctness": JudgerConfig(judger_name="correctness", reward_handler=reward_a),
-                "format": JudgerConfig(judger_name="format", reward_handler=reward_b),
-            },
-            select_fn=lambda state, branches: ["correctness", "format"],
-        )
-
-        judger = judger_config.build()
-        rollout_state = asyncio.run(judger.judge(FAKE_JUDGER_INPUT_ITEM.model_copy(deep=True)))
-
-        self.assertEqual(rollout_state.reward["correctness"], 1.0)
-        self.assertEqual(rollout_state.reward["format"], 0.25)
-
 if __name__ == "__main__":
     unittest.main()

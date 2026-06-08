@@ -25,6 +25,7 @@ from xtuner.v1.rl.agent_loop_manager.group_policy import (
     GroupPolicyConfig,
     GroupState,
 )
+from xtuner.v1.rl.judger import Judger
 from xtuner.v1.rl.agent_loop_manager.trajectory_scheduler import (
     PRIORITY_COLLECTING,
     PRIORITY_NEEDS_MORE,
@@ -401,6 +402,7 @@ class ProduceStrategyConfig(ABC, BaseModel):
         *,
         sync_weights_interval: int = 1,
         prompt_repeat_k: int = 1,
+        judgers: dict[str, Judger] | None = None,
     ) -> "ProduceStrategy": ...
 
 
@@ -419,6 +421,7 @@ class SyncProduceStrategyConfig(ProduceStrategyConfig):
         *,
         sync_weights_interval: int = 1,
         prompt_repeat_k: int = 1,
+        judgers: dict[str, Judger] | None = None,
     ) -> "ProduceStrategy":
         return _build_trajectory_strategy(
             wait_until_all_ready=True,
@@ -430,6 +433,7 @@ class SyncProduceStrategyConfig(ProduceStrategyConfig):
             prompt_repeat_k=prompt_repeat_k,
             is_valid_sample_fn=self.is_valid_sample_fn,
             should_continue_fn=self.should_continue_fn,
+            judgers=judgers,
         )
 
 
@@ -454,6 +458,7 @@ class AsyncProduceStrategyConfig(ProduceStrategyConfig):
         *,
         sync_weights_interval: int = 1,
         prompt_repeat_k: int = 1,
+        judgers: dict[str, Judger] | None = None,
     ) -> "ProduceStrategy":
         return _build_trajectory_strategy(
             wait_until_all_ready=False,
@@ -465,6 +470,7 @@ class AsyncProduceStrategyConfig(ProduceStrategyConfig):
             prompt_repeat_k=prompt_repeat_k,
             is_valid_sample_fn=self.is_valid_sample_fn,
             should_continue_fn=self.should_continue_fn,
+            judgers=judgers,
         )
 
 
@@ -480,6 +486,7 @@ def _build_trajectory_strategy(
     is_valid_sample_fn: IsValidSampleFn,
     should_continue_fn: ShouldContinueFn,
     count_unit: CountUnit = "groups",
+    judgers: dict[str, Judger] | None = None,
 ) -> "TrajectoryProduceStrategy":
     group_policy = GroupPolicyConfig(
         min_repeat=prompt_repeat_k,
@@ -501,6 +508,7 @@ def _build_trajectory_strategy(
         is_valid_sample_fn=is_valid_sample_fn,
         should_continue_fn=should_continue_fn,
         count_unit=count_unit,
+        judgers=judgers,
     )
 
 
@@ -539,6 +547,7 @@ class ProgressiveProduceStrategyConfig(ProduceStrategyConfig):
         *,
         sync_weights_interval: int = 1,
         prompt_repeat_k: int = 1,
+        judgers: dict[str, Judger] | None = None,
     ) -> "ProduceStrategy":
         # prompt_repeat_k coming from SamplerConfig is ignored: the
         # progressive config expresses its own min/max via group_policy.
@@ -551,6 +560,7 @@ class ProgressiveProduceStrategyConfig(ProduceStrategyConfig):
             is_valid_sample_fn=self.is_valid_sample_fn,
             should_continue_fn=self.should_continue_fn,
             count_unit="trajectories",
+            judgers=judgers,
         )
 
 
@@ -632,6 +642,7 @@ class TrajectoryProduceStrategy(ProduceStrategy):
         is_valid_sample_fn: IsValidSampleFn,
         should_continue_fn: ShouldContinueFn,
         count_unit: CountUnit = "groups",
+        judgers: dict[str, Judger] | None = None,
     ) -> None:
         super().__init__(is_valid_sample_fn, should_continue_fn)
         self._scheduler = scheduler
@@ -639,6 +650,7 @@ class TrajectoryProduceStrategy(ProduceStrategy):
         self._aggregator = GroupAggregator(group_policy)
         self._over_sample_threshold = over_sample_threshold
         self._count_unit: CountUnit = count_unit
+        self._judgers: dict[str, Judger] = judgers or {}
 
     @property
     def stale_threshold(self) -> int:
@@ -661,6 +673,17 @@ class TrajectoryProduceStrategy(ProduceStrategy):
 
     def pending_task_count(self) -> int:
         return self._scheduler.pending_count()
+
+    def _resolve_batch_judger(self, state: RolloutState) -> Judger | None:
+        if not self._judgers:
+            return None
+        data_source = state.data_source
+        if data_source is None:
+            return None
+        judger = self._judgers.get(data_source)
+        if judger is None or not judger.is_batch_judger:
+            return None
+        return judger
 
     async def pause_produce(self, ctx: ProduceContext) -> float:
         pause_start = time.perf_counter()
@@ -893,6 +916,9 @@ class TrajectoryProduceStrategy(ProduceStrategy):
 
             finalized_group = await self._aggregator.try_finalize_if_ready(snap.prompt_uid)
             if finalized_group is not None:
+                batch_judger = self._resolve_batch_judger(finalized_group[0])
+                if batch_judger is not None:
+                    finalized_group = await batch_judger.judge(finalized_group)
                 await ctx.put_generated_group(finalized_group)
                 stats["finalized"] += 1
                 continue
@@ -1022,7 +1048,11 @@ class TrajectoryProduceStrategy(ProduceStrategy):
                     f"this round; stopping further preload."
                 )
                 return
-            await self._aggregator.register_prompt(prompt_req.prompt, ctx.task_name)
+            await self._aggregator.register_prompt(
+                prompt_req.prompt,
+                ctx.task_name,
+                is_batch_judger=self._resolve_batch_judger(prompt_req.prompt) is not None,
+            )
             for _ in range(per_prompt):
                 await self._scheduler.submit(prompt_req)
             preloaded += 1
@@ -1065,7 +1095,11 @@ class TrajectoryProduceStrategy(ProduceStrategy):
                     f"this round; stopping further preload."
                 )
                 return
-            await self._aggregator.register_prompt(prompt_req.prompt, ctx.task_name)
+            await self._aggregator.register_prompt(
+                prompt_req.prompt,
+                ctx.task_name,
+                is_batch_judger=self._resolve_batch_judger(prompt_req.prompt) is not None,
+            )
             await self._scheduler.submit(prompt_req)
             preloaded += 1
 
@@ -1144,6 +1178,10 @@ class TrajectoryProduceStrategy(ProduceStrategy):
             )
             if state is GroupState.READY:
                 assert group is not None
+                batch_judger = self._resolve_batch_judger(group[0])
+                if batch_judger is not None:
+                    judged = await batch_judger.judge(group)
+                    group = judged
                 await ctx.put_generated_group(group)
             elif state is GroupState.NEEDS_MORE:
                 # All-equal rewards after min_repeat: extend the aggregation by

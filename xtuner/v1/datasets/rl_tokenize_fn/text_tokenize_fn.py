@@ -18,7 +18,7 @@ class RLTextTokenizeFn(CachableTokenizeFunction[RolloutState]):
         tokenizer: PreTrainedTokenizer,
         max_length: int | None = None,
         tools_schema: list | None = None,
-        data_judger_mapping: dict | None = None,
+        data_judger_mapping: dict[str, str] | None = None,
         system_prompt: str | None = None,
     ):
         super().__init__(tokenizer)
@@ -70,15 +70,15 @@ class RLTextTokenizeFn(CachableTokenizeFunction[RolloutState]):
             if self.max_length is not None:
                 assert num_tokens <= self.max_length, f"num_tokens {num_tokens} > max_length {self.max_length}"
 
-        mapped_judger_name_and_weight = None
+        mapped_judger_name: str | None = None
         if self.state != "cache":
             data_source = item.get("data_source")
             assert data_source is not None, "data_source is required in item"
             extra_info["origin_data_source"] = data_source
             if self.data_judger_mapping is not None:
-                mapped_judger_name_and_weight = self.data_judger_mapping.get(data_source)
+                mapped_judger_name = self.data_judger_mapping.get(data_source)
             else:
-                mapped_judger_name_and_weight = {data_source: 1.0}
+                mapped_judger_name = data_source
 
         if self.state == "cache":
             # If return RolloutState, the cache speed will be slow because of serialization problem
@@ -93,7 +93,7 @@ class RLTextTokenizeFn(CachableTokenizeFunction[RolloutState]):
                 reward_model=item.get("reward_model", {}),
                 num_tokens=num_tokens,
                 proxy_attn_flops=float(num_tokens),
-                data_source=mapped_judger_name_and_weight,
+                data_source=mapped_judger_name,
                 extra_fields=extra_info,
             )
 
@@ -105,6 +105,7 @@ class RLTextTokenizeFnConfig(BaseModel):
     model_config = ConfigDict(title="Text RL dataset config for xtuner", extra="forbid")
     max_length: int | None = None
     tools_schema: list | None = None
+    data_judger_mapping: dict[str, str] | None = None
 
     def build(self, tokenizer: PreTrainedTokenizer, **kwargs) -> RLTextTokenizeFn:
-        return RLTextTokenizeFn(tokenizer=tokenizer, max_length=self.max_length, tools_schema=self.tools_schema)
+        return RLTextTokenizeFn(tokenizer=tokenizer, max_length=self.max_length, tools_schema=self.tools_schema, data_judger_mapping=self.data_judger_mapping)
