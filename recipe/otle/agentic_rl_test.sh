@@ -5,6 +5,7 @@ cd /mnt/shared-storage-user/huanghaian/code/xtuner/
 export PATH=/usr/local/nvidia/bin/:$PATH
 export LD_LIBRARY_PATH=/usr/local/nvidia/lib:/usr/local/nvidia/lib64:$LD_LIBRARY_PATH
 
+# 需要配合修改的 crg 项目路径。分支名也叫做 otel
 CRG_PATH="/mnt/shared-storage-user/huanghaian/code/gitlab/crg_rl_projects/"
 LAGENT_PATH="/mnt/shared-storage-user/huanghaian/code/gateway/lagent"
 LMDEPLOY_PATH="/mnt/shared-storage-user/huanghaian/code/lmdeploy"
