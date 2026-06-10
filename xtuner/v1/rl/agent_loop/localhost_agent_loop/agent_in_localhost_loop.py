@@ -6,6 +6,7 @@ import importlib
 import json
 import traceback
 import uuid
+from contextlib import contextmanager
 from typing import Any, Literal
 
 from lagent.utils import create_object, ctx_session_id
@@ -61,6 +62,34 @@ def _load_eval_trace_segment(artifacts: dict[str, Any]) -> tuple[list[dict[str, 
 
 def _to_json_safe(value: Any) -> Any:
     return json.loads(json.dumps(value, ensure_ascii=False, default=str))
+
+
+@contextmanager
+def _otel_baggage(attrs: dict[str, Any] | None):
+    if not attrs:
+        yield
+        return
+    token = None
+    try:
+        from opentelemetry import baggage, context
+
+        ctx = context.get_current()
+        for key, value in attrs.items():
+            if value is None:
+                continue
+            ctx = baggage.set_baggage(str(key), str(value), context=ctx)
+        token = context.attach(ctx)
+    except Exception:
+        yield
+        return
+
+    try:
+        yield
+    finally:
+        try:
+            context.detach(token)
+        except Exception:
+            pass
 
 
 class AgentInLocalhostLoopConfig(AgentLoopConfig):
@@ -126,7 +155,7 @@ class AgentInLocalhostLoop(AgentLoop):
                 rollout_state.uid = uuid.uuid4().int
             item.uid = rollout_state.uid
             item.group_id = rollout_state.message_uid
-            result = await self._run_item(item)
+            result = await self._run_item(item, otel_attrs=rollout_state.extra_fields.get("otel"))
             await self._fill_rollout_state(rollout_state, result)
             return rollout_state
         except Exception as exc:
@@ -142,11 +171,11 @@ class AgentInLocalhostLoop(AgentLoop):
             self.logger.error(f"[AgentInLocalhostLoop] failed: {exc}\n{traceback.format_exc()}")
             return rollout_state
 
-    async def _run_item(self, item: AgentRolloutItem) -> AgentRolloutItem:
+    async def _run_item(self, item: AgentRolloutItem, otel_attrs: dict[str, Any] | None = None) -> AgentRolloutItem:
         runner = _resolve_runner(item.pipeline)
         if runner is None:
             raise ValueError("AgentRolloutItem.pipeline is required.")
-        with ctx_session_id.set(str(item.uid)):
+        with ctx_session_id.set(str(item.uid)), _otel_baggage(otel_attrs):
             return await runner.run(item)
 
     async def _fill_rollout_state(self, rollout_state: RolloutState, item: AgentRolloutItem) -> None:

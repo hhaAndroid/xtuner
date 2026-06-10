@@ -1,6 +1,9 @@
 import copy
+import hashlib
+import json
+import os
 from pathlib import Path
-from typing import Iterator, Optional, cast
+from typing import Any, Iterator, Optional, cast
 from uuid import uuid4
 
 import ray
@@ -17,6 +20,43 @@ from xtuner.v1.utils.logger import get_logger
 
 
 logger = get_logger(__name__)
+
+
+def _json_dumps_stable(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, default=str, separators=(",", ":"))
+
+
+def _otel_run_id() -> str | None:
+    return (
+        os.environ.get("XTUNER_OTEL_RUN_ID")
+        or os.environ.get("RUN_ID")
+        or os.environ.get("MODEL_NAME")
+        or os.environ.get("WORK_DIR")
+    )
+
+
+def _build_otel_attrs(data: RolloutState, group_index: int, repeat_index: int, prompt_repeat_k: int) -> dict[str, Any]:
+    data_source = data.data_source
+    if data.message_uid is not None:
+        case_payload = {"data_source": data_source, "message_uid": data.message_uid, "repeat_index": repeat_index}
+    else:
+        case_payload = {"data_source": data_source, "message": data.message, "repeat_index": repeat_index}
+    case_hash = hashlib.sha1(_json_dumps_stable(case_payload).encode("utf-8")).hexdigest()[:16]
+
+    attrs: dict[str, Any] = {
+        "case.id": case_hash,
+        "sample.group_index": group_index,
+        "sample.repeat_index": repeat_index,
+        "sample.repeat_k": prompt_repeat_k,
+    }
+    run_id = _otel_run_id()
+    if run_id:
+        attrs["run.id"] = run_id
+    if data.message_uid is not None:
+        attrs["sample.message_uid"] = data.message_uid
+    if data_source is not None:
+        attrs["sample.data_source"] = _json_dumps_stable(data_source) if isinstance(data_source, dict) else str(data_source)
+    return attrs
 
 
 class SamplerConfig(BaseModel):
@@ -104,6 +144,9 @@ class _DatasetSampler:
         group_data = []
         for item_idx in range(self.prompt_repeat_k):
             new_data = copy.deepcopy(data)
+            new_data.extra_fields.setdefault("otel", {}).update(
+                _build_otel_attrs(data, self._consumed_samples, item_idx, self.prompt_repeat_k)
+            )
             if XTUNER_DETERMINISTIC:
                 new_data.message_uid = message_uid
                 new_data.uid = uid_base + item_idx

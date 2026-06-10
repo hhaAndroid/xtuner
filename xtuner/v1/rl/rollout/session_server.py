@@ -1,4 +1,5 @@
 import json
+import time
 from functools import reduce
 from operator import add
 from typing import Any, Optional
@@ -11,6 +12,7 @@ from transformers import AutoTokenizer
 from xtuner.v1.utils import get_logger
 
 from .chat_template import canonicalize_messages_for_chat_template
+from .otel import begin_span, end_span, extract_context, inject_context, set_attrs, start_span, use_context
 from .trace_store import TokenizedSegment, get_store
 
 
@@ -73,7 +75,7 @@ def _extract_output_logprobs(choice: dict, output_token_ids: list[int]) -> list[
     return [item[0] for item in output_token_logprobs]
 
 
-_SESSION_SERVER_ONLY_KEYS = {"session_id"}
+_SESSION_SERVER_ONLY_KEYS = {"session_id", "_otel_trace_context"}
 
 
 def _bool_request_value(value: Any, default: bool = False) -> bool:
@@ -86,6 +88,27 @@ def _bool_request_value(value: Any, default: bool = False) -> bool:
 
 def _request_uses_trace_store(req_body: dict) -> bool:
     return _bool_request_value(req_body.get("return_token_ids"), True)
+
+
+def _list_len(value: Any) -> int | None:
+    return len(value) if isinstance(value, list) else None
+
+
+def _choices_output_ids_len(data: dict) -> int:
+    total = 0
+    for choice in data.get("choices") or []:
+        output_ids = choice.get("output_ids")
+        if isinstance(output_ids, list):
+            total += len(output_ids)
+    return total
+
+
+def _response_output_ids_len(data: dict) -> int | None:
+    output_ids = data.get("output_ids")
+    if isinstance(output_ids, list):
+        return len(output_ids)
+    total = _choices_output_ids_len(data)
+    return total if total > 0 else None
 
 
 class SessionServer:
@@ -135,6 +158,16 @@ class SessionServer:
     async def on_request(self, req_body: dict, *, trace_enabled: bool = True) -> dict:
         """Hook for processing/modifying the request before forwarding."""
 
+        with start_span(
+            "xtuner.session_server.on_request",
+            session_id=req_body.get("session_id"),
+            trace_store_enabled=trace_enabled,
+            messages=len(req_body.get("messages") or []) if isinstance(req_body.get("messages"), list) else None,
+            tools=len(req_body.get("tools") or []) if isinstance(req_body.get("tools"), list) else None,
+        ) as span:
+            return await self._on_request_impl(req_body, trace_enabled=trace_enabled, span=span)
+
+    async def _on_request_impl(self, req_body: dict, *, trace_enabled: bool, span: Any = None) -> dict:
         if not trace_enabled:
             worker_req = {k: v for k, v in req_body.items() if k not in _SESSION_SERVER_ONLY_KEYS}
             if "logprobs" in worker_req:
@@ -148,22 +181,34 @@ class SessionServer:
 
         session_id = req_body["session_id"]
         # 1. chat_template render 出完整 prompt string，不 tokenize 全量
-        prompt_text = self.tokenizer.apply_chat_template(
-            canonicalize_messages_for_chat_template(req_body["messages"]),
-            tools=req_body.get("tools", None),
-            add_generation_prompt=True,
-            tokenize=False,
-        )
+        with start_span("xtuner.session_server.apply_chat_template", session_id=session_id):
+            prompt_text = self.tokenizer.apply_chat_template(
+                canonicalize_messages_for_chat_template(req_body["messages"]),
+                tools=req_body.get("tools", None),
+                add_generation_prompt=True,
+                tokenize=False,
+            )
+        set_attrs(span, prompt_chars=len(prompt_text))
 
         # 2. Store 做 string prefix match。
-        prefix, nodes = await self.store.search.remote(session_id, prompt_text, filter_none=True)
+        with start_span("xtuner.session_server.trace_store.search_prompt", session_id=session_id):
+            prefix, nodes = await self.store.search.remote(session_id, prompt_text, filter_none=True)
         if prefix:
             get_logger().debug(f"Hit prefix cache for session {session_id}")
         delta, delta_ids = prompt_text[len(prefix) :], []
         if delta:
-            delta_ids = self.tokenizer.encode(delta, add_special_tokens=False)
-            await self.store.insert.remote(session_id, prompt_text, TokenizedSegment(text=delta, token_ids=delta_ids))
+            with start_span("xtuner.session_server.tokenize_delta", session_id=session_id, delta_chars=len(delta)):
+                delta_ids = self.tokenizer.encode(delta, add_special_tokens=False)
+            with start_span(
+                "xtuner.session_server.trace_store.insert_prompt_delta",
+                session_id=session_id,
+                delta_tokens=len(delta_ids),
+            ):
+                await self.store.insert.remote(
+                    session_id, prompt_text, TokenizedSegment(text=delta, token_ids=delta_ids)
+                )
         input_ids = reduce(add, [node.value.token_ids for node in nodes] + [delta_ids])
+        set_attrs(span, prefix_chars=len(prefix), delta_chars=len(delta), input_tokens=len(input_ids))
 
         # 3. 组装 OpenAI chat completions 请求。
         worker_req = {
@@ -184,6 +229,14 @@ class SessionServer:
     async def on_response(self, worker_resp: dict, *, trace_enabled: bool = True) -> dict:
         """Hook for processing the parsed response received from the worker."""
 
+        with start_span(
+            "xtuner.session_server.on_response",
+            session_id=worker_resp.get("session_id"),
+            trace_store_enabled=trace_enabled,
+        ) as span:
+            return await self._on_response_impl(worker_resp, trace_enabled=trace_enabled, span=span)
+
+    async def _on_response_impl(self, worker_resp: dict, *, trace_enabled: bool, span: Any = None) -> dict:
         if not trace_enabled:
             return {k: v for k, v in worker_resp.items() if k not in {"messages", "tools"}}
 
@@ -198,33 +251,47 @@ class SessionServer:
                 "SessionServer response choice has no output_ids; "
                 "cannot export a training trace for this assistant turn."
             )
+        message = choice.get("message") or {}
+        set_attrs(
+            span,
+            output_tokens=len(output_token_ids),
+            response_chars=len(message.get("content") or ""),
+            finish_reason=choice.get("finish_reason"),
+        )
         output_logprobs = _extract_output_logprobs(choice, output_token_ids)
         raw_routed_expert = choice.get("routed_experts")  # 本次 call 的 raw routed_expert，可为 None
 
         # 2. Store 把 input_delta / assistant_output 两个节点补齐字段。
-        old_prompt = self.tokenizer.apply_chat_template(
-            canonicalize_messages_for_chat_template(messages), tools=tools, add_generation_prompt=True, tokenize=False
-        )
-        messages = [*messages, choice["message"]]
-        new_prompt = (
-            self.tokenizer.apply_chat_template(
+        with start_span("xtuner.session_server.apply_old_prompt_template", session_id=session_id):
+            old_prompt = self.tokenizer.apply_chat_template(
                 canonicalize_messages_for_chat_template(messages),
                 tools=tools,
-                add_generation_prompt=False,
+                add_generation_prompt=True,
                 tokenize=False,
             )
-        ).rstrip()
+        messages = [*messages, choice["message"]]
+        with start_span("xtuner.session_server.apply_new_prompt_template", session_id=session_id):
+            new_prompt = (
+                self.tokenizer.apply_chat_template(
+                    canonicalize_messages_for_chat_template(messages),
+                    tools=tools,
+                    add_generation_prompt=False,
+                    tokenize=False,
+                )
+            ).rstrip()
         assert new_prompt.startswith(old_prompt) and new_prompt.endswith(self.stop_word)
 
         if raw_routed_expert is not None:
-            raw_routed_expert = await self._decode_routed_experts(raw_routed_expert)
+            with start_span("xtuner.session_server.decode_routed_experts", session_id=session_id):
+                raw_routed_expert = await self._decode_routed_experts(raw_routed_expert)
             if len(raw_routed_expert) > 0:
                 num_layers = raw_routed_expert.shape[1]
                 topk_experts = raw_routed_expert.shape[2]
                 dummy_expert = np.full((1, num_layers, topk_experts), 0, dtype=raw_routed_expert.dtype)
                 raw_routed_expert = np.concatenate([dummy_expert, raw_routed_expert], axis=0)
 
-            _, nodes = await self.store.search.remote(session_id, old_prompt, filter_none=True)
+            with start_span("xtuner.session_server.trace_store.search_old_prompt", session_id=session_id):
+                _, nodes = await self.store.search.remote(session_id, old_prompt, filter_none=True)
 
             # last node in nodes corresponds to the delta inserted in on_request (if any)
             if nodes:
@@ -241,24 +308,34 @@ class SessionServer:
                 if delta_len > 0:
                     delta_node_val.expert_key = ray.put(delta_expert)
                     # update delta node in store
-                    await self.store.insert.remote(session_id, old_prompt, delta_node_val)
+                    with start_span(
+                        "xtuner.session_server.trace_store.update_prompt_delta",
+                        session_id=session_id,
+                        delta_tokens=delta_len,
+                    ):
+                        await self.store.insert.remote(session_id, old_prompt, delta_node_val)
 
                 raw_routed_expert = ray.put(response_expert)
             else:
                 raw_routed_expert = ray.put(raw_routed_expert)
 
-        await self.store.insert.remote(
-            session_id,
-            key=new_prompt,
-            value=TokenizedSegment(
-                text=new_prompt[len(old_prompt) :],
-                token_ids=output_token_ids,
-                logprobs=output_logprobs,
-                labels=output_token_ids,
-                expert_key=raw_routed_expert,
-                length=len(output_token_ids),
-            ),
-        )
+        with start_span(
+            "xtuner.session_server.trace_store.insert_response",
+            session_id=session_id,
+            output_tokens=len(output_token_ids),
+        ):
+            await self.store.insert.remote(
+                session_id,
+                key=new_prompt,
+                value=TokenizedSegment(
+                    text=new_prompt[len(old_prompt) :],
+                    token_ids=output_token_ids,
+                    logprobs=output_logprobs,
+                    labels=output_token_ids,
+                    expert_key=raw_routed_expert,
+                    length=len(output_token_ids),
+                ),
+            )
 
         # 3. 返回标准 OpenAI response，session_id 由 SessionClient 层再剥
         resp = {k: v for k, v in worker_resp.items() if k != "messages"}
@@ -295,8 +372,52 @@ class SessionServer:
     async def _handle_request(self, request: web.Request) -> web.Response:
         """Proxy handler for the worker API."""
 
-        # Read the request body
         request_body = await request.read()
+        body_trace_context = None
+        if request_body:
+            try:
+                body_data = json.loads(request_body)
+                body_trace_context = body_data.get("_otel_trace_context") if isinstance(body_data, dict) else None
+            except json.JSONDecodeError:
+                body_trace_context = None
+
+        traceparent_header = request.headers.get("traceparent")
+        traceparent_body = None
+        if isinstance(body_trace_context, dict):
+            traceparent_body = body_trace_context.get("traceparent")
+        parent_context_source = "header" if traceparent_header else "none"
+        parent_context = extract_context(request.headers)
+        if traceparent_body:
+            parent_context = extract_context(body_trace_context)
+            parent_context_source = "body"
+
+        with use_context(parent_context):
+            return await self._handle_request_impl(
+                request,
+                request_body=request_body,
+                traceparent_header_present=bool(traceparent_header),
+                traceparent_body_present=bool(traceparent_body),
+                traceparent_context_source=parent_context_source,
+            )
+
+    async def _handle_request_impl(
+        self,
+        request: web.Request,
+        request_body: bytes | None = None,
+        request_span: Any = None,
+        traceparent_header_present: bool = False,
+        traceparent_body_present: bool = False,
+        traceparent_context_source: str = "none",
+    ) -> web.Response:
+        """Proxy handler for the worker API."""
+
+        # Read the request body
+        if request_body is None:
+            with start_span("xtuner.session_server.read_request_body"):
+                request_body = await request.read()
+        else:
+            with start_span("xtuner.session_server.read_request_body", cached=True):
+                pass
         request_data = session_id = messages = None
         trace_enabled = False
         orig_return_logprob = orig_return_token_ids = orig_return_routed_experts = False
@@ -314,9 +435,25 @@ class SessionServer:
                 session_id = request_data.get("session_id")
                 messages = request_data.get("messages")
                 tools = request_data.get("tools", None)
+                body_trace_context = request_data.pop("_otel_trace_context", None)
+                set_attrs(
+                    request_span,
+                    session_id=session_id,
+                    trace_store_enabled=trace_enabled,
+                    request_bytes=len(request_body),
+                    messages=len(messages) if isinstance(messages, list) else None,
+                    tools=len(tools) if isinstance(tools, list) else None,
+                    body_trace_context_present=isinstance(body_trace_context, dict),
+                )
 
                 # Apply purely abstract on_request processing
                 request_data = await self.on_request(request_data, trace_enabled=trace_enabled)
+                input_ids = request_data.get("input_ids") if isinstance(request_data, dict) else None
+                set_attrs(
+                    request_span,
+                    input_tokens=_list_len(input_ids),
+                    max_tokens=request_data.get("max_tokens") if isinstance(request_data, dict) else None,
+                )
                 # Re-serialize the modified payload back to bytes
                 request_body = json.dumps(request_data).encode("utf-8")
             except json.JSONDecodeError:
@@ -332,6 +469,7 @@ class SessionServer:
         forward_headers.pop("host", None)
         forward_headers.pop("Content-Length", None)
         forward_headers.pop("content-length", None)
+        inject_context(forward_headers)
 
         # Re-build Path
         req_path = request.match_info["path"]
@@ -340,6 +478,15 @@ class SessionServer:
             target_url += f"?{request.query_string}"
 
         is_stream = request_data.get("stream", False) if request_data else False
+        input_tokens = _list_len(request_data.get("input_ids")) if request_data else None
+        max_tokens = request_data.get("max_tokens") if request_data else None
+        set_attrs(
+            request_span,
+            target_url=target_url,
+            stream=is_stream,
+            input_tokens=input_tokens,
+            max_tokens=max_tokens,
+        )
 
         def _clean_data(data: dict) -> bool:
             modified = False
@@ -379,72 +526,176 @@ class SessionServer:
         # tool_calls/reasoning_content payloads can exceed the 64KB default and trigger
         # "Chunk too big" from readuntil(b"\n").
         timeout = ClientTimeout(total=self.request_timeout, sock_connect=30)
-        async with ClientSession(read_bufsize=self.read_bufsize, timeout=timeout) as client:
-            async with client.request(
-                method=request.method, url=target_url, headers=forward_headers, data=request_body
-            ) as resp:
-                # Setup proper stream vs sync response objects
-                if is_stream:
-                    response_chunks = []
-                    response = web.StreamResponse(
-                        status=resp.status,
-                        headers={
-                            k: v
-                            for k, v in resp.headers.items()
-                            if k.lower() not in ("transfer-encoding", "content-length", "content-encoding")
-                        },
-                    )
-                    await response.prepare(request)
-                    # If the downstream client closes the socket mid-stream
-                    # (e.g. AsyncAPIClient bails out on a finish_reason=='error'
-                    # chunk after the prompt overflowed the session window),
-                    # keep draining the upstream so the trace is still recorded
-                    # in full but stop attempting to write to the closed socket.
-                    client_alive = True
-                    async for line in resp.content:
-                        # Keep unmodified line for trace store parsing
-                        if trace_enabled:
-                            response_chunks.append(line)
+        forward_span = begin_span(
+            "xtuner.session_server.forward_worker",
+            target_url=target_url,
+            stream=is_stream,
+            request_bytes=len(request_body) if request_body else 0,
+            timeout_s=self.request_timeout,
+            input_tokens=input_tokens,
+            max_tokens=max_tokens,
+            model=request_data.get("model") if request_data else None,
+            http_method=request.method,
+            http_path=request.path,
+            worker_base_url=self.worker_base_url,
+            traceparent_header_present=traceparent_header_present,
+            traceparent_body_present=traceparent_body_present,
+            traceparent_context_source=traceparent_context_source,
+        )
+        try:
+            async with ClientSession(read_bufsize=self.read_bufsize, timeout=timeout) as client:
+                async with client.request(
+                    method=request.method, url=target_url, headers=forward_headers, data=request_body
+                ) as resp:
+                    set_attrs(forward_span, http_status=resp.status)
+                    # Setup proper stream vs sync response objects
+                    if is_stream:
+                        response_chunks = []
+                        response = web.StreamResponse(
+                            status=resp.status,
+                            headers={
+                                k: v
+                                for k, v in resp.headers.items()
+                                if k.lower() not in ("transfer-encoding", "content-length", "content-encoding")
+                            },
+                        )
+                        await response.prepare(request)
+                        # If the downstream client closes the socket mid-stream
+                        # (e.g. AsyncAPIClient bails out on a finish_reason=='error'
+                        # chunk after the prompt overflowed the session window),
+                        # keep draining the upstream so the trace is still recorded
+                        # in full but stop attempting to write to the closed socket.
+                        client_alive = True
+                        stream_span = begin_span(
+                            "xtuner.session_server.stream_read",
+                            target_url=target_url,
+                            input_tokens=input_tokens,
+                            max_tokens=max_tokens,
+                        )
+                        stream_start = time.perf_counter()
+                        first_chunk_ms = None
+                        first_output_token_ms = None
+                        first_content_ms = None
+                        chunk_count = 0
+                        raw_response_bytes = 0
+                        output_tokens = 0
+                        usage_prompt_tokens = None
+                        usage_completion_tokens = None
+                        usage_total_tokens = None
+                        finish_reason = None
+                        try:
+                            async for line in resp.content:
+                                chunk_count += 1
+                                raw_response_bytes += len(line)
+                                if first_chunk_ms is None:
+                                    first_chunk_ms = (time.perf_counter() - stream_start) * 1000
+                                # Keep unmodified line for trace store parsing
+                                if trace_enabled:
+                                    response_chunks.append(line)
 
-                        # Dynamically prune added fields before writing to client
-                        if request_data is not None and line.startswith(b"data: ") and line.strip() != b"data: [DONE]":
+                                # Dynamically prune added fields before writing to client
+                                if (
+                                    request_data is not None
+                                    and line.startswith(b"data: ")
+                                    and line.strip() != b"data: [DONE]"
+                                ):
+                                    try:
+                                        text = line.decode("utf-8")
+                                        data = json.loads(text[6:])
+                                        event_output_tokens = _choices_output_ids_len(data)
+                                        if event_output_tokens > 0 and first_output_token_ms is None:
+                                            first_output_token_ms = (time.perf_counter() - stream_start) * 1000
+                                        output_tokens += event_output_tokens
+                                        usage = data.get("usage")
+                                        if isinstance(usage, dict):
+                                            usage_prompt_tokens = usage.get("prompt_tokens", usage_prompt_tokens)
+                                            usage_completion_tokens = usage.get(
+                                                "completion_tokens", usage_completion_tokens
+                                            )
+                                            usage_total_tokens = usage.get("total_tokens", usage_total_tokens)
+                                        for choice in data.get("choices") or []:
+                                            delta = choice.get("delta") or {}
+                                            if delta.get("content") and first_content_ms is None:
+                                                first_content_ms = (time.perf_counter() - stream_start) * 1000
+                                            if choice.get("finish_reason"):
+                                                finish_reason = choice.get("finish_reason")
+                                        if _clean_data(data):
+                                            line = ("data: " + json.dumps(data) + "\n").encode("utf-8")
+                                    except Exception:
+                                        pass
+
+                                # Delay [DONE] only while a training trace still needs to be exported.
+                                if client_alive and (not trace_enabled or line.strip() != b"data: [DONE]"):
+                                    try:
+                                        await response.write(line)
+                                    except (ConnectionError, ClientConnectionResetError):
+                                        client_alive = False
+                        finally:
+                            end_span(
+                                stream_span,
+                                first_chunk_ms=first_chunk_ms,
+                                first_output_token_ms=first_output_token_ms,
+                                first_content_ms=first_content_ms,
+                                chunks=chunk_count,
+                                raw_response_bytes=raw_response_bytes,
+                                output_tokens=output_tokens if output_tokens > 0 else None,
+                                prompt_tokens=usage_prompt_tokens,
+                                completion_tokens=usage_completion_tokens,
+                                total_tokens=usage_total_tokens,
+                                finish_reason=finish_reason,
+                                client_alive=client_alive,
+                            )
+                            set_attrs(
+                                forward_span,
+                                first_chunk_ms=first_chunk_ms,
+                                first_output_token_ms=first_output_token_ms,
+                                first_content_ms=first_content_ms,
+                                output_tokens=output_tokens if output_tokens > 0 else None,
+                                prompt_tokens=usage_prompt_tokens,
+                                completion_tokens=usage_completion_tokens,
+                                total_tokens=usage_total_tokens,
+                                finish_reason=finish_reason,
+                            )
+
+                        raw_response = b"".join(response_chunks) if trace_enabled else b""
+                    else:
+                        with start_span("xtuner.session_server.read_response", target_url=target_url):
+                            raw_response = await resp.read()
+                        final_raw_response = raw_response
+                        set_attrs(forward_span, response_bytes=len(raw_response))
+
+                        if request_data is not None:
                             try:
-                                text = line.decode("utf-8")
-                                data = json.loads(text[6:])
-                                if _clean_data(data):
-                                    line = ("data: " + json.dumps(data) + "\n").encode("utf-8")
+                                clean_data = json.loads(raw_response)
+                                usage = clean_data.get("usage") if isinstance(clean_data, dict) else None
+                                set_attrs(
+                                    forward_span,
+                                    output_tokens=_response_output_ids_len(clean_data)
+                                    if isinstance(clean_data, dict)
+                                    else None,
+                                    prompt_tokens=usage.get("prompt_tokens") if isinstance(usage, dict) else None,
+                                    completion_tokens=usage.get("completion_tokens") if isinstance(usage, dict) else None,
+                                    total_tokens=usage.get("total_tokens") if isinstance(usage, dict) else None,
+                                )
+                                if _clean_data(clean_data):
+                                    final_raw_response = json.dumps(clean_data).encode("utf-8")
                             except Exception:
                                 pass
 
-                        # Delay [DONE] only while a training trace still needs to be exported.
-                        if client_alive and (not trace_enabled or line.strip() != b"data: [DONE]"):
-                            try:
-                                await response.write(line)
-                            except (ConnectionError, ClientConnectionResetError):
-                                client_alive = False
-
-                    raw_response = b"".join(response_chunks) if trace_enabled else b""
-                else:
-                    raw_response = await resp.read()
-                    final_raw_response = raw_response
-
-                    if request_data is not None:
-                        try:
-                            clean_data = json.loads(raw_response)
-                            if _clean_data(clean_data):
-                                final_raw_response = json.dumps(clean_data).encode("utf-8")
-                        except Exception:
-                            pass
-
-                    response = web.Response(
-                        status=resp.status,
-                        headers={
-                            k: v
-                            for k, v in resp.headers.items()
-                            if k.lower() not in ("transfer-encoding", "content-length", "content-encoding")
-                        },
-                        body=final_raw_response,  # Modified raw response without our injected trace params
-                    )
+                        response = web.Response(
+                            status=resp.status,
+                            headers={
+                                k: v
+                                for k, v in resp.headers.items()
+                                if k.lower() not in ("transfer-encoding", "content-length", "content-encoding")
+                            },
+                            body=final_raw_response,  # Modified raw response without our injected trace params
+                        )
+        except Exception as exc:
+            end_span(forward_span, exc=exc)
+            raise
+        else:
+            end_span(forward_span, response_bytes=len(raw_response) if raw_response is not None else None)
 
         # Apply abstract on_response processing
         response_data = None
@@ -455,7 +706,11 @@ class SessionServer:
                 skip_done = not _stream_has_traceable_choices(raw_response)
                 if not skip_done:
                     try:
-                        response_data = self._parse_stream_response(raw_response)
+                        with start_span(
+                            "xtuner.session_server.parse_stream_response",
+                            raw_response_bytes=len(raw_response),
+                        ):
+                            response_data = self._parse_stream_response(raw_response)
                     except Exception as exc:
                         session_error_msg = f"SessionServer stream trace failed: {type(exc).__name__}: {exc}"
             else:
