@@ -1080,6 +1080,13 @@ class BaseRLTrainer:
                     ground_truth = None
                     if data.reward_model is not None:
                         ground_truth = data.reward_model.get("ground_truth")
+                    logprobs = data.logprobs
+                    if logprobs is not None:
+                        logprobs_t = logprobs if isinstance(logprobs, torch.Tensor) else torch.tensor(logprobs, dtype=torch.float32)
+                        entropy = -logprobs_t.mean().item()
+                    else:
+                        entropy = None
+                    
                     item = {
                         "prompt": data.message,
                         "raw_prompt": data.extra_fields.get("raw_prompt", None),
@@ -1088,6 +1095,9 @@ class BaseRLTrainer:
                         "label": ground_truth,
                         "reward": data.reward["score"],
                         "finish_reason": data.finish_reason,
+                        "origin_data_source": data.extra_fields.get("origin_data_source", "unknown"),
+                        "entropy": entropy,
+                        "seq_staleness": data.seq_staleness,
                     }
                     json.dump(item, f, ensure_ascii=False, indent=2)
                     f.write("\n")

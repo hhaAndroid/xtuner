@@ -270,7 +270,7 @@ def partial_rollout_postprocess(rollout_state: "RolloutState") -> "RolloutState"
         # (aggregator.drop / replay_buffer.put on EXPIRED|FILTERED /
         # _dispatch_trajectory free_rollout_state_refs).
         elapsed = time.time() - start_time
-        _partial_rollout_logger.info(
+        _partial_rollout_logger.debug(
             f"routed_experts concatenation time: {elapsed:.4f}s "
             f"(history_len={history_len}, cur_len={cur_len}, concat_len={concat.shape[0]})"
         )

@@ -47,6 +47,10 @@ from .sampler import Sampler, SamplerExhausted
 
 logger = get_logger()
 GROUP_GENERATE_TIME_KEY = "group_generate_time_s"
+# Minimum seconds between per-iteration progress logs inside produce_batch's
+# main loop. Throttled purely by wall-clock so log volume stays bounded
+# regardless of how fast ``available`` changes.
+PRODUCE_PROGRESS_LOG_INTERVAL_S = 30.0
 
 
 class _ProgressDisplayer:
@@ -353,7 +357,7 @@ class ProduceContext:
         if is_completed:
             is_valid = self.is_valid_sample_fn(group)
             if not is_valid:
-                logger.info(
+                logger.debug(
                     f"[{self.task_name}] group filtered by is_valid_sample_fn: "
                     f"prompt_uid={prompt_uid}, size={group_size}"
                 )
@@ -369,7 +373,7 @@ class ProduceContext:
         # replay_buffer.put 可能把 stale group 转为 EXPIRED，返回前重新判断是否仍可训练。
         final_status = get_group_status(group)
         if final_status != initial_status:
-            logger.info(
+            logger.debug(
                 f"[{self.task_name}] group status transition: "
                 f"{initial_status.name} -> {final_status.name} "
                 f"(prompt_uid={prompt_uid}, size={group_size})"
@@ -769,7 +773,6 @@ class TrajectoryProduceStrategy(ProduceStrategy):
         runner = self._build_pipeline(ctx)
         iteration = 0
         last_log_time = time.perf_counter()
-        last_available = -1
         exit_reason = "normal"
 
         while True:
@@ -811,7 +814,7 @@ class TrajectoryProduceStrategy(ProduceStrategy):
                     break
 
             now = time.perf_counter()
-            if now - last_log_time >= 10.0 or available != last_available:
+            if now - last_log_time >= PRODUCE_PROGRESS_LOG_INTERVAL_S:
                 logger.info(
                     f"[{ctx.task_name}] iter={iteration} available={available}/{ctx.target_abs} "
                     f"inflight={self._scheduler.inflight_count()} "
@@ -823,7 +826,6 @@ class TrajectoryProduceStrategy(ProduceStrategy):
                     f"needs_more_this_call={ctx.progress.needs_more_reentries.get(ctx.task_name, 0) - needs_more_start}"
                 )
                 last_log_time = now
-                last_available = available
 
             await self._scheduler.wait_first_completed(timeout_s=1.0)
 
@@ -1022,7 +1024,7 @@ class TrajectoryProduceStrategy(ProduceStrategy):
         # carry-over commitments.
         if prompts_to_add <= 0:
             return
-        logger.info(
+        logger.debug(
             f"[{ctx.task_name}] preload (saturating): pending={pending}, queue={queue}, "
             f"queue_by_pri=[{format_queue_breakdown(self._scheduler.queue_lens_by_priority())}], "
             f"capacity={capacity}, slots_available={slots_available}, "
@@ -1074,7 +1076,7 @@ class TrajectoryProduceStrategy(ProduceStrategy):
                 f"active_prompts={active_prompts}"
             )
             return
-        logger.info(
+        logger.debug(
             f"[{ctx.task_name}] preload: deficit={deficit} (groups), "
             f"per_prompt={per_prompt}, prompts_for_deficit={prompts_for_deficit}, "
             f"oversample_prompts={oversample_prompts}, active_prompts={active_prompts}, "
