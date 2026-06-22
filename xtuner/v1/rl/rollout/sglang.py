@@ -1,5 +1,6 @@
 import base64
 import os
+from types import SimpleNamespace
 from typing import Any, Dict, List, Union
 
 import numpy as np
@@ -20,6 +21,115 @@ from .worker import (
 )
 
 
+def _patch_sglang_routed_experts_cuda_graph_capture() -> None:
+    # Compatibility patch for the older xtuner_sglang fork. Its routed experts
+    # capturer copies routing data back to CPU in on_forward_end(), which is not
+    # allowed while EAGLE/MTP draft CUDA graph capture is active. Newer SGLang
+    # versions moved this path to state_capturer with deferred/no_copy_to_cpu
+    # handling, so they no longer need this local guard.
+    try:
+        import torch
+        from sglang.srt.layers.moe import routed_experts_capturer
+        from sglang.srt.model_executor import model_runner
+    except Exception:
+        return
+
+    capturer_cls = getattr(routed_experts_capturer, "_RoutedExpertsCapturerReal", None)
+    if capturer_cls is not None and not getattr(capturer_cls, "_xtuner_skip_graph_capture_sync", False):
+        original_on_forward_end = capturer_cls.on_forward_end
+
+        def on_forward_end(self, forward_batch, can_run_graph, cuda_graph_batch):
+            if torch.cuda.is_available() and torch.cuda.is_current_stream_capturing():
+                return
+            return original_on_forward_end(self, forward_batch, can_run_graph, cuda_graph_batch)
+
+        capturer_cls.on_forward_end = on_forward_end
+        capturer_cls._xtuner_skip_graph_capture_sync = True
+
+    model_runner_cls = getattr(model_runner, "ModelRunner", None)
+    if model_runner_cls is not None and not getattr(
+        model_runner_cls, "_xtuner_preserve_routed_experts_capturer", False
+    ):
+        original_init_routed_experts_capturer = model_runner_cls.init_routed_experts_capturer
+
+        def init_routed_experts_capturer(self, *args, **kwargs):
+            ret = original_init_routed_experts_capturer(self, *args, **kwargs)
+            self._xtuner_routed_experts_capturer = model_runner.get_global_experts_capturer()
+            return ret
+
+        model_runner_cls.init_routed_experts_capturer = init_routed_experts_capturer
+        model_runner_cls._xtuner_preserve_routed_experts_capturer = True
+
+    def restore_target_capturer(worker):
+        target_runner = getattr(getattr(worker, "target_worker", None), "model_runner", None)
+        target_capturer = getattr(target_runner, "_xtuner_routed_experts_capturer", None)
+        if target_capturer is not None:
+            routed_experts_capturer.set_global_experts_capturer(target_capturer)
+
+    def patch_eagle_worker_init(worker_cls):
+        if worker_cls is None or getattr(worker_cls, "_xtuner_restore_target_capturer", False):
+            return
+
+        original_init = worker_cls.__init__
+
+        def init(self, *args, **kwargs):
+            ret = original_init(self, *args, **kwargs)
+            restore_target_capturer(self)
+            return ret
+
+        worker_cls.__init__ = init
+        worker_cls._xtuner_restore_target_capturer = True
+
+    try:
+        from sglang.srt.speculative import eagle_worker
+    except Exception:
+        eagle_worker = None
+    if eagle_worker is not None:
+        patch_eagle_worker_init(getattr(eagle_worker, "EAGLEWorker", None))
+
+    try:
+        from sglang.srt.speculative import eagle_worker_v2
+    except Exception:
+        eagle_worker_v2 = None
+    if eagle_worker_v2 is not None:
+        # Spec v2 switches from EAGLEWorker to EAGLEWorkerV2/EagleDraftWorker;
+        # both can initialize a draft capturer and overwrite the target capturer.
+        patch_eagle_worker_init(getattr(eagle_worker_v2, "EAGLEWorkerV2", None))
+
+        draft_worker_cls = getattr(eagle_worker_v2, "EagleDraftWorker", None)
+        if draft_worker_cls is not None and not getattr(
+            draft_worker_cls, "_xtuner_restore_target_capturer", False
+        ):
+            original_draft_init = draft_worker_cls.__init__
+
+            def draft_init(self, *args, **kwargs):
+                ret = original_draft_init(self, *args, **kwargs)
+                restore_target_capturer(self)
+                return ret
+
+            draft_worker_cls.__init__ = draft_init
+            draft_worker_cls._xtuner_restore_target_capturer = True
+
+
+def _run_sglang_scheduler_process_with_xtuner_patches(*args, **kwargs):
+    _patch_sglang_routed_experts_cuda_graph_capture()
+
+    from sglang.srt.managers.scheduler import run_scheduler_process
+
+    return run_scheduler_process(*args, **kwargs)
+
+
+def _launch_sglang_server(server_args) -> None:
+    if hasattr(server_args, "init_kwargs"):
+        from sglang.srt.server_args import ServerArgs
+
+        server_args = ServerArgs(**server_args.init_kwargs)
+    from sglang.srt.entrypoints.http_server import launch_server
+
+    _patch_sglang_routed_experts_cuda_graph_capture()
+    launch_server(server_args, run_scheduler_process_func=_run_sglang_scheduler_process_with_xtuner_patches)
+
+
 class SGLangWorker(RolloutWorker):
     def __init__(
         self,
@@ -31,9 +141,7 @@ class SGLangWorker(RolloutWorker):
         accelerator: str = "GPU",
     ):
         super().__init__(config, rank, master_addr, master_port, world_size, accelerator)
-        from sglang.srt.entrypoints.http_server import launch_server
-
-        self.server_func = launch_server
+        self.server_func = _launch_sglang_server
         self.endpoints["health"] = "health"
         self.endpoints["health_generate"] = "health_generate"
         self.endpoints["generate"] = "generate"
@@ -323,7 +431,6 @@ class SGLangWorker(RolloutWorker):
     def _transform_rollout_config_to_server_configs(self):
         # remove the CUDA_VISIBLE_DEVICES set by ray and use base_gpu_id
         os.environ.pop("CUDA_VISIBLE_DEVICES", None)
-        from sglang.srt.server_args import ServerArgs
 
         extra_config = self.config.extra_rollout_config or dict()
         sglang_config_kwargs = {
@@ -380,13 +487,12 @@ class SGLangWorker(RolloutWorker):
             init_kwargs["disable_overlap_schedule"] = True
             init_kwargs["disable_cuda_graph"] = True
 
-        # Forward supported sglang_* extra configs to ServerArgs directly.
-        server_arg_fields = getattr(ServerArgs, "__dataclass_fields__", {})
+        # Forward sglang_* extra configs to ServerArgs in the SGLang child
+        # process. Constructing ServerArgs here would import SGLang CUDA
+        # modules inside Ray's one-GPU actor and can leave torch with stale
+        # CUDA_VISIBLE_DEVICES state before we launch the TP engine.
         for key, value in sglang_config_kwargs.items():
-            if key in server_arg_fields:
-                init_kwargs[key] = value
-            else:
-                self.logger.warning(f"Ignore unknown SGLang server arg: {key}={value!r}")
+            init_kwargs[key] = value
 
         # Qwen3-MoE in sglang 0.5.9 can hit native rotary + fused KV buffer incompatibility
         # during server startup unless fused qk_norm_rope is enabled.
@@ -397,9 +503,7 @@ class SGLangWorker(RolloutWorker):
         if self.config.context_length is not None:
             init_kwargs["context_length"] = self.config.context_length
 
-        sglang_server_args = ServerArgs(**init_kwargs)
-
-        return sglang_server_args
+        return SimpleNamespace(api_key=init_kwargs.get("api_key"), init_kwargs=init_kwargs)
 
     def _request_server_terminate(self) -> bool:
         self.logger.warning("SGLang server does not support terminate request, will directly kill the process.")

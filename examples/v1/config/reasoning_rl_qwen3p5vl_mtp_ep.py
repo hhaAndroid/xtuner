@@ -1,6 +1,11 @@
 import json
 import os
 
+# Enable SGLang EAGLE/MTP spec v2 by default for this config. Use
+# `SGLANG_ENABLE_SPEC_V2=0` in the launch script to keep the previous spec v1
+# baseline without editing this file.
+os.environ.setdefault("SGLANG_ENABLE_SPEC_V2", "1")
+
 from transformers import AutoTokenizer
 
 from xtuner.v1.config import AdamWConfig, FSDPConfig, LRConfig
@@ -51,8 +56,8 @@ experimental_name = "reasoning_rl_qwen3p5vl_mtp_ep"
 total_epochs = 15
 train_batch_size = int(os.environ.get("TRAIN_BATCH_SIZE", 256))
 prompt_repeat_k = 8
-rollout_tp_size = 1
-rollout_ep_size = 4
+rollout_tp_size = 8  # tp8 可以
+rollout_ep_size = 1
 max_prompt_length = 2048
 max_response_length = 8192
 pack_max_length = 32768
@@ -83,16 +88,33 @@ rollout_config = RolloutConfig(
     gpu_memory_utilization=0.6,
     context_length=max_response_length + max_prompt_length,
     enable_return_routed_experts=True,
-    rollout_max_batch_size_per_instance=512,
+    rollout_max_batch_size_per_instance=128,
+    dist_port_base=35000,
     extra_rollout_config=dict(
-        lmdeploy_log_level="INFO", 
-        lmdeploy_uvicorn_log_level="INFO",
-        lmdeploy_speculative_algorithm='qwen3_5_mtp',
-        # MTP draft tokens trade throughput for extra activation memory; try 3 if still tight.
-        lmdeploy_speculative_num_draft_tokens=4,
+        sglang_log_level="info",
+        sglang_log_level_http="info",
+        sglang_speculative_algorithm="EAGLE",
+        sglang_speculative_draft_model_path=model_path,
+        sglang_speculative_num_steps=3,
+        sglang_speculative_eagle_topk=1,
+        # With eagle_topk=1, SGLang normalizes draft tokens to num_steps + 1.
+        sglang_speculative_num_draft_tokens=4,
+        # Fast spec v2 candidate: enable radix cache with Mamba extra_buffer.
+        # This is expected to be faster than the smoke-test no_buffer path, but
+        # it uses more memory.
+        sglang_mamba_scheduler_strategy="extra_buffer",
+        # Stable spec v2 smoke-test baseline kept for speed/memory comparison:
+        #   - comment out sglang_mamba_scheduler_strategy="extra_buffer"
+        #   - uncomment sglang_disable_radix_cache=True
+        # Do not enable both together; SGLang rejects extra_buffer with disabled
+        # radix cache.
+        # sglang_disable_radix_cache=True,
+        # Spec v1 baseline kept for speed comparison:
+        #   - set SGLANG_ENABLE_SPEC_V2=0 in the launch script
+        #   - keep sglang_disable_radix_cache=True
     ),
-    health_check_interval_seconds=300,
-    health_check_failure_threshold=3,
+    health_check_interval_seconds=300000,
+    health_check_failure_threshold=300000,
 )
 
 # sampling params

@@ -1293,18 +1293,43 @@ class RolloutWorker(SingleAcceleratorWorker):
                     rollout_state.error_msg = "Missing finish_reason in response meta_info"
                     return rollout_state
                 returned_response = response.get("text", "")
+                rollout_status = update_status_from_finish_reason(finish_reason)
                 # 获取response_ids && respoonse_ids
+                num_return_tokens = response["meta_info"].get("completion_tokens")
                 if (
                     "output_token_logprobs" in response["meta_info"]
                     and response["meta_info"]["output_token_logprobs"] is not None
                 ):
-                    response_ids = [item[1] for item in response["meta_info"]["output_token_logprobs"]]
-                    logprobs = [item[0] for item in response["meta_info"]["output_token_logprobs"]]
+                    output_token_logprobs = response["meta_info"]["output_token_logprobs"]
+                    if num_return_tokens is not None:
+                        if len(output_token_logprobs) != num_return_tokens:
+                            self.logger.warning(
+                                "SGLang response has mismatched output_token_logprobs and completion_tokens "
+                                f"for message {uid}: output_token_logprobs_len={len(output_token_logprobs)}, "
+                                f"completion_tokens={num_return_tokens}, finish_reason={finish_reason}. "
+                                "Truncating output_token_logprobs to completion_tokens."
+                            )
+                        output_token_logprobs = (
+                            output_token_logprobs[-num_return_tokens:] if num_return_tokens > 0 else []
+                        )
+                    response_ids = [item[1] for item in output_token_logprobs]
+                    logprobs = [item[0] for item in output_token_logprobs]
                 else:
-                    num_return_tokens = response["meta_info"].get("completion_tokens", 0)
+                    num_return_tokens = num_return_tokens or 0
                     response_ids = response["output_ids"][-num_return_tokens:] if num_return_tokens > 0 else []
+                allow_empty_partial_continuation = (
+                    self.enable_partial_rollout
+                    and bool(rollout_state.response_ids)
+                    and response["meta_info"].get("completion_tokens", 0) == 0
+                    and finish_reason == "length"
+                )
                 # 获取 routed_experts
-                if should_return_routed_experts:
+                has_completion_tokens = len(response_ids) > 0
+                should_require_routed_experts = should_return_routed_experts and (
+                    (rollout_status == Status.COMPLETED and not allow_empty_partial_continuation)
+                    or has_completion_tokens
+                )
+                if should_require_routed_experts:
                     assert "routed_experts" in response["meta_info"], (
                         "enable_return_routed_experts is True, but routed_experts is not in meta_info"
                     )
@@ -1314,14 +1339,11 @@ class RolloutWorker(SingleAcceleratorWorker):
                         if not isinstance(routed_experts, ray.ObjectRef):
                             routed_experts = ray.put(routed_experts)
 
-                # 获取 status
-                rollout_status = update_status_from_finish_reason(finish_reason)
-
                 # 检查输出结果
                 if rollout_status == Status.COMPLETED:
                     validation_errors = []
 
-                    if not response_ids:
+                    if not response_ids and not allow_empty_partial_continuation:
                         validation_errors.append("empty response_ids")
 
                     if not response:
@@ -1330,7 +1352,7 @@ class RolloutWorker(SingleAcceleratorWorker):
                     if sample_params.return_logprob and not logprobs:
                         validation_errors.append("missing logprobs")
 
-                    if should_return_routed_experts and routed_experts is None:
+                    if should_require_routed_experts and routed_experts is None:
                         validation_errors.append("missing routed_experts")
 
                     if validation_errors:
@@ -1346,6 +1368,14 @@ class RolloutWorker(SingleAcceleratorWorker):
                     rollout_state.routed_experts = routed_experts
                     rollout_state.status = Status.FAILED
                     rollout_state.error_msg = error_msg
+                    return rollout_state
+                elif rollout_status == Status.ABORTED:
+                    rollout_state.response = returned_response
+                    rollout_state.response_ids = response_ids
+                    rollout_state.logprobs = logprobs
+                    rollout_state.routed_experts = routed_experts
+                    rollout_state.finish_reason = finish_reason
+                    rollout_state.status = rollout_status
                     return rollout_state
 
                 if self.enable_partial_rollout:
