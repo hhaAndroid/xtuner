@@ -278,13 +278,13 @@ class TestRLColocateTrainerIntegration(unittest.TestCase):
         train_controller.onload(target="all")
 
         # First fit and save
-        train_controller.fit(data_batches, pack_max_length=1024, rollout_idx=0)
+        train_controller.fit(data_batches, pack_max_length=1024, rollout_idx=0, optimizer_steps=1)
         checkpoint_path = str(work_dir / "save_test")
         train_controller.save(checkpoint_path, no_save_optimizer=True)
 
         # Second fit and collect metrics
         train_controller.onload(target="all")
-        log_infos = train_controller.fit(data_batches, pack_max_length=1024, rollout_idx=1)
+        log_infos = train_controller.fit(data_batches, pack_max_length=1024, rollout_idx=1, optimizer_steps=1)
         efficient_attn_ratio_list = []
         for log_info in log_infos:
             efficient_attn_ratio_list.append(log_info['sft_train_metrics']['efficient_attn_ratio'])
@@ -314,7 +314,7 @@ class TestRLColocateTrainerIntegration(unittest.TestCase):
         train_controller.resume(load_checkpoint_cfg)
 
         train_controller.onload(target="all")
-        log_infos = train_controller.fit(data_batches, pack_max_length=1024, rollout_idx=1)
+        log_infos = train_controller.fit(data_batches, pack_max_length=1024, rollout_idx=1, optimizer_steps=1)
         new_efficient_attn_ratio_list = []
         for log_info in log_infos:
             new_efficient_attn_ratio_list.append(log_info['sft_train_metrics']['efficient_attn_ratio'])

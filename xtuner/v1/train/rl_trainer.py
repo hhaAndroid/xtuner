@@ -755,6 +755,7 @@ class BaseRLTrainer:
                 data_batches,
                 pack_max_length=self._train_worker_cfg.pack_max_length,
                 rollout_idx=train_step,
+                optimizer_steps=self._train_worker_cfg.optimizer_steps,
             )
         return {
             "data_info": data_info,

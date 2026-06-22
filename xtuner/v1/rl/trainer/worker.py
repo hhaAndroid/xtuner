@@ -1,6 +1,5 @@
 import contextlib
 import json
-import math
 import os
 import time
 from contextlib import contextmanager
@@ -85,6 +84,29 @@ def calculate_entropy(
     dist.all_reduce(sum_entropy, op=dist.ReduceOp.SUM)
     avg_sum_entropy = sum_entropy / global_grad_tokens if global_grad_tokens > 0 else torch.tensor(0.0)
     return avg_sum_entropy
+
+
+def compute_group_bounds(num_items: int, num_groups: int) -> list[tuple[int, int]]:
+    """Split ``num_items`` packs into exactly ``num_groups`` contiguous groups.
+
+    The group sizes are as even as possible: the first ``num_items % num_groups`` groups get one extra item.
+    Each group corresponds to one optimizer update (gradients are accumulated across the packs within a group).
+
+    Args:
+        num_items (int): Number of packs to split. Must be greater than or equal to ``num_groups``.
+        num_groups (int): Number of optimizer updates to perform.
+
+    Returns:
+        list[tuple[int, int]]: ``(start, end)`` half-open index ranges, one per group.
+    """
+    base, rem = divmod(num_items, num_groups)
+    bounds: list[tuple[int, int]] = []
+    start = 0
+    for g in range(num_groups):
+        size = base + (1 if g < rem else 0)
+        bounds.append((start, start + size))
+        start += size
+    return bounds
 
 
 class WorkerConfig(BaseModel):
@@ -505,11 +527,14 @@ class TrainingWorker(SingleAcceleratorWorker, UpdateWeighter):
         self.logger = get_logger(log_dir=self.log_dir, tag="TrainingWorker")
         loss_cfg: BaseRLLossConfig = self.config.loss_cfg
         num_batches = len(data_batches)
-        iters_per_step = math.ceil(num_batches / self._optimizer_steps)
-        if num_batches < self._optimizer_steps:
-            self.logger.info(
-                f"Optimizer only step once because num_batches {num_batches} < optimizer_steps {self._optimizer_steps}."
-            )
+        assert num_batches >= self._optimizer_steps, (
+            f"num_batches {num_batches} < optimizer_steps {self._optimizer_steps}; the controller should pack "
+            "enough data so that every dp rank has at least `optimizer_steps` packs."
+        )
+        # Split the packs into exactly `optimizer_steps` contiguous groups (one optimizer update per group).
+        # The grouping depends only on (num_batches, optimizer_steps), which is identical across ranks, so the
+        # collective ops inside `build_batches` / `train_step` stay in lockstep.
+        group_bounds = compute_group_bounds(num_batches, self._optimizer_steps)
 
         # Update seq_ctx: pixel_values, rollout_routed_experts
         # Init loss_ctx: shifted_labels, advantages, rollout_logprobs
@@ -670,21 +695,20 @@ class TrainingWorker(SingleAcceleratorWorker, UpdateWeighter):
         batched_loss_ctx_list: list[BaseRLLossContext] = []
         batched_mtp_loss_ctx_list: list[list[MTPLossContext]] = []
         LossContext = loss_cfg.loss_ctx_cls
-        for i in range(0, len(loss_ctx_list), iters_per_step):
-            batches_loss_ctx = loss_ctx_list[i : i + iters_per_step]
+        for start, end in group_bounds:
+            batches_loss_ctx = loss_ctx_list[start:end]
             batched_loss_ctx_list.extend(
                 LossContext.build_batches(batches_loss_ctx)  # type: ignore[arg-type]
             )
 
             if self.mtp_config is not None:
-                batches_seq_ctx = seq_ctx_list[i : i + iters_per_step]
+                batches_seq_ctx = seq_ctx_list[start:end]
                 cu_seq_lens_list = [seq_ctx.cu_seq_lens_q for seq_ctx in batches_seq_ctx]
                 # mtp_loss_ctx_list: list[list[MTPLossContext]], outer=batch, inner=mtp_depth
                 num_mtp_depths = len(mtp_loss_ctx_list[0]) if mtp_loss_ctx_list else 0
                 for mtp_idx in range(num_mtp_depths):
                     depth_mtp_loss_ctxs: list[LMHeadLossContext] = [
-                        mtp_loss_ctx_list[j][mtp_idx]
-                        for j in range(i, min(i + iters_per_step, len(mtp_loss_ctx_list)))
+                        mtp_loss_ctx_list[j][mtp_idx] for j in range(start, end)
                     ]
                     batched_mtp_depth_ctxs = cast(
                         list[MTPLossContext],
@@ -696,17 +720,17 @@ class TrainingWorker(SingleAcceleratorWorker, UpdateWeighter):
                     )
                     # Append each depth's batched ctx to the corresponding batch index
                     for batch_offset, mtp_ctx in enumerate(batched_mtp_depth_ctxs):
-                        global_batch_idx = i + batch_offset
+                        global_batch_idx = start + batch_offset
                         if global_batch_idx >= len(batched_mtp_loss_ctx_list):
                             batched_mtp_loss_ctx_list.append([mtp_ctx])
                         else:
                             batched_mtp_loss_ctx_list[global_batch_idx].append(mtp_ctx)
 
         # train optimizer steps
-        for i in range(0, len(seq_ctx_list), iters_per_step):
+        for step_idx, (start, end) in enumerate(group_bounds):
             global_train_step = self._global_train_step + 1
-            batches_seq_ctx = seq_ctx_list[i : i + iters_per_step]
-            batches_loss_ctx = batched_loss_ctx_list[i : i + iters_per_step]
+            batches_seq_ctx = seq_ctx_list[start:end]
+            batches_loss_ctx = batched_loss_ctx_list[start:end]
 
             engine_input = [
                 ModelItem(seq_ctx=seq_ctx, loss_ctx={"lm": loss_ctx})
@@ -714,7 +738,7 @@ class TrainingWorker(SingleAcceleratorWorker, UpdateWeighter):
             ]
 
             if self.mtp_config is not None:
-                batches_mtp_loss_ctxs = batched_mtp_loss_ctx_list[i : i + iters_per_step]
+                batches_mtp_loss_ctxs = batched_mtp_loss_ctx_list[start:end]
                 engine_input = [
                     ModelItem(
                         seq_ctx=seq_ctx,
@@ -735,7 +759,7 @@ class TrainingWorker(SingleAcceleratorWorker, UpdateWeighter):
                 )
             self.logger.debug(
                 f"Rank{self.rank} Rollout {rollout_idx} GlobalStep {global_train_step} "
-                f"train_step[{i}].engine_train_step elapsed={time.perf_counter() - train_step_begin:.4f}s"
+                f"train_step[{step_idx}].engine_train_step elapsed={time.perf_counter() - train_step_begin:.4f}s"
             )
             grad_norm = self._engine.clip_grad_norm()
             self._engine.step_optimizer(grad_norm)
@@ -764,7 +788,7 @@ class TrainingWorker(SingleAcceleratorWorker, UpdateWeighter):
                 f"{key}={value:.4f}" if isinstance(value, float) else f"{key}={value}"
                 for key, value in train_log_item.items()
             )
-            log_str = f"Rank{self.rank} Rollout {rollout_idx} Step {i}: " + log_str
+            log_str = f"Rank{self.rank} Rollout {rollout_idx} Step {step_idx}: " + log_str
             self.logger.info(log_str)
             self._global_train_step = global_train_step
 

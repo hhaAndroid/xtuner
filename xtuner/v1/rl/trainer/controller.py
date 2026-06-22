@@ -1,5 +1,7 @@
+import heapq
 import math
 import os
+import random
 from typing import Literal, TypedDict
 
 import ray
@@ -9,7 +11,7 @@ from xtuner.v1.data_proto.sequence_context import SequenceContext
 from xtuner.v1.model.compose.base import BaseComposeConfig
 from xtuner.v1.rl.utils import free_object_refs
 from xtuner.v1.train.trainer import LoadCheckpointConfig
-from xtuner.v1.utils import get_logger
+from xtuner.v1.utils import XTUNER_DETERMINISTIC, get_logger
 
 from .worker import TrainingWorker, WorkerLogItem
 
@@ -30,50 +32,68 @@ class TrainingController:
         self.logger = get_logger()
 
     # TODO(hha): 这个逻辑不够通用，应该复用 sft 函数，从而支持 expand soft pack
-    def _get_pack_infos(self, dataset, num_tokens, target, random=None):
-        inds = list(range(len(dataset)))
-        if random is not None:
-            random.shuffle(inds)
+    def _get_balanced_pack_infos(
+        self,
+        num_tokens: list[int],
+        pack_max_length: int,
+        num_bins: int,
+        dp_size: int,
+    ) -> list[dict]:
+        """Distribute sequences into ``num_bins`` packs as evenly as possible.
 
-        item_buffer = []
-        length_buffer = []
-        longest = 0
+        Sequences are assigned with the Longest-Processing-Time (LPT) heuristic: they are processed from longest
+        to shortest and each is placed into the currently least-loaded pack that still has room. ``num_bins`` is the
+        number of packs the train workers need (``optimizer_steps * dp_size``); when the data does not fit under the
+        ``pack_max_length`` capacity, ``num_bins`` is grown in steps of ``dp_size`` so the result stays divisible by
+        the data parallel size.
 
-        pack_infos = []
-        for shfl_i in inds:
-            if num_tokens[shfl_i] + sum(length_buffer) <= target:
-                item_buffer.append(shfl_i)
-                length_buffer.append(num_tokens[shfl_i])
-                longest = max(longest, num_tokens[shfl_i])
-            else:
-                if len(item_buffer) > 0:
-                    info = {
-                        "indices": item_buffer,
-                        "longest": int(longest),
-                    }
-                    pack_infos.append(info)
+        Args:
+            num_tokens (list[int]): Token count of each sequence.
+            pack_max_length (int): Maximum number of tokens allowed in one pack.
+            num_bins (int): Initial number of packs to distribute into.
+            dp_size (int): Data parallel size; ``num_bins`` is grown by this step when the capacity is exceeded.
 
-                item_buffer = [shfl_i]
-                length_buffer = [num_tokens[shfl_i]]
-                longest = num_tokens[shfl_i]
-
-        if len(item_buffer) > 0:
-            info = {
-                "indices": item_buffer,
-                "longest": int(longest),
-            }
-
-            pack_infos.append(info)
-
-        return pack_infos
+        Returns:
+            list[dict]: One entry per pack with the assigned sequence ``indices`` and the ``longest`` sequence
+            length in the pack. Some packs may be empty when the number of sequences is smaller than ``num_bins``.
+        """
+        order = sorted(range(len(num_tokens)), key=lambda i: num_tokens[i], reverse=True)
+        while True:
+            heap = [(0, b) for b in range(num_bins)]  # (load, bin_idx)
+            heapq.heapify(heap)
+            bins: list[list[int]] = [[] for _ in range(num_bins)]
+            feasible = True
+            for i in order:
+                load, b = heap[0]  # the least-loaded pack has the most remaining room
+                if load + num_tokens[i] <= pack_max_length:
+                    heapq.heapreplace(heap, (load + num_tokens[i], b))
+                    bins[b].append(i)
+                else:
+                    # Even the emptiest pack cannot fit this sequence: we need more packs.
+                    feasible = False
+                    break
+            if feasible:
+                break
+            num_bins += dp_size
+        return [{"indices": b, "longest": int(max((num_tokens[i] for i in b), default=0))} for b in bins]
 
     # TODO(hha): 这个逻辑不够通用，和模型绑定了
-    def _packing(self, data_batches, pack_max_length, language_cfg):
-        pack_infos = self._get_pack_infos(
-            data_batches,
-            [data["seq_ctx"].input_ids.numel() for data in data_batches],
-            pack_max_length,
-        )
+    def _packing(self, data_batches, pack_max_length, language_cfg, dp_size, optimizer_steps):
+        num_tokens = [data["seq_ctx"].input_ids.numel() for data in data_batches]
+        # Train workers perform `optimizer_steps` updates per dp rank, so they need at least
+        # `optimizer_steps * dp_size` packs globally. Grow the target up to the capacity lower bound
+        # (total tokens / pack_max_length) and keep it divisible by `dp_size`.
+        min_bins = optimizer_steps * dp_size
+        cap_bins = math.ceil(math.ceil(sum(num_tokens) / pack_max_length) / dp_size) * dp_size
+        num_bins = max(min_bins, cap_bins)
+        if len(num_tokens) < num_bins:
+            self.logger.warning(
+                f"Number of valid sequences ({len(num_tokens)}) is smaller than the required number of packs "
+                f"({num_bins} = optimizer_steps {optimizer_steps} * dp_size {dp_size}). Some packs will contain "
+                "only padding, leading to no-op optimizer steps. Consider providing more data or reducing "
+                "optimizer_steps."
+            )
+        pack_infos = self._get_balanced_pack_infos(num_tokens, pack_max_length, num_bins, dp_size)
         packed_data_batches = []
 
         is_qwen3_vl = False
@@ -157,6 +177,13 @@ class TrainingController:
                     "rollout_logprobs": rollout_logprobs,
                 }
             )
+
+        # `_get_balanced_pack_infos` sorts sequences by length, so the resulting pack order is correlated with
+        # sequence length. Since the worker slices packs into optimizer-step groups by position, that ordering
+        # would make each optimizer step a length-stratified (hence biased) mini-batch. Shuffle the balanced packs
+        # so every step is a random sample; the packs are load-balanced, so shuffling preserves the balance.
+        if not XTUNER_DETERMINISTIC:
+            random.shuffle(packed_data_batches)
         return packed_data_batches
 
     def _grouped_by_max_length(self, packed_data_batches):
@@ -165,88 +192,31 @@ class TrainingController:
         # 排序后这条 pack 会被放在最前面，导致 rank0 的第一个 step 消耗的有效 token 数往往少于其他 rank，是正常现象。
         return sorted(packed_data_batches, key=lambda x: x["seq_ctx"].max_length_q, reverse=True)
 
-    def fit(self, data_batches: list[ColateItem], pack_max_length: int, rollout_idx: int) -> list[WorkerLogItem]:
-        has_rollout_routed_experts = False
+    def fit(
+        self, data_batches: list[ColateItem], pack_max_length: int, rollout_idx: int, optimizer_steps: int
+    ) -> list[WorkerLogItem]:
         language_cfg = None
         if data_batches[0]["seq_ctx"].rollout_routed_experts is not None:
             model_cfg = ray.get(self.workers[0].get_model_cfg.remote())  # type: ignore[attr-defined]
-            has_rollout_routed_experts = True
             language_cfg = model_cfg
             if isinstance(model_cfg, BaseComposeConfig):
                 language_cfg = model_cfg.text_config
 
-        packed_data_batches = self._packing(data_batches, pack_max_length, language_cfg)
-        # packed_data_batches = self._grouped_by_max_length(packed_data_batches)
-
-        # TODO(hha): 这个逻辑不够通用，和模型绑定了
-        is_qwen3_vl = False
-        if len(packed_data_batches[0]["seq_ctx"].position_ids.shape) == 3:
-            is_qwen3_vl = True
-
-        # todo: support round up
-        num_packed_data_batches = len(packed_data_batches)
         data_replicate_size = ray.get(self.workers[0].get_data_replicate_size.remote())  # type: ignore[attr-defined]
         dp_size = len(self.workers) // data_replicate_size
-        pad_num = math.ceil(num_packed_data_batches / dp_size) * dp_size - num_packed_data_batches
-        if pad_num > 0:
-            # Reduce the attn calculation time by using multiple short sequence packs
-            assert data_batches[0]["seq_ctx"].input_ids is not None
-            pad_tokens = tuple(
-                torch.zeros(1, 1024, dtype=data_batches[0]["seq_ctx"].input_ids.dtype, device="cpu")
-                for _ in range(pack_max_length // 1024)
-            )
-            if pack_max_length % 1024 > 0:
-                assert data_batches[0]["seq_ctx"].input_ids is not None
-                pad_tokens = pad_tokens + (
-                    torch.zeros(
-                        1, pack_max_length % 1024, dtype=data_batches[0]["seq_ctx"].input_ids.dtype, device="cpu"
-                    ),
-                )
-            pad_seq_ctx = SequenceContext.from_input_ids(pad_tokens, device="cpu")  # type: ignore
-            pad_seq_ctx.num_padding = pack_max_length
-            if is_qwen3_vl:
-                _position_ids_list = []
-                for pad_token in pad_tokens:
-                    _position_ids = torch.arange(pad_token.size(-1)).view(1, 1, -1).expand(3, 1, -1)
-                    _position_ids_list.append(_position_ids)
-                pad_seq_ctx.position_ids = torch.cat(_position_ids_list, dim=-1)  # type: ignore
 
-            pad_shifted_labels = torch.full(
-                (1, pack_max_length),
-                -100,
-                dtype=packed_data_batches[0]["shifted_labels"].dtype,
-                device="cpu",
-            )
-            pad_advantages = torch.full(
-                (1, pack_max_length),
-                -100,
-                dtype=packed_data_batches[0]["advantages"].dtype,
-                device="cpu",
-            )
+        packed_data_batches = self._packing(data_batches, pack_max_length, language_cfg, dp_size, optimizer_steps)
+        # packed_data_batches = self._grouped_by_max_length(packed_data_batches)
 
-            if has_rollout_routed_experts:
-                pad_rand_index = torch.randint(
-                    low=0,
-                    high=1,
-                    size=(1, 1, 1),  # add dummy data, true data will be initialized in train worker.fit
-                )
-                pad_seq_ctx.rollout_routed_experts = pad_rand_index
-
-            pad_rollout_logprobs = None
-            if "rollout_logprobs" in packed_data_batches[0] and packed_data_batches[0]["rollout_logprobs"] is not None:
-                pad_rollout_logprobs = torch.zeros(
-                    1, pack_max_length, dtype=packed_data_batches[0]["rollout_logprobs"].dtype, device="cpu"
-                )
-            pad_data = {
-                "seq_ctx": pad_seq_ctx,
-                "shifted_labels": pad_shifted_labels,
-                "advantages": pad_advantages,
-                "rollout_logprobs": pad_rollout_logprobs,
-            }
-            pad_data_samples = [pad_data for _ in range(pad_num)]
-            packed_data_batches = packed_data_batches + pad_data_samples
-
-        print(f"len(packed_data_batches): {len(packed_data_batches)}")
+        # `_packing` guarantees a pack count that is divisible by `dp_size` and provides at least
+        # `optimizer_steps` packs per dp rank, so no extra padding / distribution alignment is needed here.
+        num_packed_data_batches = len(packed_data_batches)
+        assert (
+            num_packed_data_batches % dp_size == 0 and num_packed_data_batches >= optimizer_steps * dp_size
+        ), (
+            f"Unexpected packed batch count {num_packed_data_batches} for dp_size {dp_size} and "
+            f"optimizer_steps {optimizer_steps}."
+        )
 
         handles = []
         for worker_idx, worker in enumerate(self.workers):
