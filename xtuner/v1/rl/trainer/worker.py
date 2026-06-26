@@ -422,7 +422,6 @@ class TrainingWorker(SingleAcceleratorWorker, UpdateWeighter):
             else self.config.model_cfg
         )
 
-        to_free_routed_expert_refs: list[ray.ObjectRef] = []
         if isinstance(rollout_routed_experts, list):
             # list[n,l,e]
             out_rollout_routed_expert = []
@@ -454,13 +453,8 @@ class TrainingWorker(SingleAcceleratorWorker, UpdateWeighter):
                         raise ValueError(
                             f"Invalid rollout_routed_expert_refs type: {type(rollout_routed_expert_refs)}"
                         )
-                    # free obj store explicitly
-                    if self.sp_mesh is None or self.sp_mesh.size() == 1:
-                        ray.internal.free(rollout_routed_expert_refs, local_only=False)
-                    else:
-                        if self.sp_mesh.get_local_rank() == 0:
-                            # only free once of sp mesh
-                            to_free_routed_expert_refs.append(rollout_routed_expert_refs)
+                    # Keep routed expert refs alive until Ray releases them after training.
+                    # Early worker-side free can hide duplicate ObjectRef consumers during diagnosis.
                     rollout_routed_expert = torch.as_tensor(rollout_routed_expert, dtype=torch.long)
                     rollout_routed_expert = rollout_routed_expert.reshape(
                         -1, language_cfg.num_hidden_layers, language_cfg.num_experts_per_tok
@@ -487,12 +481,6 @@ class TrainingWorker(SingleAcceleratorWorker, UpdateWeighter):
         assert seq_ctx.rollout_routed_experts.size(0) == seq_ctx.input_ids.size(1), (
             f"rollout_routed_experts.size(0) {seq_ctx.rollout_routed_experts.size(0)} != input_ids.size(1) {seq_ctx.input_ids.size(1)}"
         )
-
-        if self.sp_mesh is not None and self.sp_mesh.size() > 1:
-            dist.barrier()
-            for free_routed_expert_refs in to_free_routed_expert_refs:
-                ray.internal.free(free_routed_expert_refs, local_only=False)
-            del to_free_routed_expert_refs
 
     @contextmanager
     def _maybe_profiling(self, global_train_step: int, phase: str):

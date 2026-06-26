@@ -19,6 +19,10 @@ from xtuner.v1.train.trainer import LoadCheckpointConfig
 from xtuner.v1.rl.utils import AcceleratorResourcesConfig
 from xtuner.v1.train.rl_trainer import RLColocateTrainerConfig
 
+# Enable SGLang EAGLE/MTP spec v2 by default for this config. Use
+# `SGLANG_ENABLE_SPEC_V2=0` in the launch script to keep the previous spec v1
+# baseline without editing this file.
+os.environ.setdefault("SGLANG_ENABLE_SPEC_V2", "1")
 
 # export LMDEPLOY_FP32_MAMBA_SSM_DTYPE=1
 
@@ -110,6 +114,7 @@ model_name = os.environ["MODEL_NAME"]
 debug_rollout_dir = os.environ.get("DEBUG_ROLLOUT_DIR", "")
 debug_train = _env_bool("DEBUG_TRAIN")
 debug_rollout = _env_bool("DEBUG_ROLLOUT")
+enable_return_routed_experts = _env_bool("ENABLE_RETURN_ROUTED_EXPERTS", False)
 
 experimental_name = os.environ.get("EXPERIMENT_NAME", "localhost_agent_rl")
 total_epochs = 10
@@ -150,21 +155,43 @@ rollout_config = RolloutConfig(
     gpu_memory_utilization=0.6,
     enable_float8=False,
     skip_load_weights=skip_load_weights,
-    context_length=max_response_length,
-    enable_return_routed_experts=True,
+    context_length=max_prompt_length + max_response_length,
+    enable_return_routed_experts=enable_return_routed_experts,
+    tool_call_parser="qwen3p5",
+    reasoning_parser="qwen3",
     rollout_max_batch_size_per_instance=128,
     rollout_timeout=1200,
     session_server_timeout=1200,
-    health_check_interval_seconds=30.0,
-    health_check_failure_threshold=3,
     extra_rollout_config=dict(
-        lmdeploy_log_level="INFO",
-        lmdeploy_uvicorn_log_level="INFO",
-        lmdeploy_tool_call_parser="qwen3coder",
-        lmdeploy_reasoning_parser="default",
-        lmdeploy_speculative_algorithm="qwen3_5_mtp",
-        lmdeploy_speculative_num_draft_tokens=4,
+        sglang_log_level="info",
+        sglang_log_level_http="info",
+        # Keep cumulative text chunks by default. The local SGLang OpenAI chat
+        # serving path still slices text/tool deltas from cumulative content.
+        sglang_incremental_streaming_output=_env_bool("SGLANG_INCREMENTAL_STREAMING_OUTPUT", False),
+        sglang_tool_call_parser="qwen3_coder",
+        sglang_reasoning_parser="qwen3",
+        sglang_speculative_algorithm="EAGLE",
+        sglang_speculative_draft_model_path=model_path,
+        sglang_speculative_num_steps=3,
+        sglang_speculative_eagle_topk=1,
+        # With eagle_topk=1, SGLang normalizes draft tokens to num_steps + 1.
+        sglang_speculative_num_draft_tokens=4,
+        # Stable spec v2 baseline for agentic multi-turn rollout. The
+        # extra_buffer + radix-cache path can leak Mamba pages under tool-call
+        # traffic and make one SGLang instance stop accepting requests.
+        sglang_disable_radix_cache=True,
+        # Fast spec v2 candidate kept for speed/memory comparison:
+        #   - uncomment sglang_mamba_scheduler_strategy="extra_buffer"
+        #   - comment out sglang_disable_radix_cache=True
+        # Do not enable both together; SGLang rejects extra_buffer with disabled
+        # radix cache.
+        # sglang_mamba_scheduler_strategy="extra_buffer",
+        # Spec v1 baseline kept for speed comparison:
+        #   - set SGLANG_ENABLE_SPEC_V2=0 in the launch script
+        #   - keep sglang_disable_radix_cache=True
     ),
+    health_check_interval_seconds=300000,
+    health_check_failure_threshold=300000,
 )
 
 training_sample_params = SampleParams(
@@ -173,6 +200,7 @@ training_sample_params = SampleParams(
     top_p=0.999,
     temperature=1.0,
     min_tokens=0,
+    return_routed_experts=enable_return_routed_experts,
 )
 evaluation_sample_params = SampleParams(
     max_tokens=max_response_length,
@@ -180,6 +208,7 @@ evaluation_sample_params = SampleParams(
     top_p=0.999,
     temperature=0.8,
     min_tokens=0,
+    return_routed_experts=enable_return_routed_experts,
 )
 
 train_dataset_cfg = _build_dataset_cfg(
@@ -278,7 +307,7 @@ agent_loop_manager_cfg = AgentLoopManagerConfig(
     tasks=TaskSpecConfig(
         task_name="train_task",
         agent_loop_config=agent_loop_config,
-        produce_strategy_config=AsyncProduceStrategyConfig(over_sample_threshold=1.0),
+        produce_strategy_config=AsyncProduceStrategyConfig(over_sample_threshold=0.0),
         sampler_config=SamplerConfig(dataloader_cfg=dataloader_cfg, prompt_repeat_k=prompt_repeat_k),
     ),
 )
@@ -293,7 +322,7 @@ if enable_evaluate:
         tasks=TaskSpecConfig(
             task_name="eval_task",
             agent_loop_config=eval_agent_loop_config,
-            produce_strategy_config=AsyncProduceStrategyConfig(),
+            produce_strategy_config=AsyncProduceStrategyConfig(over_sample_threshold=1.0),
             sampler_config=SamplerConfig(dataloader_cfg=eval_dataloader_cfg, prompt_repeat_k=1),
         ),
     )

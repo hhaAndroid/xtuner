@@ -164,6 +164,18 @@ class PartialRolloutHandler:
         rollout_state.logprobs = history_logprobs + current_logprobs
 
         history_routed_experts = rollout_state.routed_experts
+        if (
+            history_routed_experts is not None
+            and not current_response_ids
+            and not current_logprobs
+            and completion_tokens == 0
+        ):
+            # SGLang spec v2 can return length=0 continuations with a prompt-only
+            # routed_experts payload. No new token was accepted, so keep the
+            # historical experts instead of concatenating a duplicate prompt pass.
+            rollout_state.routed_experts = history_routed_experts
+            return rollout_state
+
         if history_routed_experts is not None and routed_experts is not None:
             routed_experts_expect_len = prompt_tokens + completion_tokens - 1
             history_routed_experts_expect_len = prompt_tokens - 1

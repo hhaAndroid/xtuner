@@ -1346,7 +1346,7 @@ class BaseRLTrainer:
                 rewards.append(data.reward["score"])
                 response_ids = self._get_trajectory_response_ids(data)
                 response = data.response
-                if response is None and response_ids:
+                if not response and response_ids:
                     response = self.tokenizer.decode(response_ids)
                 ground_truth = None
                 if data.reward_model is not None:
@@ -1411,8 +1411,8 @@ class BaseRLTrainer:
         for group in data_groups:
             for data in group:
                 reward = data.reward["score"] if data.reward is not None and "score" in data.reward else 0.0
-                response = data.response or ""
                 response_ids = self._get_trajectory_response_ids(data)
+                response = data.response or (self.tokenizer.decode(response_ids) if response_ids else "")
                 response_len = len(response_ids)
                 rewards.append(reward)
                 ground_truth = None

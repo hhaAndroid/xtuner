@@ -1,4 +1,9 @@
 import json
+import base64
+import asyncio
+import os
+import time
+import uuid
 from functools import reduce
 from operator import add
 from typing import Any, Optional
@@ -7,7 +12,7 @@ import numpy as np
 import ray
 from aiohttp import ClientConnectionResetError, ClientSession, ClientTimeout, web
 
-from transformers import AutoTokenizer
+from transformers import AutoConfig, AutoTokenizer
 from xtuner.v1.utils import get_logger
 
 from .chat_template import canonicalize_messages_for_chat_template
@@ -25,6 +30,99 @@ def _lmdeploy_error_payload(message: str, status: int = 500, error_type: str = "
         "code": status,
         "object": "error",
     }
+
+
+def _short_repr(value: Any, max_chars: int = 512) -> str:
+    try:
+        text = json.dumps(value, ensure_ascii=False, default=str)
+    except Exception:
+        text = repr(value)
+    if len(text) > max_chars:
+        return text[:max_chars] + "...<truncated>"
+    return text
+
+
+def _payload_summary(payload: Optional[dict]) -> dict:
+    if not isinstance(payload, dict):
+        return {}
+
+    messages = payload.get("messages")
+    choices = payload.get("choices")
+    return {
+        "model": payload.get("model"),
+        "stream": payload.get("stream"),
+        "session_id": payload.get("session_id"),
+        "input_ids_len": len(payload.get("input_ids") or []),
+        "messages_len": len(messages) if isinstance(messages, list) else None,
+        "tools_len": len(payload.get("tools") or []),
+        "max_tokens": payload.get("max_tokens", payload.get("max_completion_tokens")),
+        "temperature": payload.get("temperature"),
+        "top_p": payload.get("top_p"),
+        "top_k": payload.get("top_k"),
+        "return_logprob": payload.get("return_logprob"),
+        "return_token_ids": payload.get("return_token_ids"),
+        "return_routed_experts": payload.get("return_routed_experts"),
+        "choices_len": len(choices) if isinstance(choices, list) else None,
+    }
+
+
+def _stream_event_summary(event: Any) -> dict:
+    if not isinstance(event, dict):
+        return {"event": _short_repr(event, 256)}
+
+    summary: dict[str, Any] = {
+        "id": event.get("id"),
+        "object": event.get("object"),
+        "model": event.get("model"),
+        "type": event.get("type"),
+    }
+    if event.get("error") is not None:
+        summary["error"] = event.get("error")
+    choices = event.get("choices")
+    if isinstance(choices, list):
+        summary["choices_len"] = len(choices)
+        finish_reasons = []
+        output_ids_len = 0
+        output_token_logprobs_len = 0
+        content_len = 0
+        reasoning_content_len = 0
+        tool_calls_len = 0
+        tool_call_arguments_len = 0
+        routed_experts_len = 0
+        routed_experts_type = None
+        for choice in choices:
+            if not isinstance(choice, dict):
+                continue
+            finish_reasons.append(choice.get("finish_reason"))
+            output_ids_len += len(choice.get("output_ids") or [])
+            output_token_logprobs_len += len(choice.get("output_token_logprobs") or [])
+            delta = choice.get("delta") or {}
+            if isinstance(delta.get("content"), str):
+                content_len += len(delta["content"])
+            if isinstance(delta.get("reasoning_content"), str):
+                reasoning_content_len += len(delta["reasoning_content"])
+            for tool_call in delta.get("tool_calls") or []:
+                tool_calls_len += 1
+                fn = tool_call.get("function") or {}
+                if isinstance(fn.get("arguments"), str):
+                    tool_call_arguments_len += len(fn["arguments"])
+            routed_experts = choice.get("routed_experts")
+            if routed_experts is not None:
+                routed_experts_type = type(routed_experts).__name__
+                if isinstance(routed_experts, str):
+                    routed_experts_len += len(routed_experts)
+        summary["finish_reasons"] = finish_reasons
+        summary["output_ids_len"] = output_ids_len
+        summary["output_token_logprobs_len"] = output_token_logprobs_len
+        summary["content_len"] = content_len
+        summary["reasoning_content_len"] = reasoning_content_len
+        summary["tool_calls_len"] = tool_calls_len
+        summary["tool_call_arguments_len"] = tool_call_arguments_len
+        summary["routed_experts_type"] = routed_experts_type
+        summary["routed_experts_len"] = routed_experts_len
+    if event.get("usage") is not None:
+        summary["usage"] = event.get("usage")
+    return summary
 
 
 def _stream_has_traceable_choices(raw: bytes) -> bool:
@@ -74,6 +172,7 @@ def _extract_output_logprobs(choice: dict, output_token_ids: list[int]) -> list[
 
 
 _SESSION_SERVER_ONLY_KEYS = {"session_id"}
+_DEFAULT_MAX_MODEL_LEN_SAFETY_MARGIN = 16
 
 
 def _bool_request_value(value: Any, default: bool = False) -> bool:
@@ -117,13 +216,30 @@ class SessionServer:
         port: int = 8080,
         request_timeout: float = 1200.0,
         read_bufsize: int = 2**26,
+        max_model_len: Optional[int] = None,
+        max_model_len_reserved_tokens: int = 0,
+        normalize_sglang_sampling_params: bool = False,
+        drain_upstream_on_client_disconnect: bool = True,
+        enable_return_routed_experts: bool = True,
     ):
         self.worker_base_url = worker_base_url.rstrip("/")
         self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_path, trust_remote_code=True)
+        self.model_config = AutoConfig.from_pretrained(tokenizer_path, trust_remote_code=True)
+        text_config = getattr(self.model_config, "text_config", self.model_config)
+        self.routed_experts_num_hidden_layers = getattr(text_config, "num_hidden_layers", None)
+        self.routed_experts_num_experts_per_tok = getattr(text_config, "num_experts_per_tok", None)
         self.host = host
         self.port = port
         self.request_timeout = request_timeout
         self.read_bufsize = read_bufsize
+        self.max_model_len = max_model_len
+        self.max_model_len_safety_margin = max(
+            _DEFAULT_MAX_MODEL_LEN_SAFETY_MARGIN,
+            max_model_len_reserved_tokens + 1,
+        )
+        self.normalize_sglang_sampling_params = normalize_sglang_sampling_params
+        self.drain_upstream_on_client_disconnect = drain_upstream_on_client_disconnect
+        self.enable_return_routed_experts = enable_return_routed_experts
         self.store = get_store()
         self.stop_word = self.tokenizer.eos_token or ""
 
@@ -143,7 +259,7 @@ class SessionServer:
                 worker_req.pop("top_logprobs", None)
                 worker_req["return_logprob"] = False
             worker_req["return_token_ids"] = False
-            worker_req.setdefault("return_routed_experts", True)
+            worker_req.setdefault("return_routed_experts", self.enable_return_routed_experts)
             return worker_req
 
         session_id = req_body["session_id"]
@@ -175,11 +291,37 @@ class SessionServer:
             "messages": [],
             "input_ids": input_ids,
             "return_token_ids": True,
-            "return_routed_experts": True,
+            "return_routed_experts": self.enable_return_routed_experts
+            and _bool_request_value(req_body.get("return_routed_experts"), True),
             "return_logprob": True,
             "include_stop_str_in_output": True,
         }
+        self._normalize_sampling_params(worker_req)
+        self._cap_completion_budget(worker_req, input_ids_len=len(input_ids))
         return worker_req
+
+    def _normalize_sampling_params(self, worker_req: dict) -> None:
+        if not self.normalize_sglang_sampling_params:
+            return
+
+        # Keep SessionServer behavior aligned with SGLangWorker._transform_sample_params.
+        # XTuner uses top_k=0 for "disabled", while SGLang's OpenAI server expects -1.
+        if worker_req.get("top_p", 0) > 0 and worker_req.get("top_k") != -1:
+            worker_req["top_k"] = -1
+
+    def _cap_completion_budget(self, worker_req: dict, *, input_ids_len: int) -> None:
+        if self.max_model_len is None:
+            return
+
+        remaining_tokens = self.max_model_len - input_ids_len - self.max_model_len_safety_margin
+        if remaining_tokens <= 0:
+            return
+
+        for key in ("max_tokens", "max_completion_tokens"):
+            value = worker_req.get(key)
+            if not isinstance(value, int) or value <= remaining_tokens:
+                continue
+            worker_req[key] = remaining_tokens
 
     async def on_response(self, worker_resp: dict, *, trace_enabled: bool = True) -> dict:
         """Hook for processing the parsed response received from the worker."""
@@ -295,6 +437,10 @@ class SessionServer:
     async def _handle_request(self, request: web.Request) -> web.Response:
         """Proxy handler for the worker API."""
 
+        request_id = request.headers.get("x-request-id") or uuid.uuid4().hex[:12]
+        started_at = time.monotonic()
+        logger = get_logger()
+
         # Read the request body
         request_body = await request.read()
         request_data = session_id = messages = None
@@ -322,8 +468,12 @@ class SessionServer:
             except json.JSONDecodeError:
                 pass
             except Exception as exc:
-                message = f"SessionServer request hook failed: {type(exc).__name__}: {exc}"
-                get_logger().error(message)
+                message = (
+                    f"SessionServer request hook failed: {type(exc).__name__}: {exc}; "
+                    f"request_id={request_id}; session_id={session_id}; path={request.path}; "
+                    f"payload_summary={_short_repr(_payload_summary(request_data), 1024)}"
+                )
+                logger.error(message)
                 return web.json_response(_lmdeploy_error_payload(message), status=500)
 
         # Build forwarding headers, dropping original Host
@@ -340,6 +490,12 @@ class SessionServer:
             target_url += f"?{request.query_string}"
 
         is_stream = request_data.get("stream", False) if request_data else False
+        logger.info(
+            "[SessionServer:req_start] "
+            f"request_id={request_id} session_id={session_id} method={request.method} path={request.path} "
+            f"target_url={target_url} stream={is_stream} trace_enabled={trace_enabled} "
+            f"payload_summary={_short_repr(_payload_summary(request_data), 1024)}"
+        )
 
         def _clean_data(data: dict) -> bool:
             modified = False
@@ -379,72 +535,314 @@ class SessionServer:
         # tool_calls/reasoning_content payloads can exceed the 64KB default and trigger
         # "Chunk too big" from readuntil(b"\n").
         timeout = ClientTimeout(total=self.request_timeout, sock_connect=30)
-        async with ClientSession(read_bufsize=self.read_bufsize, timeout=timeout) as client:
-            async with client.request(
-                method=request.method, url=target_url, headers=forward_headers, data=request_body
-            ) as resp:
-                # Setup proper stream vs sync response objects
-                if is_stream:
-                    response_chunks = []
-                    response = web.StreamResponse(
-                        status=resp.status,
-                        headers={
-                            k: v
-                            for k, v in resp.headers.items()
-                            if k.lower() not in ("transfer-encoding", "content-length", "content-encoding")
-                        },
+        response = None
+        raw_response = b""
+        stream_chunk_count = 0
+        stream_byte_count = 0
+        stream_nonfinal_byte_count = 0
+        stream_final_byte_count = 0
+        stream_max_event_bytes = 0
+        stream_max_event_summary = None
+        stream_routed_experts_event_count = 0
+        stream_total_output_ids = 0
+        stream_total_output_logprobs = 0
+        stream_saw_done = False
+        stream_terminal_finish_seen = False
+        stream_last_event_summary = None
+        stream_last_chunk_at = None
+        stream_max_inter_chunk_gap = 0.0
+        stream_last_inter_chunk_gap = None
+        downstream_write_max_s = 0.0
+        downstream_write_slow_count = 0
+        upstream_status = None
+        stream_finished = False
+        stall_log_interval_s = float(os.environ.get("XTUNER_SESSION_SERVER_STALL_LOG_S", "60"))
+        slow_write_log_s = float(os.environ.get("XTUNER_SESSION_SERVER_SLOW_WRITE_LOG_S", "5"))
+        try:
+            async with ClientSession(read_bufsize=self.read_bufsize, timeout=timeout) as client:
+                async with client.request(
+                    method=request.method, url=target_url, headers=forward_headers, data=request_body
+                ) as resp:
+                    upstream_status = resp.status
+                    logger.info(
+                        "[SessionServer:upstream_open] "
+                        f"request_id={request_id} session_id={session_id} status={resp.status} "
+                        f"elapsed={time.monotonic() - started_at:.2f}s target_url={target_url}"
                     )
-                    await response.prepare(request)
-                    # If the downstream client closes the socket mid-stream
-                    # (e.g. AsyncAPIClient bails out on a finish_reason=='error'
-                    # chunk after the prompt overflowed the session window),
-                    # keep draining the upstream so the trace is still recorded
-                    # in full but stop attempting to write to the closed socket.
-                    client_alive = True
-                    async for line in resp.content:
-                        # Keep unmodified line for trace store parsing
-                        if trace_enabled:
-                            response_chunks.append(line)
+                    # Setup proper stream vs sync response objects
+                    if is_stream:
+                        response_chunks = []
+                        response = web.StreamResponse(
+                            status=resp.status,
+                            headers={
+                                k: v
+                                for k, v in resp.headers.items()
+                                if k.lower() not in ("transfer-encoding", "content-length", "content-encoding")
+                            },
+                        )
+                        await response.prepare(request)
+                        # If the downstream client closes the socket mid-stream,
+                        # stop writing. For backends where abandoned generations keep
+                        # consuming GPU, close the upstream stream instead of draining
+                        # it only for trace completeness.
+                        client_alive = True
+                        next_progress_at = started_at + 300.0
+                        async def _stall_watchdog() -> None:
+                            next_log_at = time.monotonic() + stall_log_interval_s
+                            while not stream_finished:
+                                await asyncio.sleep(max(1.0, stall_log_interval_s / 2))
+                                now = time.monotonic()
+                                if now < next_log_at:
+                                    continue
+                                last_age = now - stream_last_chunk_at if stream_last_chunk_at is not None else None
+                                if stream_last_chunk_at is None or last_age >= stall_log_interval_s:
+                                    logger.warning(
+                                        "[SessionServer:stream_stall] "
+                                        f"request_id={request_id} session_id={session_id} "
+                                        f"elapsed={now - started_at:.2f}s last_chunk_age="
+                                        f"{None if last_age is None else round(last_age, 3)} "
+                                        f"chunks={stream_chunk_count} bytes={stream_byte_count} "
+                                        f"nonfinal_bytes={stream_nonfinal_byte_count} final_bytes={stream_final_byte_count} "
+                                        f"saw_done={stream_saw_done} terminal_finish={stream_terminal_finish_seen} "
+                                        f"client_alive={client_alive} upstream_status={upstream_status} "
+                                        f"max_gap={round(stream_max_inter_chunk_gap, 3)} "
+                                        f"last_event={_short_repr(stream_last_event_summary, 1024)}"
+                                    )
+                                    next_log_at = now + stall_log_interval_s
 
-                        # Dynamically prune added fields before writing to client
-                        if request_data is not None and line.startswith(b"data: ") and line.strip() != b"data: [DONE]":
+                        watchdog_task = asyncio.create_task(_stall_watchdog())
+                        try:
+                            async for line in resp.content:
+                                now = time.monotonic()
+                                if stream_last_chunk_at is not None:
+                                    stream_last_inter_chunk_gap = now - stream_last_chunk_at
+                                    stream_max_inter_chunk_gap = max(
+                                        stream_max_inter_chunk_gap, stream_last_inter_chunk_gap
+                                    )
+                                stream_chunk_count += 1
+                                stream_byte_count += len(line)
+                                stream_last_chunk_at = now
+
+                                stripped_line = line.strip()
+                                line_is_final_event = False
+                                if stripped_line == b"data: [DONE]":
+                                    stream_saw_done = True
+                                elif line.startswith(b"data: "):
+                                    try:
+                                        event = json.loads(line.decode("utf-8")[6:])
+                                        stream_last_event_summary = _stream_event_summary(event)
+                                        if len(line) > stream_max_event_bytes:
+                                            stream_max_event_bytes = len(line)
+                                            stream_max_event_summary = stream_last_event_summary
+                                        choices = event.get("choices") if isinstance(event, dict) else None
+                                        if isinstance(choices, list):
+                                            if any(choice.get("finish_reason") for choice in choices if isinstance(choice, dict)):
+                                                line_is_final_event = True
+                                                stream_terminal_finish_seen = True
+                                            for choice in choices:
+                                                if not isinstance(choice, dict):
+                                                    continue
+                                                stream_total_output_ids += len(choice.get("output_ids") or [])
+                                                stream_total_output_logprobs += len(
+                                                    choice.get("output_token_logprobs") or []
+                                                )
+                                                if choice.get("routed_experts") is not None:
+                                                    stream_routed_experts_event_count += 1
+                                        if _is_error_payload(event):
+                                            logger.error(
+                                                "[SessionServer:upstream_error_event] "
+                                                f"request_id={request_id} session_id={session_id} "
+                                                f"elapsed={now - started_at:.2f}s chunks={stream_chunk_count} "
+                                                f"bytes={stream_byte_count} upstream_status={upstream_status} "
+                                                f"event={_short_repr(stream_last_event_summary, 2048)} "
+                                                f"target_url={target_url}"
+                                            )
+                                    except Exception:
+                                        stream_last_event_summary = {
+                                            "parse_error": line[:256].decode("utf-8", errors="replace")
+                                        }
+
+                                if line_is_final_event:
+                                    stream_final_byte_count += len(line)
+                                elif stripped_line != b"data: [DONE]":
+                                    stream_nonfinal_byte_count += len(line)
+
+                                if now >= next_progress_at:
+                                    logger.info(
+                                        "[SessionServer:stream_progress] "
+                                        f"request_id={request_id} session_id={session_id} "
+                                        f"elapsed={now - started_at:.2f}s chunks={stream_chunk_count} "
+                                        f"bytes={stream_byte_count} nonfinal_bytes={stream_nonfinal_byte_count} "
+                                        f"final_bytes={stream_final_byte_count} saw_done={stream_saw_done} "
+                                        f"terminal_finish={stream_terminal_finish_seen} client_alive={client_alive} "
+                                        f"upstream_status={upstream_status} "
+                                        f"last_gap={None if stream_last_inter_chunk_gap is None else round(stream_last_inter_chunk_gap, 3)} "
+                                        f"max_gap={round(stream_max_inter_chunk_gap, 3)} "
+                                        f"output_ids={stream_total_output_ids} logprobs={stream_total_output_logprobs} "
+                                        f"routed_events={stream_routed_experts_event_count} "
+                                        f"last_event={_short_repr(stream_last_event_summary, 1024)}"
+                                    )
+                                    next_progress_at = now + 300.0
+
+                                # Keep unmodified line for trace store parsing
+                                if trace_enabled:
+                                    response_chunks.append(line)
+
+                                # Dynamically prune added fields before writing to client
+                                if request_data is not None and line.startswith(b"data: ") and stripped_line != b"data: [DONE]":
+                                    try:
+                                        text = line.decode("utf-8")
+                                        data = json.loads(text[6:])
+                                        modified = False
+                                        if _is_error_payload(data):
+                                            data.setdefault(
+                                                "session_server",
+                                                {
+                                                    "request_id": request_id,
+                                                    "session_id": session_id,
+                                                    "target_url": target_url,
+                                                    "upstream_status": upstream_status,
+                                                    "elapsed": round(time.monotonic() - started_at, 3),
+                                                    "stream_chunks": stream_chunk_count,
+                                                    "stream_bytes": stream_byte_count,
+                                                    "stream_nonfinal_bytes": stream_nonfinal_byte_count,
+                                                    "stream_final_bytes": stream_final_byte_count,
+                                                    "stream_saw_done": stream_saw_done,
+                                                    "terminal_finish": stream_terminal_finish_seen,
+                                                    "last_event": stream_last_event_summary,
+                                                },
+                                            )
+                                            modified = True
+                                        if _clean_data(data):
+                                            modified = True
+                                        if modified:
+                                            line = ("data: " + json.dumps(data) + "\n").encode("utf-8")
+                                    except Exception:
+                                        pass
+
+                                # Delay [DONE] only while a training trace still needs to be exported.
+                                if client_alive and (not trace_enabled or stripped_line != b"data: [DONE]"):
+                                    try:
+                                        write_started_at = time.monotonic()
+                                        await response.write(line)
+                                        write_elapsed = time.monotonic() - write_started_at
+                                        downstream_write_max_s = max(downstream_write_max_s, write_elapsed)
+                                        if write_elapsed >= slow_write_log_s:
+                                            downstream_write_slow_count += 1
+                                            logger.warning(
+                                                "[SessionServer:slow_downstream_write] "
+                                                f"request_id={request_id} session_id={session_id} "
+                                                f"elapsed={now - started_at:.2f}s write_elapsed={write_elapsed:.3f}s "
+                                                f"line_bytes={len(line)} chunks={stream_chunk_count} "
+                                                f"client_alive={client_alive}"
+                                            )
+                                    except (ConnectionError, ClientConnectionResetError):
+                                        client_alive = False
+                                        logger.warning(
+                                            "[SessionServer:client_disconnect] "
+                                            f"request_id={request_id} session_id={session_id} "
+                                            f"elapsed={now - started_at:.2f}s chunks={stream_chunk_count} "
+                                            f"bytes={stream_byte_count} nonfinal_bytes={stream_nonfinal_byte_count} "
+                                            f"final_bytes={stream_final_byte_count} saw_done={stream_saw_done} "
+                                            f"terminal_finish={stream_terminal_finish_seen} "
+                                            f"last_event={_short_repr(stream_last_event_summary, 1024)} "
+                                            f"drain_upstream={self.drain_upstream_on_client_disconnect}"
+                                        )
+                                        if not self.drain_upstream_on_client_disconnect:
+                                            break
+                        finally:
+                            stream_finished = True
+                            watchdog_task.cancel()
                             try:
-                                text = line.decode("utf-8")
-                                data = json.loads(text[6:])
-                                if _clean_data(data):
-                                    line = ("data: " + json.dumps(data) + "\n").encode("utf-8")
+                                await watchdog_task
+                            except asyncio.CancelledError:
+                                pass
+
+                        raw_response = b"".join(response_chunks) if trace_enabled else b""
+                    else:
+                        raw_response = await resp.read()
+                        final_raw_response = raw_response
+
+                        if request_data is not None:
+                            try:
+                                clean_data = json.loads(raw_response)
+                                if _clean_data(clean_data):
+                                    final_raw_response = json.dumps(clean_data).encode("utf-8")
                             except Exception:
                                 pass
 
-                        # Delay [DONE] only while a training trace still needs to be exported.
-                        if client_alive and (not trace_enabled or line.strip() != b"data: [DONE]"):
-                            try:
-                                await response.write(line)
-                            except (ConnectionError, ClientConnectionResetError):
-                                client_alive = False
+                        response = web.Response(
+                            status=resp.status,
+                            headers={
+                                k: v
+                                for k, v in resp.headers.items()
+                                if k.lower() not in ("transfer-encoding", "content-length", "content-encoding")
+                            },
+                            body=final_raw_response,  # Modified raw response without our injected trace params
+                        )
+        except Exception as exc:
+            elapsed = time.monotonic() - started_at
+            status = 504 if isinstance(exc, (asyncio.TimeoutError, TimeoutError)) else 500
+            context = {
+                "request_id": request_id,
+                "session_id": session_id,
+                "method": request.method,
+                "path": request.path,
+                "target_url": target_url,
+                "is_stream": is_stream,
+                "trace_enabled": trace_enabled,
+                "elapsed": round(elapsed, 3),
+                "upstream_status": upstream_status,
+                "stream_chunks": stream_chunk_count,
+                "stream_bytes": stream_byte_count,
+                "stream_nonfinal_bytes": stream_nonfinal_byte_count,
+                "stream_final_bytes": stream_final_byte_count,
+                "stream_max_event_bytes": stream_max_event_bytes,
+                "stream_max_event": stream_max_event_summary,
+                "stream_routed_experts_events": stream_routed_experts_event_count,
+                "stream_output_ids": stream_total_output_ids,
+                "stream_output_token_logprobs": stream_total_output_logprobs,
+                "stream_saw_done": stream_saw_done,
+                "stream_terminal_finish_seen": stream_terminal_finish_seen,
+                "last_chunk_age": round(elapsed - (stream_last_chunk_at - started_at), 3)
+                if stream_last_chunk_at is not None
+                else None,
+                "last_inter_chunk_gap": round(stream_last_inter_chunk_gap, 3)
+                if stream_last_inter_chunk_gap is not None
+                else None,
+                "max_inter_chunk_gap": round(stream_max_inter_chunk_gap, 3),
+                "downstream_write_max_s": round(downstream_write_max_s, 3),
+                "downstream_write_slow_count": downstream_write_slow_count,
+                "last_event": stream_last_event_summary,
+                "payload_summary": _payload_summary(request_data),
+            }
+            message = f"SessionServer forwarding failed: {type(exc).__name__}: {exc}; context={_short_repr(context, 4096)}"
+            logger.exception(message)
+            error_payload = _lmdeploy_error_payload(message, status=status)
+            if is_stream and response is not None and getattr(response, "prepared", False):
+                try:
+                    await response.write(("data: " + json.dumps(error_payload, ensure_ascii=False) + "\n\n").encode("utf-8"))
+                    await response.write_eof()
+                    return response
+                except (ConnectionError, ClientConnectionResetError):
+                    pass
+            return web.json_response(error_payload, status=status)
 
-                    raw_response = b"".join(response_chunks) if trace_enabled else b""
-                else:
-                    raw_response = await resp.read()
-                    final_raw_response = raw_response
-
-                    if request_data is not None:
-                        try:
-                            clean_data = json.loads(raw_response)
-                            if _clean_data(clean_data):
-                                final_raw_response = json.dumps(clean_data).encode("utf-8")
-                        except Exception:
-                            pass
-
-                    response = web.Response(
-                        status=resp.status,
-                        headers={
-                            k: v
-                            for k, v in resp.headers.items()
-                            if k.lower() not in ("transfer-encoding", "content-length", "content-encoding")
-                        },
-                        body=final_raw_response,  # Modified raw response without our injected trace params
-                    )
+        logger.info(
+            "[SessionServer:req_done] "
+            f"request_id={request_id} session_id={session_id} status={upstream_status} "
+            f"stream={is_stream} elapsed={time.monotonic() - started_at:.2f}s "
+            f"chunks={stream_chunk_count} bytes={stream_byte_count} "
+            f"nonfinal_bytes={stream_nonfinal_byte_count} final_bytes={stream_final_byte_count} "
+            f"max_event_bytes={stream_max_event_bytes} routed_events={stream_routed_experts_event_count} "
+            f"output_ids={stream_total_output_ids} logprobs={stream_total_output_logprobs} "
+            f"saw_done={stream_saw_done} terminal_finish={stream_terminal_finish_seen} "
+            f"max_gap={round(stream_max_inter_chunk_gap, 3)} "
+            f"downstream_write_max_s={round(downstream_write_max_s, 3)} "
+            f"downstream_write_slow_count={downstream_write_slow_count} "
+            f"max_event={_short_repr(stream_max_event_summary, 1024)} "
+            f"last_event={_short_repr(stream_last_event_summary, 1024)}"
+        )
 
         # Apply abstract on_response processing
         response_data = None
@@ -503,6 +901,21 @@ class SessionServer:
 
     async def _decode_routed_experts(self, routed_experts: Any) -> np.ndarray:
         if isinstance(routed_experts, str):
+            # SGLang returns routed experts as a base64-encoded int32 tensor.
+            # LMDeploy returns a Ray shared-store key string. Try the SGLang
+            # format first and fall back to LMDeploy shared_store lookup.
+            try:
+                if self.routed_experts_num_hidden_layers and self.routed_experts_num_experts_per_tok:
+                    routed_experts_flat = np.frombuffer(base64.b64decode(routed_experts, validate=True), dtype=np.int32)
+                    routed_experts_array = routed_experts_flat.reshape(
+                        -1,
+                        self.routed_experts_num_hidden_layers,
+                        self.routed_experts_num_experts_per_tok,
+                    )
+                    return routed_experts_array.copy()
+            except Exception:
+                pass
+
             if self._lmdeploy_actor is None:
                 self._lmdeploy_actor = ray.get_actor("shared_store", namespace="lmdeploy")
             assert self._lmdeploy_actor is not None, "LMDeploy actor should be available in the shared store."
@@ -626,12 +1039,29 @@ class SessionServer:
 class SessionServerActor:
     """Ray actor wrapper that owns one SessionServer instance."""
 
-    def __init__(self, worker_base_url: str, tokenizer_path: str, host: str, port: int, request_timeout: float):
+    def __init__(
+        self,
+        worker_base_url: str,
+        tokenizer_path: str,
+        host: str,
+        port: int,
+        request_timeout: float,
+        max_model_len: Optional[int] = None,
+        max_model_len_reserved_tokens: int = 0,
+        normalize_sglang_sampling_params: bool = False,
+        drain_upstream_on_client_disconnect: bool = True,
+        enable_return_routed_experts: bool = True,
+    ):
         self.worker_base_url = worker_base_url
         self.tokenizer_path = tokenizer_path
         self.host = host
         self.port = port
         self.request_timeout = request_timeout
+        self.max_model_len = max_model_len
+        self.max_model_len_reserved_tokens = max_model_len_reserved_tokens
+        self.normalize_sglang_sampling_params = normalize_sglang_sampling_params
+        self.drain_upstream_on_client_disconnect = drain_upstream_on_client_disconnect
+        self.enable_return_routed_experts = enable_return_routed_experts
         self.server: SessionServer | None = None
 
     @property
@@ -648,6 +1078,11 @@ class SessionServerActor:
             host=self.host,
             port=self.port,
             request_timeout=self.request_timeout,
+            max_model_len=self.max_model_len,
+            max_model_len_reserved_tokens=self.max_model_len_reserved_tokens,
+            normalize_sglang_sampling_params=self.normalize_sglang_sampling_params,
+            drain_upstream_on_client_disconnect=self.drain_upstream_on_client_disconnect,
+            enable_return_routed_experts=self.enable_return_routed_experts,
         )
         await self.server.start()
         return self.server.url

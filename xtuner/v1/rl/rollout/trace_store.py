@@ -320,6 +320,8 @@ class RolloutTraceStore:
             trace["labels"].extend(node_val.labels)
             trace["logprobs"].extend(node_val.logprobs)
             trace["routed_experts"].append(node_val.expert_key)
+        if trace["routed_experts"] and all(expert_key is None for expert_key in trace["routed_experts"]):
+            trace["routed_experts"] = None
         return trace
 
     def get_objects(self, keys: list[str]) -> list[ray.ObjectRef]:
