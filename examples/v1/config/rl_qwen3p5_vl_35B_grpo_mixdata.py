@@ -15,6 +15,7 @@ from xtuner.v1.rl.evaluator import EvaluatorConfig
 from xtuner.v1.rl.judger import DapoMathJudgerConfig
 from xtuner.v1.rl.loss import GRPOLossConfig
 from xtuner.v1.rl.replay_buffer import SyncReplayBufferConfig
+from xtuner.v1.rl.rollout import RolloutRouterConfig
 from xtuner.v1.rl.rollout.worker import RolloutConfig
 from xtuner.v1.rl.trainer import RolloutImportanceSampling, WorkerConfig
 from xtuner.v1.rl.utils import AcceleratorResourcesConfig, get_eos_token
@@ -23,6 +24,55 @@ from xtuner.v1.train.rl_trainer import RLColocateTrainerConfig
 
 def _as_list(value):
     return value if isinstance(value, list) else [value]
+
+
+def _as_bool(value):
+    if isinstance(value, bool):
+        return value
+    return str(value).lower() in {"1", "true", "yes", "y", "on"}
+
+
+def _build_rollout_router_config() -> RolloutRouterConfig:
+    """Build rollout router config for the remove-generate prototype.
+
+    Supported prototype modes:
+    - url_pool_worker: SingleTurn talks to raw rollout worker URLs. This is the default and the first mode to test.
+    - url_pool_session_server: SingleTurn talks to per-worker SessionServer URLs. This is useful for checking the
+      optional SessionServer path, but may need SessionServer response compatibility fixes.
+    - third_party_session_server: register active SessionServer URLs to routedapiproxy and return the third-party
+      routed URL.
+    """
+
+    mode = os.environ.get("ROLLOUT_ROUTER_MODE", "url_pool_worker")
+    sticky_session = _as_bool(os.environ.get("ROLLOUT_ROUTER_STICKY_SESSION", "1"))
+
+    if mode == "url_pool_worker":
+        return RolloutRouterConfig(
+            router_type="url_pool",
+            endpoint_type="worker",
+            sticky_session=sticky_session,
+        )
+    if mode == "url_pool_session_server":
+        return RolloutRouterConfig(
+            router_type="url_pool",
+            endpoint_type="session_server",
+            sticky_session=sticky_session,
+        )
+    if mode == "third_party_session_server":
+        return RolloutRouterConfig(
+            router_type="third_party",
+            endpoint_type="session_server",
+            sticky_session=sticky_session,
+            third_party_routed_url=os.environ.get(
+                "ROLLOUT_THIRD_PARTY_ROUTED_URL",
+                "http://s-20260104203038-22bhb.ailab-evalservice.pjh-service.org.cn/v1",
+            ),
+        )
+
+    raise ValueError(
+        f"Unsupported ROLLOUT_ROUTER_MODE={mode!r}. "
+        "Supported modes: url_pool_worker, url_pool_session_server, third_party_session_server."
+    )
 
 
 work_dir = os.environ["WORK_DIR"]
@@ -34,6 +84,7 @@ eval_media_root = os.environ.get("EVAL_MEDIA_ROOT", "")
 debug_rollout_dir = os.environ.get("DEBUG_ROLLOUT_DIR", "")
 debug_train = os.environ.get("DEBUG_TRAIN", False)
 debug_rollout = os.environ.get("DEBUG_ROLLOUT", False)
+rollout_router_config = _build_rollout_router_config()
 
 enable_evaluate = eval_data_path is not None and eval_data_path != ""
 
@@ -48,7 +99,7 @@ max_prompt_length = 2048
 max_response_length = 8192
 pack_max_length = 32768
 train_optimizer_steps = 8
-hf_interval = 15
+hf_interval = 150
 
 # 1. resources
 resources = AcceleratorResourcesConfig(
@@ -71,6 +122,8 @@ rollout_config = RolloutConfig(
     context_length=max_response_length + max_prompt_length,
     enable_return_routed_experts=True,
     rollout_max_batch_size_per_instance=512,
+    health_check_interval_seconds=0.0,
+    health_check_failure_threshold=0,
 )
 
 # sampling params
@@ -217,6 +270,7 @@ agent_loop_manager_cfg = AgentLoopManagerConfig(
     tasks=TaskSpecConfig(
         task_name="train_task",
         agent_loop_config=agent_loop_config,
+        rollout_router_config=rollout_router_config,
         judger_config=judger_config,
         produce_strategy_config=SyncProduceStrategyConfig(),
         sampler_config=SamplerConfig(dataloader_cfg=dataloader_cfg, prompt_repeat_k=prompt_repeat_k),
@@ -232,6 +286,7 @@ if enable_evaluate:
         tasks=TaskSpecConfig(
             task_name="eval_task",
             agent_loop_config=eval_agent_loop_config,
+            rollout_router_config=rollout_router_config,
             judger_config=judger_config,
             sampler_config=SamplerConfig(dataloader_cfg=eval_dataloader_cfg, prompt_repeat_k=1),
         ),

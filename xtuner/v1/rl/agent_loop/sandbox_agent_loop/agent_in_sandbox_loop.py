@@ -149,16 +149,24 @@ class AgentInSandboxLoop(AgentLoop):
         self.mode = mode
 
     async def generate_group(self, rollout_state: list[RolloutState], **kwargs) -> list[RolloutState]:
-        async def generate_one(state: RolloutState) -> RolloutState:
+        rollout_urls = kwargs.pop("rollout_urls", None)
+        rollout_endpoint_types = kwargs.pop("rollout_endpoint_types", None)
+
+        async def generate_one(state: RolloutState, sample_kwargs: dict) -> RolloutState:
             if self._sample_semaphore is None:
-                return await self.generate_sample(state, **kwargs)
+                return await self.generate_sample(state, **sample_kwargs)
             async with self._sample_semaphore:
-                return await self.generate_sample(state, **kwargs)
+                return await self.generate_sample(state, **sample_kwargs)
 
         pending_tasks = []
-        for state in rollout_state:
+        for idx, state in enumerate(rollout_state):
             state.sample_params = self.sample_params
-            task = create_task(generate_one(state))
+            sample_kwargs = dict(kwargs)
+            if rollout_urls is not None:
+                sample_kwargs["rollout_url"] = rollout_urls[idx]
+            if rollout_endpoint_types is not None:
+                sample_kwargs["rollout_endpoint_type"] = rollout_endpoint_types[idx]
+            task = create_task(generate_one(state, sample_kwargs))
             pending_tasks.append(task)
         generated_samples = asyncio.gather(*pending_tasks)
         group_samples = await generated_samples

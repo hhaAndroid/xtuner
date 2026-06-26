@@ -1,6 +1,7 @@
 import os
 
 from .controller import RolloutController
+from .router import RolloutEndpoint, RolloutRouter, RolloutRouterConfig
 from .worker import RolloutWorker
 
 

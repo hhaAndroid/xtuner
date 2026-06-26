@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any, Awaitable, Callable, Optional, Protocol, 
 
 if TYPE_CHECKING:
     from xtuner.v1.rl.rollout.controller import RolloutControllerProxy
+    from xtuner.v1.rl.rollout.router import RolloutRouter
 
 import ray
 import tqdm
@@ -297,6 +298,7 @@ class ProduceContext:
     """
 
     agent_loop: AgentLoopSpec
+    rollout_router: "RolloutRouter"
     sampler: Sampler
     replay_buffer: ReplayBuffer
     task_batch_size: int
@@ -338,14 +340,24 @@ class ProduceContext:
     ) -> list[RolloutState]:
         # strategy 只表达“要生成”，不关心 agent_loop 是 ray actor 还是本地对象。
         start = time.perf_counter()
+        rollout_urls = []
+        rollout_endpoint_types = []
+        for state in rollout_state:
+            endpoint = await self.rollout_router.acquire(state)
+            rollout_urls.append(endpoint.url)
+            rollout_endpoint_types.append(endpoint.endpoint_type)
         if isinstance(self.agent_loop, ray.actor.ActorHandle):
             result = await self.agent_loop.generate_group.remote(
                 rollout_state,
+                rollout_urls=rollout_urls,
+                rollout_endpoint_types=rollout_endpoint_types,
                 enable_partial_rollout=enable_partial_rollout,
             )
         else:
             result = await self.agent_loop.generate_group(
                 rollout_state,
+                rollout_urls=rollout_urls,
+                rollout_endpoint_types=rollout_endpoint_types,
                 enable_partial_rollout=enable_partial_rollout,
             )
         elapsed = time.perf_counter() - start
@@ -502,10 +514,6 @@ class AsyncProduceStrategyConfig(ProduceStrategyConfig):
         sync_weights_interval: int = 1,
         rollout_controller: "Optional[RolloutControllerProxy]" = None,
     ) -> "AsyncProduceStrategy":
-        if rollout_controller is not None:
-            import ray
-
-            ray.get(rollout_controller.set_enable_partial_rollout.remote(self.enable_partial_rollout))
         return AsyncProduceStrategy(
             over_sample_threshold=self.over_sample_threshold,
             enable_partial_rollout=self.enable_partial_rollout,
@@ -717,8 +725,15 @@ class AsyncProduceStrategy(ProduceStrategy):
         if self._pending_tasks.count() == 0:
             return 0.0
 
-        rollout_ctl = await get_agent_loop_rollout_ctl(ctx.agent_loop)
-        await rollout_ctl.pause_generation.remote()  # type: ignore[attr-defined]
+        pause = getattr(ctx.agent_loop, "pause", None)
+        if pause is not None:
+            if isinstance(ctx.agent_loop, ray.actor.ActorHandle):
+                await pause.remote()
+            else:
+                await pause()
+        else:
+            rollout_ctl = await get_agent_loop_rollout_ctl(ctx.agent_loop)
+            await rollout_ctl.pause_generation.remote()  # type: ignore[attr-defined]
 
         logger.info(
             f"Pause signal sent for task {ctx.task_name}. Waiting for {self._pending_tasks.count()} pending tasks to complete..."
@@ -756,6 +771,7 @@ class AsyncProduceStrategy(ProduceStrategy):
                         f"length: {len(item.response_ids or [])}) after pausing generation."
                     )
                 await ctx.put_generated_group(paused_items)
+        rollout_ctl = await get_agent_loop_rollout_ctl(ctx.agent_loop)
         await rollout_ctl.cleanup_after_pause.remote()  # type: ignore[attr-defined]
         pause_time = time.perf_counter() - pause_start
         aborted_tokens_mean = aborted_tokens_sum / aborted_count if aborted_count > 0 else 0.0

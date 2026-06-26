@@ -116,6 +116,7 @@ AgentLoop
 - 根据 metadata 获取 active URLs。
 - 在 `sticky_session=True` 且 `rollout_state.session_uid is not None` 时保持同 session 到同 URL。
 - 在没有 `session_uid` 时做 round-robin，不记录 sticky 映射。
+- 选择 URL 时只使用 active endpoint。
 
 ### 5.4 AgentLoop
 
@@ -195,7 +196,7 @@ XTuner 自己启动一个内部 router，对 AgentLoop 暴露统一 URL。
 如果 agent 内部会拿到 `rollout_url` 后自行请求并重试，那么统一 URL 的价值会变高：
 
 - `url_pool` 返回的是具体 worker/session_server URL，agent 内部 retry 只能重试同一个 URL。
-- `third_party` 或 `xtuner` 返回统一 URL，router 可ky session以在服务端做健康检查、失败重试和 stic。
+- `third_party` 或 `xtuner` 返回统一 URL，router 可以在服务端做健康检查、失败重试和 sticky session。
 - 后续接入健康检测时，统一 router 能在每次请求时基于最新健康状态跳过 inactive endpoint；`url_pool` 只能在外层 acquire 时判断一次，无法管理 agent 内部后续请求。
 
 因此：
@@ -257,6 +258,184 @@ XTuner 自己启动一个内部 router，对 AgentLoop 暴露统一 URL。
 - 如果第三方 router 不能保证 session sticky，则不能用于强依赖同 session 同 backend 的 agentic trace 场景。
 - 第三方 router 注册逻辑应该从 `rl_trainer.py` 移到 `ThirdPartyRolloutRouter`。
 - `router_type` 和 `endpoint_type` 是 router/config 层信息。`AgentLoop.generate_sample` 默认只接收 `rollout_url`。
+
+### 6.4 使用模式与请求协议
+
+`router_type` 只决定 AgentLoop 拿到的是具体 URL 还是统一 router URL；真正决定请求 payload 形态的是
+`endpoint_type`。
+
+#### 模式 A：SingleTurn + url_pool + worker
+
+用途：
+
+- 当前最小可验证主路径。
+- 不走 SessionServer。
+- AgentLoop 直接请求 raw rollout worker。
+
+配置：
+
+```python
+RolloutRouterConfig(
+    router_type="url_pool",
+    endpoint_type="worker",
+    sticky_session=True,
+)
+```
+
+请求协议：
+
+```python
+{
+    "model": model_name,
+    "messages": [],
+    "input_ids": rollout_state.tokens,
+    "return_token_ids": True,
+    "return_logprob": True,
+    "return_routed_experts": ...,
+    ...
+}
+```
+
+说明：
+
+- `SingleTurnAgentLoop` 已经从 dataloader 拿到 tokenized prompt，因此可以直接把 `input_ids`
+  发给 worker。
+- 这个模式不需要 `session_id`。
+- 不使用 trace store。
+
+#### 模式 B：SingleTurn + url_pool + session_server
+
+用途：
+
+- 验证 SingleTurn 也能走 SessionServer。
+- 请求必须是标准对话请求，由 SessionServer 负责 chat template、tokenization 和 trace store。
+
+配置：
+
+```python
+RolloutRouterConfig(
+    router_type="url_pool",
+    endpoint_type="session_server",
+    sticky_session=True,
+)
+```
+
+请求协议：
+
+```python
+{
+    "model": model_name,
+    "session_id": str(rollout_state.session_uid or rollout_state.uid),
+    "messages": rollout_state.message,
+    "tools": rollout_state.tools,
+    "tool_choice": rollout_state.tool_choice,
+    "return_token_ids": True,
+    "return_logprob": True,
+    "return_routed_experts": ...,
+    ...
+}
+```
+
+禁止：
+
+```python
+{
+    "messages": [],
+    "input_ids": rollout_state.tokens,
+    ...
+}
+```
+
+说明：
+
+- 走 SessionServer 时，上游不应该传 `input_ids`。
+- `input_ids` 是 SessionServer 根据 `messages/tools` 和 trace store 生成并转发给 raw worker 的内部协议。
+- 如果 SingleTurn 走 SessionServer，需要确保 dataloader 保留 `rollout_state.message`。
+- `session_id` 是请求协议字段，不代表 router 可以修改 `RolloutState`；router 仍然只读 state。
+
+#### 模式 C：Agentic Loop + url_pool + session_server
+
+用途：
+
+- 简单 agentic 验证。
+- agent 内部拿到的是具体 per-worker SessionServer URL。
+- 可以使用 SessionServer trace store，但不支持 agent 内部透明 failover。
+
+请求协议：
+
+```python
+{
+    "model": model_name,
+    "session_id": session_id,
+    "messages": messages,
+    "tools": tools,
+    "tool_choice": tool_choice,
+    ...
+}
+```
+
+说明：
+
+- agent 内部必须使用同一个 `session_id` 维持同一条 trace。
+- 因为 `url_pool` 返回具体 URL，agent 内部 retry 只能重试同一个 SessionServer。
+- 如果这个 SessionServer 或背后的 worker 出问题，无法在 agent 内部透明切到其它 endpoint。
+
+#### 模式 D：Agentic Loop + third_party + session_server
+
+用途：
+
+- 第三方 routedapiproxy 统一入口。
+- 适合 agent 内部需要拿一个稳定 URL 自己发多轮请求的场景。
+
+配置：
+
+```python
+RolloutRouterConfig(
+    router_type="third_party",
+    endpoint_type="session_server",
+    sticky_session=True,
+)
+```
+
+请求协议：
+
+和模式 C 相同，仍然是标准对话请求：
+
+```python
+{
+    "session_id": session_id,
+    "messages": messages,
+    ...
+}
+```
+
+说明：
+
+- 第三方 router 注册的是 active SessionServer URL。
+- sticky session 是否真的成立，取决于第三方 router 是否按 `session_id` 做粘性路由。
+- 如果第三方 router 不保证 sticky，则不能用于强依赖 trace store 的多轮 agentic 场景。
+
+#### 模式 E：XTunerRolloutRouter
+
+用途：
+
+- XTuner 自己提供统一 router URL。
+- 未来用于集中管理 sticky session、retry、健康检测、熔断和恢复。
+
+状态：
+
+- 本轮原型不实现。
+- 当前代码中 `XTunerRolloutRouter` 是占位，配置该模式应 fail fast。
+
+#### 模式选择建议
+
+| 场景                         | 推荐模式                          |
+| ---------------------------- | --------------------------------- |
+| 当前 SingleTurn 最小验证      | `url_pool + worker`               |
+| 验证 SingleTurn 经 SessionServer | `url_pool + session_server`，请求必须走 messages |
+| 简单 agentic 原型             | `url_pool + session_server`       |
+| agent 内部需要统一 URL         | `third_party + session_server`    |
+| 后续健康检测/统一 failover     | `xtuner + session_server` 或 `third_party + session_server` |
 
 ## 7. Sticky Session 规则
 
@@ -518,7 +697,7 @@ class XTunerRolloutRouter:
 - request headers/body/query string 透传。
 - timeout 和连接池。
 - 基于请求 `session_id` 的 sticky routing。
-- backend health / inactive URL 跳过。
+- 每次请求转发前检查 backend health / inactive URL。
 - endpoint 失败计数、熔断和恢复。
 - 错误响应格式。
 
@@ -868,15 +1047,56 @@ Trainer 不直接注册第三方 router，只负责 build config。
 
 ## 13. 风险与待确认
 
+### 13.0 本轮不处理范围
+
+这一版是 rollout router / remove generate 的核心功能原型，只验证主链路：
+
+- `RolloutRouter` 如何给 AgentLoop 提供 `rollout_url`。
+- `SingleTurnAgentLoop` 如何基于 `rollout_url` 直接访问 rollout backend。
+- `RolloutController` / `RolloutWorker` 删除 Ray generate 数据面后，仍保留 pause / abort / lifecycle 控制面。
+
+以下路径不属于本轮核心验收范围，暂时不要为了这次原型重构它们：
+
+- `xtuner/v1/rl/gateway/**`
+- `recipe/**`
+- `GSM8KToolAgentLoop` / `xtuner/v1/rl/agent_loop/gsm8k_with_tool.py`
+
+这些路径后续如果需要接入新 router，应单独设计。当前阶段不要因为删除
+`RolloutController.generate` 就顺手改 gateway、recipe 或 GSM8K tool loop；否则容易把非核心迁移成本混入原型验证。
+
 ### 13.1 SessionServer 与 SingleTurn
 
-`SingleTurnAgentLoop` 默认应该走 `endpoint_type="worker"`。因为当前 `SessionServer` 在非 trace 请求下可能会清理 token/logprob 字段，不适合作为 SingleTurn 的默认入口。
+`SingleTurnAgentLoop` 默认仍建议先走 `endpoint_type="worker"`，这是最小验证路径。
 
-后续如果希望 SingleTurn 也能走 SessionServer，需要确认 SessionServer 在非 trace 模式下是否保留：
+但 `SingleTurnAgentLoop` 也可以支持 `endpoint_type="session_server"`。关键约束是：
 
-- `return_token_ids=True`
-- `return_logprob=True`
-- `return_routed_experts=True`
+- 走 worker 时，SingleTurn 可以发送 `input_ids`。
+- 走 SessionServer 时，SingleTurn 必须发送标准对话请求，也就是 `session_id + messages`。
+- 走 SessionServer 时不能发送 `input_ids`；`input_ids` 应该由 SessionServer 根据 `messages/tools`
+  和 trace store 生成后转发给 worker。
+
+因此，SingleTurn 的两种 endpoint 模式不是“同一个 payload 多包一层 proxy”，而是两套请求协议：
+
+| endpoint 类型     | 上游请求输入              | 是否走 trace store | 适用目的                   |
+| ----------------- | ------------------------- | ------------------ | -------------------------- |
+| `worker`          | `input_ids`               | 否                 | 最小训练 generate 验证      |
+| `session_server`  | `session_id + messages`   | 是                 | 验证标准对话请求和 trace 路径 |
+
+对应的数据读取逻辑也不同：
+
+- `worker`：SingleTurn 直接从 HTTP response 的 `output_ids`、`output_token_logprobs`、
+  `routed_experts` 填充 `RolloutState`。
+- `session_server`：SingleTurn 不能从 HTTP response 硬解训练字段。HTTP response 只用于读取
+  assistant message 和 `finish_reason`；`input_ids`、`labels`、`logprobs`、`routed_experts`
+  必须根据 `session_id` 和最终 chat template 文本从 `TraceStore.export_training_trace()` 导出。
+
+这和 `AgentInLocalhostLoop` 的训练数据导出方式保持一致。也就是说，走 SessionServer 的目的不是让
+SingleTurn 继续消费 worker 私有 response 字段，而是验证标准对话请求、SessionServer tokenization
+和 trace store 的完整链路。
+
+当前原型中，`SingleTurnAgentLoop + session_server` 不支持 partial rollout continuation。partial
+rollout 的现有实现是把 `prompt_ids + response_ids` 拼成下一次 worker `input_ids`，这和
+SessionServer 的 `messages` 请求协议不兼容；如果后续需要支持，应先设计 message-level continuation。
 
 ### 13.2 第三方 router sticky 能力
 
@@ -918,6 +1138,14 @@ Trainer 不直接注册第三方 router，只负责 build config。
 因此，`url_pool` 只能依赖 `RolloutController.get_rollout_metadata()` 中的状态快照做静态过滤；
 `third_party` 或 `XTunerRolloutRouter` 才是后续健康检测、故障隔离和统一重试的主路径。
 
+后续接入健康检测时需要遵守以下边界：
+
+- `RolloutController` 负责维护 worker / SessionServer 的基础 active 状态，并通过 `get_rollout_metadata()` 暴露。
+- `UrlPoolRolloutRouter.acquire()` 必须过滤 inactive endpoint，但它只在 sample 开始前选择一次 URL。
+- `ThirdPartyRolloutRouter` 注册时只注册 active SessionServer URL；如果第三方 router 支持动态健康检测，应由第三方 router 在请求时处理。
+- `XTunerRolloutRouter` 必须在每次请求转发前检查 endpoint 状态，并维护失败计数、熔断和恢复。
+- `AgentLoop` 不处理 endpoint 健康，只处理当前 LLM 调用错误和有限 retry。
+
 ### 13.5 旧测试迁移成本
 
 当前很多测试直接调用 `rollout_controller.generate.remote(...)`。删除 generate 后这些测试需要改写为：
@@ -943,4 +1171,3 @@ Trainer 不直接注册第三方 router，只负责 build config。
 5. 有 `session_uid` 且 sticky enabled 时，同 session 返回同 URL。
 6. 没有 `session_uid` 时 round-robin。
 7. abort 仍然通过 `RolloutController.pause_generation -> RolloutWorker.pause_generation -> /abort_request` 生效。
-

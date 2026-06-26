@@ -156,14 +156,24 @@ class AgentLoop(ABC):
     async def generate_sample(self, rollout_state: RolloutState, **kwargs) -> RolloutState: ...
 
     async def generate_group(self, rollout_state: list[RolloutState], **kwargs) -> list[RolloutState]:
+        rollout_urls = kwargs.pop("rollout_urls", None)
+        rollout_endpoint_types = kwargs.pop("rollout_endpoint_types", None)
         pending_tasks = []
-        for state in rollout_state:
+        for idx, state in enumerate(rollout_state):
             state.sample_params = self.sample_params
-            task = create_task(self.generate_sample(state, **kwargs))
+            sample_kwargs = dict(kwargs)
+            if rollout_urls is not None:
+                sample_kwargs["rollout_url"] = rollout_urls[idx]
+            if rollout_endpoint_types is not None:
+                sample_kwargs["rollout_endpoint_type"] = rollout_endpoint_types[idx]
+            task = create_task(self.generate_sample(state, **sample_kwargs))
             pending_tasks.append(task)
         generated_samples = asyncio.gather(*pending_tasks)
         group_samples = await generated_samples
         return group_samples
+
+    async def pause(self) -> None:
+        await self.rollout_ctl.pause_generation.remote()  # type: ignore[attr-defined]
 
 
 class RouterAgentLoop:
@@ -204,6 +214,9 @@ class RouterAgentLoop:
     def get_worker_status(self) -> dict[str, int]:
         return {str(worker): load for worker, load in self._worker_loads.items()}
 
+    async def pause(self) -> None:
+        await asyncio.gather(*(worker.pause.remote() for worker in self.workers))
+
 
 async def get_agent_loop_rollout_ctl(agent_loop: AgentLoopSpec) -> RolloutController:
     rollout_ctl = getattr(agent_loop, "rollout_ctl", None)
@@ -237,6 +250,10 @@ class AgentLoopActor:
     @ray_method
     async def generate_group(self, rollout_state: list[RolloutState], **kwargs) -> list[RolloutState]:
         return await self.agent_loop.generate_group(rollout_state, **kwargs)
+
+    @ray_method
+    async def pause(self) -> None:
+        return await self.agent_loop.pause()
 
     @ray_method
     async def get_rollout_ctl(self):

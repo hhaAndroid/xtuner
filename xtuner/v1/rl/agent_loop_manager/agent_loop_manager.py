@@ -13,7 +13,7 @@ from xtuner.v1.data_proto.rl_data import RolloutState, Status
 from xtuner.v1.rl.agent_loop import AgentLoopConfig, AgentLoopSpec, get_agent_loop_rollout_ctl
 from xtuner.v1.rl.judger import ComposedJudgerConfig, JudgerConfig, build_judger
 from xtuner.v1.rl.replay_buffer import ReplayBuffer
-from xtuner.v1.rl.rollout import RolloutController
+from xtuner.v1.rl.rollout import RolloutController, RolloutRouter, RolloutRouterConfig
 from xtuner.v1.rl.utils import asyncio_run
 from xtuner.v1.utils import get_logger
 
@@ -85,6 +85,7 @@ class ProduceBatchResult:
 class _TaskRunner:
     task_name: str
     agent_loop: AgentLoopSpec
+    rollout_router: RolloutRouter
     produce_strategy: ProduceStrategy
     sampler: Sampler
     weight: float = 1.0
@@ -199,6 +200,7 @@ def _build_produce_context(
 ) -> ProduceContext:
     return ProduceContext(
         agent_loop=task_runner.agent_loop,
+        rollout_router=task_runner.rollout_router,
         sampler=task_runner.sampler,
         replay_buffer=replay_buffer,
         task_batch_size=batch_size,
@@ -255,6 +257,7 @@ class TaskSpecConfig(BaseModel):
     task_name: str
     weight: float = Field(default=1.0, ge=0.0)
     agent_loop_config: AgentLoopConfig
+    rollout_router_config: RolloutRouterConfig = Field(default_factory=RolloutRouterConfig)
     judger_config: JudgerConfig | ComposedJudgerConfig | None = None
     produce_strategy_config: ProduceStrategyConfig = SyncProduceStrategyConfig()
     sampler_config: SamplerConfig
@@ -321,11 +324,13 @@ class AgentLoopManagerConfig(BaseModel):
                 sync_weights_interval=sync_weights_interval,
                 rollout_controller=rollout_controller,
             )
+            rollout_router = task_cfg.rollout_router_config.build(rollout_controller)
             sampler = task_cfg.sampler_config.build(tokenizer=tokenizer, replay_buffer=replay_buffer)
             task_runners.append(
                 _TaskRunner(
                     task_name=task_cfg.task_name,
                     agent_loop=agent_loop,
+                    rollout_router=rollout_router,
                     produce_strategy=produce_strategy,
                     sampler=sampler,
                     weight=task_cfg.weight,

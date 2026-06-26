@@ -27,6 +27,20 @@ else
   ACCELERATOR_PER_NODE=${7:-8}
 fi
 
+if [ "$ACCELERATOR" = "GPU" ] && [ "${CUDA_VISIBLE_DEVICES+x}" = "x" ]; then
+  if [ -z "$CUDA_VISIBLE_DEVICES" ] || [ "$CUDA_VISIBLE_DEVICES" = "NoDevFiles" ]; then
+    echo "CUDA_VISIBLE_DEVICES is set to '${CUDA_VISIBLE_DEVICES}', unsetting it before starting Ray."
+    unset CUDA_VISIBLE_DEVICES
+  fi
+fi
+
+RAY_ACCELERATOR_ARGS=()
+if [ "$ACCELERATOR" = "GPU" ]; then
+  RAY_ACCELERATOR_ARGS+=(--num-gpus="$ACCELERATOR_PER_NODE")
+else
+  RAY_ACCELERATOR_ARGS+=(--resources="{\"NPU\": ${ACCELERATOR_PER_NODE}}")
+fi
+
 ulimit -n 65536  # OSError: [Errno 24] Too many open files
 
 export PYTHONPATH=$(pwd):$PYTHONPATH
@@ -105,6 +119,7 @@ if [ "$RAY_RANK" -eq 0 ]; then
     --dashboard-port=$RAY_DASHBOARD_PORT \
     --include-dashboard=true \
     --disable-usage-stats \
+    "${RAY_ACCELERATOR_ARGS[@]}" \
     --temp-dir="/tmp/ray_log/"
 else
   while true; do
@@ -116,7 +131,7 @@ else
       sleep 2
     fi
   done
-  ray start --address="$RAY_MASTER_ADDR:$RAY_HEAD_PORT" --block --disable-usage-stats
+  ray start --address="$RAY_MASTER_ADDR:$RAY_HEAD_PORT" "${RAY_ACCELERATOR_ARGS[@]}" --block --disable-usage-stats
 fi
 
 while true; do
