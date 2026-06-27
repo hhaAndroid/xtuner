@@ -221,16 +221,24 @@ class UpdateWeighter:
         if not hasattr(self, "is_train_rollout_colocated"):
             raise RuntimeError(
                 "train/rollout mode is not set. Please call set_train_rollout_mode() before update_weights()."
-            )
+        )
 
+        self._maybe_log_update_weight_memory_stage("update_weights/begin")
+        self._maybe_log_update_weight_deferred_fsdp("update_weights/begin")
         if self.is_train_rollout_colocated:
             self._update_weights_colocated()
         else:
             self._update_weights_disaggregated()
+        self._maybe_log_update_weight_memory_stage("update_weights/end")
+        self._maybe_log_update_weight_deferred_fsdp("update_weights/end")
 
     def _update_weights_colocated(self):
+        self._maybe_log_update_weight_memory_stage("update_weights_colocated/before_empty_cache")
+        self._maybe_log_update_weight_deferred_fsdp("update_weights_colocated/before_empty_cache")
         DEVICE_MODULE.empty_cache()
+        self._maybe_log_update_weight_memory_stage("update_weights_colocated/after_empty_cache_before_event")
         self._update_params_ipc_event = DEVICE_MODULE.Event(interprocess=True)
+        self._maybe_log_update_weight_memory_stage("update_weights_colocated/after_ipc_event")
         if self.rollout_cfg_info.get("backend") == "turbomind":
             self._update_weights_by_layer()
         else:
@@ -244,7 +252,11 @@ class UpdateWeighter:
         self._last_update_params_ipc_tensor_dtype = None
         self._update_params_ipc_event = None
 
+        self._maybe_log_update_weight_memory_stage("update_weights_colocated/after_clear_ipc_refs_before_empty_cache")
+        self._maybe_log_update_weight_deferred_fsdp("update_weights_colocated/after_clear_ipc_refs_before_empty_cache")
         DEVICE_MODULE.empty_cache()
+        self._maybe_log_update_weight_memory_stage("update_weights_colocated/after_final_empty_cache")
+        self._maybe_log_update_weight_deferred_fsdp("update_weights_colocated/after_final_empty_cache")
 
     def _update_weights_disaggregated(self):
         if self.use_fake_weight_update:
@@ -253,7 +265,9 @@ class UpdateWeighter:
             )
             return
 
+        self._maybe_log_update_weight_memory_stage("update_weights_disaggregated/before_empty_cache")
         DEVICE_MODULE.empty_cache()
+        self._maybe_log_update_weight_memory_stage("update_weights_disaggregated/after_empty_cache")
         try:
             if isinstance(self.config.model_cfg, BaseComposeConfig):
                 self._update_weights_hf_generator(submodule="language_model", final_update=False)
@@ -262,7 +276,33 @@ class UpdateWeighter:
             else:
                 self._update_weights_hf_generator(final_update=True)
         finally:
+            self._maybe_log_update_weight_memory_stage("update_weights_disaggregated/finally_before_empty_cache")
             DEVICE_MODULE.empty_cache()
+            self._maybe_log_update_weight_memory_stage("update_weights_disaggregated/finally_after_empty_cache")
+
+    def _maybe_log_update_weight_memory_stage(self, tag: str) -> None:
+        if os.environ.get("XTUNER_DEBUG_MEMORY_STAGES", "0") != "1":
+            return
+        log_stage = getattr(self, "_maybe_log_memory_stage", None)
+        if callable(log_stage):
+            log_stage(tag)
+            return
+
+        self.logger.info(
+            f"[{tag}] CUDA memory: allocated={DEVICE_MODULE.memory_allocated() / (1024**2):.2f} MB, "
+            f"reserved={DEVICE_MODULE.memory_reserved() / (1024**2):.2f} MB"
+        )
+
+    def _maybe_log_update_weight_deferred_fsdp(self, tag: str) -> None:
+        log_deferred = getattr(self, "_maybe_log_deferred_fsdp_all_gathers", None)
+        if callable(log_deferred):
+            log_deferred(tag)
+
+    def _update_weight_bucket_debug_enabled(self) -> bool:
+        return (
+            os.environ.get("XTUNER_DEBUG_UPDATE_WEIGHT_MEMORY", "0") == "1"
+            or os.environ.get("XTUNER_DEBUG_MEMORY_STAGES", "0") == "1"
+        )
 
     def _rl_get_fused_ep_hf_param(self, model: MoE, target_ep_rank: int, target_ep_size: int, bucket_size: int):
         fused_param_groups: list[tuple[torch.Tensor, LoadSpec]] = model._group_param_by_load_spec(LoadEnum.FUSED)
@@ -337,6 +377,8 @@ class UpdateWeighter:
     def _update_weights_hf_generator(self, submodule=None, final_update=False):
         """Update the model weights."""
         self.endpoints["update_weights"] = "update_weights"
+        stage_name = f"update_weights_hf_generator/{submodule or 'full'}"
+        self._maybe_log_update_weight_memory_stage(f"{stage_name}/begin")
 
         model = self._engine.model
         if submodule:
@@ -388,23 +430,46 @@ class UpdateWeighter:
         )
 
         for name_list, fused_param_list in fused_gen:
+            if self._update_weight_bucket_debug_enabled():
+                bucket_bytes = sum(param.numel() * param.element_size() for param in fused_param_list)
+                self.logger.info(
+                    "[update_weight_bucket] hf_generator fused bucket: "
+                    f"submodule={submodule or 'full'}, num_tensors={len(fused_param_list)}, "
+                    f"bytes={bucket_bytes / (1024**2):.2f} MB, first_names={name_list[:3]}"
+                )
             state_dict = {name: param.detach() for name, param in zip(name_list, fused_param_list)}
             self.request_update_params(state_dict, train_enable_ep=train_enable_ep, finished=False)
             del state_dict, name_list, fused_param_list
+            self._maybe_log_update_weight_memory_stage(f"{stage_name}/after_fused_bucket")
+            self._maybe_log_update_weight_deferred_fsdp(f"{stage_name}/after_fused_bucket")
 
         for name_list, param_list in chain(same_gen, shard_gen):
+            if self._update_weight_bucket_debug_enabled():
+                bucket_bytes = sum(param.numel() * param.element_size() for param in param_list)
+                self.logger.info(
+                    "[update_weight_bucket] hf_generator same_or_shard bucket: "
+                    f"submodule={submodule or 'full'}, num_tensors={len(param_list)}, "
+                    f"bytes={bucket_bytes / (1024**2):.2f} MB, first_names={name_list[:3]}"
+                )
             state_dict = {name: param.detach() for name, param in zip(name_list, param_list)}
             self.request_update_params(state_dict, train_enable_ep=train_enable_ep, finished=False)
             del state_dict, name_list, param_list
+            self._maybe_log_update_weight_memory_stage(f"{stage_name}/after_same_or_shard_bucket")
+            self._maybe_log_update_weight_deferred_fsdp(f"{stage_name}/after_same_or_shard_bucket")
 
         if self.rollout_cfg_info["backend"] in ("pytorch", "vllm") and final_update:
             self.request_update_params({}, train_enable_ep=train_enable_ep, finished=True)
 
+        self._maybe_log_update_weight_memory_stage(f"{stage_name}/before_barrier")
         if self.is_train_rollout_colocated:
             dist.barrier()
         else:
             dist.barrier(group=self._get_train_update_sync_group())
+        self._maybe_log_update_weight_memory_stage(f"{stage_name}/after_barrier_before_empty_cache")
+        self._maybe_log_update_weight_deferred_fsdp(f"{stage_name}/after_barrier_before_empty_cache")
         DEVICE_MODULE.empty_cache()
+        self._maybe_log_update_weight_memory_stage(f"{stage_name}/end")
+        self._maybe_log_update_weight_deferred_fsdp(f"{stage_name}/end")
         return
 
     def _update_weights_by_layer(self):
@@ -584,6 +649,15 @@ class UpdateWeighter:
         )
         need_resize = state_dict_bytes > ipc_tensor_bytes
         send_ipc_tensor = dtype_changed or need_resize or update_params_ipc_tensor is None
+        if self._update_weight_bucket_debug_enabled():
+            self.logger.info(
+                "[update_weight_bucket] build_lmdeploy_flattened_tensor_data: "
+                f"dtype={state_dict_dtype}, num_tensors={len(state_dict)}, "
+                f"state_dict={state_dict_bytes / (1024**2):.2f} MB, "
+                f"ipc_tensor={ipc_tensor_bytes / (1024**2):.2f} MB, "
+                f"has_existing={update_params_ipc_tensor is not None}, "
+                f"dtype_changed={dtype_changed}, need_resize={need_resize}, send_ipc_tensor={send_ipc_tensor}"
+            )
 
         if update_params_ipc_tensor is not None:
             self._update_params_ipc_event.wait()
@@ -598,6 +672,13 @@ class UpdateWeighter:
                 state_dict_dtype,
             )
             self._update_params_ipc_tensor_dict_by_dtype[state_dict_dtype] = update_params_ipc_tensor
+            if self._update_weight_bucket_debug_enabled():
+                self.logger.info(
+                    "[update_weight_bucket] created IPC tensor: "
+                    f"dtype={state_dict_dtype}, bytes={ipc_tensor_bytes / (1024**2):.2f} MB, "
+                    f"allocated={DEVICE_MODULE.memory_allocated() / (1024**2):.2f} MB, "
+                    f"reserved={DEVICE_MODULE.memory_reserved() / (1024**2):.2f} MB"
+                )
 
         flattened_tensor_bucket = flattened_tensor_bucket_cls(
             named_tensors=list(state_dict.items()),
@@ -947,6 +1028,19 @@ class UpdateWeighter:
             finished (bool): A flag indicating whether this is the final
                 batch of updates. Defaults to False.
         """
+
+        if self._update_weight_bucket_debug_enabled():
+            state_dict_bytes = self._compute_state_dict_bytes(state_dict) if state_dict else 0
+            dtype_set = sorted({str(tensor.dtype) for tensor in state_dict.values()}) if state_dict else []
+            self.logger.info(
+                "[update_weight_bucket] request_update_params begin: "
+                f"backend={self.rollout_cfg_info.get('backend')}, colocated={self.is_train_rollout_colocated}, "
+                f"finished={finished}, train_enable_ep={train_enable_ep}, "
+                f"num_tensors={len(state_dict) if state_dict else 0}, "
+                f"bytes={state_dict_bytes / (1024**2):.2f} MB, dtypes={dtype_set}, "
+                f"allocated={DEVICE_MODULE.memory_allocated() / (1024**2):.2f} MB, "
+                f"reserved={DEVICE_MODULE.memory_reserved() / (1024**2):.2f} MB"
+            )
 
         if self.rollout_cfg_info["backend"] == "sglang" and not self.is_train_rollout_colocated:
             self._request_update_params_sglang_disaggregated(state_dict)

@@ -1,4 +1,5 @@
 import contextlib
+import gc
 import json
 import math
 import os
@@ -15,6 +16,12 @@ from typing import (
     TypedDict,
     cast,
 )
+
+
+# export ONLY_CALC_MISMATCH_RATIO=1
+# export XTUNER_DEBUG_FSDP_DEFERRED=1
+# export XTUNER_DEBUG_OFFLOAD_MEMORY=1
+# export XTUNER_DEBUG_OFFLOAD_MEMORY_SNAPSHOT=1
 
 
 if TYPE_CHECKING:
@@ -228,6 +235,9 @@ class TrainingWorker(SingleAcceleratorWorker, UpdateWeighter):
             self.logger = get_logger(log_dir=self.log_dir, tag="TrainingWorker")
         else:
             self.logger = get_logger()
+
+        if os.environ.get("XTUNER_DEBUG_OFFLOAD_MEMORY", "0") == "1":
+            self._enable_cuda_memory_history()
 
         self._set_deterministic()
         self._set_random_seed(worker_cfg.seed)
@@ -596,17 +606,25 @@ class TrainingWorker(SingleAcceleratorWorker, UpdateWeighter):
             f"Rank{self.rank} Rollout {rollout_idx} prepare_inputs elapsed="
             f"{time.perf_counter() - prepare_inputs_begin:.4f}s"
         )
+        self._maybe_log_memory_stage(f"rollout_{rollout_idx}/after_prepare_inputs")
 
         del data_batches
+        self._maybe_log_memory_stage(f"rollout_{rollout_idx}/after_del_data_batches")
 
         # When sp_mesh.size() > 1, get the sp_split shifted_labels and rollout_logprobs
         shifted_labels_list = [loss_ctx.loss_kwargs.shifted_labels for loss_ctx in loss_ctx_list]
         rollout_logprobs_list = [loss_ctx.loss_kwargs.rollout_logprobs for loss_ctx in loss_ctx_list]
 
         # compute old logprobs
+        self._maybe_log_memory_stage(f"rollout_{rollout_idx}/before_compute_actor_logprobs")
+        self._maybe_log_deferred_fsdp_all_gathers(f"rollout_{rollout_idx}/before_compute_actor_logprobs")
         old_logprobs_list = self.compute_actor_logprobs(seq_ctx_list, shifted_labels_list)
+        self._maybe_log_memory_stage(f"rollout_{rollout_idx}/after_compute_actor_logprobs")
+        self._maybe_log_deferred_fsdp_all_gathers(f"rollout_{rollout_idx}/after_compute_actor_logprobs")
         for old_logprobs, loss_ctx in zip(old_logprobs_list, loss_ctx_list):
             loss_ctx.loss_kwargs.old_logprobs = old_logprobs
+        self._maybe_log_memory_stage(f"rollout_{rollout_idx}/after_attach_old_logprobs")
+        self._maybe_log_deferred_fsdp_all_gathers(f"rollout_{rollout_idx}/after_attach_old_logprobs")
 
         worker_log_item: WorkerLogItem = {"train_entropy": 0.0, "train_metrics": [], "sft_train_metrics": {}}
         logger_msg = f"Rollout {rollout_idx}: "
@@ -623,6 +641,7 @@ class TrainingWorker(SingleAcceleratorWorker, UpdateWeighter):
 
         avg_sum_entropy = calculate_entropy(shifted_labels_list, old_logprobs_list, global_grad_tokens)
         avg_rollout_entropy = calculate_entropy(shifted_labels_list, rollout_logprobs_list, global_grad_tokens)
+        self._maybe_log_memory_stage(f"rollout_{rollout_idx}/after_entropy")
 
         assert avg_sum_entropy is not None
         worker_log_item["train_entropy"] = avg_sum_entropy.item()
@@ -653,18 +672,23 @@ class TrainingWorker(SingleAcceleratorWorker, UpdateWeighter):
             if len(rollout_is_metrics) > 0:
                 worker_log_item["rollout_is_metrics"] = rollout_is_metrics
                 logger_msg += f"\n rollout importance sampling metrics:\n{json.dumps(rollout_is_metrics, indent=4)}"
+        self._maybe_log_memory_stage(f"rollout_{rollout_idx}/after_rollout_is_metrics")
 
         if self.rank == 0:
             self.logger.info(logger_msg)
 
         only_calc_mismatch_ratio = os.environ.get("ONLY_CALC_MISMATCH_RATIO", "0") == "1"
         if only_calc_mismatch_ratio:
+            self._maybe_log_memory_stage(f"rollout_{rollout_idx}/before_only_calc_mismatch_return")
+            self._maybe_log_deferred_fsdp_all_gathers(f"rollout_{rollout_idx}/before_only_calc_mismatch_return")
             return worker_log_item
 
         # compute reference logprobs
         ref_logprobs_list: list[torch.Tensor] | None = None
         if self._has_ref:
+            self._maybe_log_memory_stage(f"rollout_{rollout_idx}/before_compute_ref_logprobs")
             ref_logprobs_list = self.compute_ref_logprobs(seq_ctx_list, shifted_labels_list)
+            self._maybe_log_memory_stage(f"rollout_{rollout_idx}/after_compute_ref_logprobs")
 
             for i, loss_ctx in enumerate(loss_ctx_list):
                 loss_ctx.loss_kwargs.ref_logprobs = ref_logprobs_list[i]
@@ -684,6 +708,7 @@ class TrainingWorker(SingleAcceleratorWorker, UpdateWeighter):
             dist.all_reduce(kl_div_sum, op=dist.ReduceOp.SUM)
             avg_kl_div = kl_div_sum / global_grad_tokens if global_grad_tokens > 0 else 0
             self.logger.info(f"Rollout {rollout_idx}: avg KL divergence: {avg_kl_div:.4f}")
+            self._maybe_log_memory_stage(f"rollout_{rollout_idx}/after_ref_kl")
 
         # compute batched loss context
         batched_loss_ctx_list: list[BaseRLLossContext] = []
@@ -720,6 +745,7 @@ class TrainingWorker(SingleAcceleratorWorker, UpdateWeighter):
                             batched_mtp_loss_ctx_list.append([mtp_ctx])
                         else:
                             batched_mtp_loss_ctx_list[global_batch_idx].append(mtp_ctx)
+        self._maybe_log_memory_stage(f"rollout_{rollout_idx}/after_build_batched_loss_ctx")
 
         # train optimizer steps
         for i in range(0, len(seq_ctx_list), iters_per_step):
@@ -748,16 +774,26 @@ class TrainingWorker(SingleAcceleratorWorker, UpdateWeighter):
                 ]
 
             train_step_begin = time.perf_counter()
+            self._maybe_log_memory_stage(f"rollout_{rollout_idx}/global_step_{global_train_step}/before_engine_train_step")
+            self._maybe_log_deferred_fsdp_all_gathers(
+                f"rollout_{rollout_idx}/global_step_{global_train_step}/before_engine_train_step"
+            )
             with self._maybe_profiling(global_train_step, "train_step"):
                 train_step_info = self._engine.train_step(
                     data_batches=engine_input,
                 )
+            self._maybe_log_memory_stage(f"rollout_{rollout_idx}/global_step_{global_train_step}/after_engine_train_step")
+            self._maybe_log_deferred_fsdp_all_gathers(
+                f"rollout_{rollout_idx}/global_step_{global_train_step}/after_engine_train_step"
+            )
             self.logger.debug(
                 f"Rank{self.rank} Rollout {rollout_idx} GlobalStep {global_train_step} "
                 f"train_step[{i}].engine_train_step elapsed={time.perf_counter() - train_step_begin:.4f}s"
             )
             grad_norm = self._engine.clip_grad_norm()
+            self._maybe_log_memory_stage(f"rollout_{rollout_idx}/global_step_{global_train_step}/after_clip_grad_norm")
             self._engine.step_optimizer(grad_norm)
+            self._maybe_log_memory_stage(f"rollout_{rollout_idx}/global_step_{global_train_step}/after_step_optimizer")
 
             engine_logs_info = cast(dict[str, float], train_step_info.pop("logs_info"))  # type: ignore[misc]
             engine_extra_info = train_step_info.pop("extra_info")  # type: ignore[misc]
@@ -792,6 +828,7 @@ class TrainingWorker(SingleAcceleratorWorker, UpdateWeighter):
             log_str = f"Rank{self.rank} Rollout {rollout_idx} Step {i}: " + log_str
             self.logger.info(log_str)
             self._global_train_step = global_train_step
+            self._maybe_log_memory_stage(f"rollout_{rollout_idx}/global_step_{global_train_step}/after_train_log")
 
         self._rollout_step += 1
         if self._sft_dataloader is not None and self._rollout_step % self._rollout_steps_per_sft == 0:
@@ -803,6 +840,7 @@ class TrainingWorker(SingleAcceleratorWorker, UpdateWeighter):
                 "efficient_attn_ratio": train_step_info["efficient_attn_ratio"],
             }
 
+        self._maybe_log_memory_stage(f"rollout_{rollout_idx}/fit_end")
         return worker_log_item
 
     def _fit_sft(self):
@@ -932,29 +970,603 @@ class TrainingWorker(SingleAcceleratorWorker, UpdateWeighter):
 
     @ray_method
     def offload_model(self):
+        self._maybe_log_memory_stage("offload_model/before_model_to_cpu")
+        self._maybe_log_deferred_fsdp_all_gathers("offload_model/before_model_to_cpu")
         self._engine.put_model_to_device("cpu")
+        if os.environ.get("XTUNER_DEBUG_OFFLOAD_MEMORY", "0") == "1":
+            self._log_offload_memory_debug("after_model_to_cpu_before_deferred_fsdp_release")
+        self._maybe_log_deferred_fsdp_all_gathers("offload_model/after_model_to_cpu_before_deferred_release")
+        self._release_deferred_fsdp_all_gathers("offload_model")
         DEVICE_MODULE.empty_cache()
         self.logger.info(
             f"Offloaded model to CPU. Current allocate {DEVICE_MODULE.memory_allocated() / (1024**2)} MB, reserved: {DEVICE_MODULE.memory_reserved() / (1024**2)} MB"
         )
+        if os.environ.get("XTUNER_DEBUG_OFFLOAD_MEMORY", "0") == "1":
+            self._log_offload_memory_debug("after_deferred_fsdp_release")
+        self._maybe_log_deferred_fsdp_all_gathers("offload_model/after_deferred_release")
+
+    def _release_deferred_fsdp_all_gathers(self, log_tag: str) -> None:
+        """Free FSDP2 deferred all-gather buffers before long offload gaps.
+
+        Two FSDP2 overlap states can keep CUDA flat buffers alive outside model
+        parameters:
+        - ``comm_ctx.all_gather_state`` for a result already consumed by a
+          module's ``wait_for_unshard()`` and deferred for overlap.
+        - ``FSDPParamGroup._all_gather_result`` for an explicit prefetch whose
+          target module did not subsequently run forward and consume it.
+
+        The latter is the important colocated RL case when old-logprob forward
+        only runs the LM loss but the last decoder layer prefetched the MTP
+        layer. Before switching back to rollout, release both forms explicitly.
+        """
+
+        try:
+            from torch.distributed._composable_state import _get_module_state
+        except Exception:
+            return
+
+        released_states = 0
+        released_param_groups = 0
+        debug = os.environ.get("XTUNER_DEBUG_OFFLOAD_MEMORY", "0") == "1"
+        debug_items: list[str] = []
+
+        def get_all_gather_result(holder):
+            result = getattr(holder, "_all_gather_result", None)
+            if result is not None:
+                return result
+            result = getattr(holder, "all_gather_result", None)
+            if result is not None:
+                return result
+            result = getattr(holder, "result", None)
+            if result is not None:
+                return result
+            if isinstance(holder, tuple) and len(holder) > 0:
+                return holder[0]
+            return None
+
+        def record_debug_item(source: str, holder) -> None:
+            if not debug or holder is None:
+                return
+            all_gather_result = get_all_gather_result(holder)
+            all_gather_output = getattr(all_gather_result, "all_gather_output", None)
+            if not torch.is_tensor(all_gather_output):
+                return
+            debug_items.append(
+                f"{source}: {all_gather_output.numel() * all_gather_output.element_size() / (1024**2):.2f} MB "
+                f"shape={tuple(all_gather_output.shape)} dtype={all_gather_output.dtype} "
+                f"device={all_gather_output.device}"
+            )
+
+        def wait_all_gather_result(all_gather_result) -> None:
+            event = getattr(all_gather_result, "all_gather_event", None)
+            if event is not None:
+                try:
+                    torch.accelerator.current_stream().wait_event(event)
+                except Exception:
+                    DEVICE_MODULE.synchronize()
+            work = getattr(all_gather_result, "all_gather_work", None)
+            if isinstance(work, dist.distributed_c10d.Work):
+                work.wait()
+
+        for module in self._engine.model.modules():
+            try:
+                state = _get_module_state(module)
+            except Exception:
+                continue
+            if state is None:
+                continue
+
+            comm_ctx = getattr(state, "_comm_ctx", None)
+            all_gather_state = getattr(comm_ctx, "all_gather_state", None)
+            if all_gather_state is not None:
+                record_debug_item(f"{module.__class__.__name__}.comm_ctx.all_gather_state", all_gather_state)
+                event = getattr(all_gather_state, "event", None)
+                if event is not None:
+                    try:
+                        event.synchronize()
+                    except Exception:
+                        DEVICE_MODULE.synchronize()
+                comm_ctx.all_gather_state = None
+                released_states += 1
+
+            param_group = getattr(state, "_fsdp_param_group", None)
+            if (all_gather_result := getattr(param_group, "_all_gather_result", None)) is not None:
+                record_debug_item(f"{module.__class__.__name__}._fsdp_param_group._all_gather_result", param_group)
+                wait_all_gather_result(all_gather_result)
+                param_group._all_gather_result = None
+                released_param_groups += 1
+
+        if debug and (released_states or released_param_groups):
+            detail = "\n".join(debug_items) if debug_items else "<no tensor details>"
+            self.logger.info(
+                f"[{log_tag}] released deferred FSDP all-gathers: "
+                f"comm_states={released_states}, param_groups={released_param_groups}\n{detail}"
+            )
+
+    def _fsdp_deferred_debug_enabled(self) -> bool:
+        return os.environ.get("XTUNER_DEBUG_FSDP_DEFERRED", "0") == "1"
+
+    def _maybe_log_deferred_fsdp_all_gathers(self, tag: str) -> None:
+        if not self._fsdp_deferred_debug_enabled():
+            return
+        try:
+            from torch.distributed._composable_state import _get_module_state
+        except Exception as e:
+            self.logger.warning(f"[{tag}] failed to import FSDP composable state helper: {e}")
+            return
+
+        module_names = {id(module): name or "<root>" for name, module in self._engine.model.named_modules()}
+        fsdp_groups = []
+        comm_ctx_states = []
+        seen_param_groups: set[int] = set()
+        seen_comm_ctx: set[int] = set()
+        deferred_rows: list[str] = []
+
+        for module in self._engine.model.modules():
+            try:
+                state = _get_module_state(module)
+            except Exception:
+                continue
+            if state is None:
+                continue
+
+            module_name = module_names.get(id(module), module.__class__.__name__)
+            param_group = getattr(state, "_fsdp_param_group", None)
+            if param_group is not None and id(param_group) not in seen_param_groups:
+                seen_param_groups.add(id(param_group))
+                fsdp_groups.append((module_name, param_group))
+
+            comm_ctx = getattr(state, "_comm_ctx", None)
+            if comm_ctx is None or id(comm_ctx) in seen_comm_ctx:
+                continue
+            seen_comm_ctx.add(id(comm_ctx))
+            comm_ctx_states.append((module_name, comm_ctx))
+
+        for module_name, comm_ctx in comm_ctx_states:
+            all_gather_state = getattr(comm_ctx, "all_gather_state", None)
+            if all_gather_state is None:
+                continue
+            deferred_rows.append(
+                self._format_deferred_fsdp_holder(
+                    source=f"comm_ctx@0x{id(comm_ctx):x} first_seen_module={module_name}",
+                    holder=all_gather_state,
+                    fsdp_groups=fsdp_groups,
+                )
+            )
+
+        param_group_rows = []
+        for module_name, param_group in fsdp_groups:
+            holder = getattr(param_group, "_all_gather_result", None)
+            if holder is None:
+                continue
+            param_group_rows.append(
+                self._format_deferred_fsdp_holder(
+                    source=f"param_group@0x{id(param_group):x} module={module_name}",
+                    holder=param_group,
+                    fsdp_groups=fsdp_groups,
+                )
+            )
+
+        rows = deferred_rows + param_group_rows
+        if not rows:
+            self.logger.info(
+                f"[{tag}] deferred FSDP all-gather states: none "
+                f"(fsdp_groups={len(fsdp_groups)}, comm_ctx={len(seen_comm_ctx)})"
+            )
+            return
+        self.logger.info(
+            f"[{tag}] deferred FSDP all-gather states: count={len(rows)} "
+            f"(fsdp_groups={len(fsdp_groups)}, comm_ctx={len(seen_comm_ctx)})\n" + "\n".join(rows)
+        )
+
+    def _format_deferred_fsdp_holder(self, source: str, holder, fsdp_groups: list[tuple[str, object]]) -> str:
+        all_gather_result = self._extract_all_gather_result(holder)
+        all_gather_output = getattr(all_gather_result, "all_gather_output", None)
+        if not torch.is_tensor(all_gather_output):
+            return f"{source}: holder={type(holder).__name__}, all_gather_output=<none>"
+
+        output_numel = int(all_gather_output.numel())
+        output_dtype = all_gather_output.dtype
+        output_mb = output_numel * all_gather_output.element_size() / (1024**2)
+        split_sizes = list(getattr(all_gather_result, "all_gather_input_split_sizes", []) or [])
+        input_numels_raw = list(getattr(all_gather_result, "param_all_gather_input_numels", []) or [])
+        input_numels = self._flatten_int_items(input_numels_raw)
+        input_dtypes = list(getattr(all_gather_result, "param_all_gather_input_dtypes", []) or [])
+        candidate_lines = self._match_fsdp_param_groups_for_all_gather(
+            output_numel=output_numel,
+            output_dtype=output_dtype,
+            input_numels=input_numels,
+            fsdp_groups=fsdp_groups,
+        )
+        return (
+            f"{source}: holder={type(holder).__name__}, result={type(all_gather_result).__name__}, "
+            f"output={output_mb:.2f} MB shape={tuple(all_gather_output.shape)} dtype={output_dtype} "
+            f"device={all_gather_output.device} ptr=0x{all_gather_output.data_ptr():x}, "
+            f"split_sizes={self._summarize_int_list(self._flatten_int_items(split_sizes))}, "
+            f"param_input_numels={self._summarize_int_list(input_numels)}, "
+            f"param_input_dtypes={self._summarize_obj_list(input_dtypes)}\n"
+            f"    candidate_param_groups:\n{candidate_lines}"
+        )
+
+    def _extract_all_gather_result(self, holder):
+        result = getattr(holder, "_all_gather_result", None)
+        if result is not None:
+            return result
+        result = getattr(holder, "all_gather_result", None)
+        if result is not None:
+            return result
+        result = getattr(holder, "result", None)
+        if result is not None:
+            return result
+        if isinstance(holder, tuple) and len(holder) > 0:
+            return holder[0]
+        return None
+
+    def _match_fsdp_param_groups_for_all_gather(
+        self,
+        output_numel: int,
+        output_dtype: torch.dtype,
+        input_numels: list[int],
+        fsdp_groups: list[tuple[str, object]],
+        limit: int = 5,
+    ) -> str:
+        candidates: list[tuple[int, str]] = []
+        expected_input_numel = sum(input_numels) if input_numels else None
+        for module_name, param_group in fsdp_groups:
+            try:
+                group_world_size = int(param_group._all_gather_process_group.size())
+            except Exception:
+                group_world_size = 0
+            fsdp_params = list(getattr(param_group, "fsdp_params", []) or [])
+            group_input_numels = []
+            param_descriptions = []
+            dtype_matches = 0
+            for fsdp_param in fsdp_params:
+                sharded_data = getattr(fsdp_param, "_sharded_param_data", None)
+                sharded_numel = int(sharded_data.numel()) if torch.is_tensor(sharded_data) else 0
+                group_input_numels.append(sharded_numel)
+                param_dtype = getattr(fsdp_param, "param_dtype", None) or (
+                    sharded_data.dtype if torch.is_tensor(sharded_data) else None
+                )
+                if param_dtype == output_dtype:
+                    dtype_matches += 1
+                param_descriptions.append(
+                    f"{getattr(fsdp_param, '_param_fqn', None)}"
+                    f" orig={tuple(getattr(fsdp_param, '_orig_size', ())) }"
+                    f" shard={tuple(getattr(fsdp_param, 'sharded_size', ())) }"
+                    f" gather_numel={sharded_numel}"
+                    f" orig_dtype={getattr(fsdp_param, 'orig_dtype', None)}"
+                    f" param_dtype={getattr(fsdp_param, 'param_dtype', None)}"
+                    f" state={getattr(fsdp_param, 'sharded_state', None)}"
+                )
+
+            group_input_total = sum(group_input_numels)
+            group_output_numel = group_input_total * group_world_size if group_world_size else -1
+            score = 0
+            if group_output_numel == output_numel:
+                score += 100
+            if expected_input_numel is not None and group_input_total == expected_input_numel:
+                score += 50
+            if len(group_input_numels) == len(input_numels):
+                score += 10
+            if dtype_matches == len(fsdp_params) and fsdp_params:
+                score += 5
+            if score == 0:
+                continue
+            candidates.append(
+                (
+                    score,
+                    f"      score={score} module={module_name} module_fqn={getattr(param_group, '_module_fqn', None)} "
+                    f"world_size={group_world_size} group_input={group_input_total} "
+                    f"group_output={group_output_numel} training_state={getattr(param_group, '_training_state', None)} "
+                    f"reshard_after_forward={getattr(param_group, '_reshard_after_forward', None)} "
+                    f"is_unsharded={getattr(param_group, 'is_unsharded', None)} "
+                    f"params={param_descriptions[:8]}"
+                ),
+            )
+        candidates.sort(key=lambda item: item[0], reverse=True)
+        if not candidates:
+            return "      <no matching param group by output/input numel>"
+        return "\n".join(line for _, line in candidates[:limit])
+
+    def _summarize_int_list(self, values: list[int], limit: int = 8) -> str:
+        if not values:
+            return "[]"
+        suffix = "" if len(values) <= limit else f", ... total={len(values)}"
+        return f"[{', '.join(str(v) for v in values[:limit])}{suffix}] sum={sum(values)}"
+
+    def _flatten_int_items(self, values) -> list[int]:
+        flattened: list[int] = []
+
+        def visit(value) -> None:
+            if isinstance(value, int):
+                flattened.append(value)
+                return
+            if isinstance(value, (list, tuple)):
+                for item in value:
+                    visit(item)
+                return
+            try:
+                flattened.append(int(value))
+            except Exception:
+                return
+
+        visit(values)
+        return flattened
+
+    def _summarize_obj_list(self, values: list[object], limit: int = 8) -> str:
+        if not values:
+            return "[]"
+        suffix = "" if len(values) <= limit else f", ... total={len(values)}"
+        return f"[{', '.join(str(v) for v in values[:limit])}{suffix}]"
+
+    def _log_offload_memory_debug(self, tag: str) -> None:
+        self._log_cuda_allocator_debug(tag)
+        self._log_live_cuda_tensors(tag)
+
+    def _memory_stage_debug_enabled(self) -> bool:
+        return os.environ.get("XTUNER_DEBUG_MEMORY_STAGES", "0") == "1"
+
+    def _memory_stage_live_tensor_debug_enabled(self) -> bool:
+        return os.environ.get("XTUNER_DEBUG_MEMORY_STAGE_LIVE_TENSORS", "0") == "1"
+
+    def _maybe_log_memory_stage(self, tag: str) -> None:
+        if not self._memory_stage_debug_enabled():
+            return
+        self._log_cuda_allocator_debug(tag)
+        if self._memory_stage_live_tensor_debug_enabled():
+            self._log_live_cuda_tensors(tag, limit=8)
+
+    def _enable_cuda_memory_history(self) -> None:
+        if os.environ.get("XTUNER_DEBUG_OFFLOAD_MEMORY_SNAPSHOT", "0") != "1":
+            return
+        try:
+            torch.cuda.memory._record_memory_history(enabled="all", stacks="python")
+        except Exception as e:
+            self.logger.warning(f"Failed to enable CUDA memory history for offload debug: {e}")
+
+    def _log_cuda_allocator_debug(self, tag: str) -> None:
+        try:
+            stats = torch.cuda.memory_stats()
+        except Exception as e:
+            self.logger.warning(f"[{tag}] failed to get CUDA memory stats: {e}")
+            return
+
+        def mb(key: str) -> float:
+            return float(stats.get(key, 0)) / (1024**2)
+
+        free_mb = total_mb = 0.0
+        try:
+            free_bytes, total_bytes = torch.cuda.mem_get_info()
+            free_mb = free_bytes / (1024**2)
+            total_mb = total_bytes / (1024**2)
+        except Exception:
+            pass
+
+        self.logger.info(
+            f"[{tag}] CUDA allocator stats: "
+            f"allocated={DEVICE_MODULE.memory_allocated() / (1024**2):.2f} MB, "
+            f"reserved={DEVICE_MODULE.memory_reserved() / (1024**2):.2f} MB, "
+            f"max_allocated={DEVICE_MODULE.max_memory_allocated() / (1024**2):.2f} MB, "
+            f"max_reserved={DEVICE_MODULE.max_memory_reserved() / (1024**2):.2f} MB, "
+            f"active={mb('active_bytes.all.current'):.2f} MB, "
+            f"active_large={mb('active_bytes.large_pool.current'):.2f} MB, "
+            f"active_small={mb('active_bytes.small_pool.current'):.2f} MB, "
+            f"inactive_split={mb('inactive_split_bytes.all.current'):.2f} MB, "
+            f"segments={int(stats.get('segment.all.current', 0))}, "
+            f"active_allocs={int(stats.get('allocation.all.current', 0))}, "
+            f"device_free={free_mb:.2f} MB, device_total={total_mb:.2f} MB"
+        )
+        if os.environ.get("XTUNER_DEBUG_OFFLOAD_MEMORY_SNAPSHOT", "0") == "1":
+            self._log_cuda_memory_snapshot(tag)
+
+    def _log_cuda_memory_snapshot(self, tag: str, limit: int = 12) -> None:
+        try:
+            snapshot = torch.cuda.memory_snapshot()
+        except Exception as e:
+            self.logger.warning(f"[{tag}] failed to get CUDA memory snapshot: {e}")
+            return
+
+        active_blocks: list[tuple[int, int, int, str, str]] = []
+        for segment in snapshot:
+            segment_type = str(segment.get("segment_type", "<unknown>"))
+            stream = str(segment.get("stream", "<unknown>"))
+            segment_address = int(segment.get("address", 0) or 0)
+            block_offset = 0
+            for block in segment.get("blocks", []):
+                state = str(block.get("state", ""))
+                size = int(block.get("size", 0))
+                if not state.startswith("active"):
+                    block_offset += size
+                    continue
+                requested_size = int(block.get("requested_size", size))
+                address = int(block.get("address", 0) or 0)
+                if address == 0 and segment_address:
+                    address = segment_address + block_offset
+                frames = block.get("frames", [])
+                frame_text = "<no python frames>"
+                if frames:
+                    frame_lines = []
+                    for frame in frames[:6]:
+                        filename = frame.get("filename", "<unknown>")
+                        line = frame.get("line", "?")
+                        name = frame.get("name", "<unknown>")
+                        frame_lines.append(f"{filename}:{line}:{name}")
+                    frame_text = " <- ".join(frame_lines)
+                active_blocks.append((size, requested_size, address, segment_type, f"stream={stream} {frame_text}"))
+                block_offset += size
+
+        active_blocks.sort(key=lambda item: item[0], reverse=True)
+        total_size = sum(item[0] for item in active_blocks)
+        lines = [
+            (
+                f"{idx:02d}: size={size / (1024**2):.2f} MB "
+                f"requested={requested_size / (1024**2):.2f} MB address=0x{address:x} "
+                f"segment={segment_type} {frame_text}"
+            )
+            for idx, (size, requested_size, address, segment_type, frame_text) in enumerate(
+                active_blocks[:limit], start=1
+            )
+        ]
+        body = "\n".join(lines) if lines else "<none>"
+        self.logger.info(
+            f"[{tag}] CUDA memory snapshot active blocks: total={total_size / (1024**2):.2f} MB "
+            f"count={len(active_blocks)}\n{body}"
+        )
+        if os.environ.get("XTUNER_DEBUG_ACTIVE_BLOCK_OWNERS", "0") == "1":
+            self._log_active_block_python_owners(tag, active_blocks[:limit])
+
+    def _log_active_block_python_owners(self, tag: str, active_blocks: list[tuple[int, int, int, str, str]]) -> None:
+        gc.collect()
+        tensor_rows: list[tuple[int, int, str, str, str, str]] = []
+        seen_storages: set[tuple[int, int, str]] = set()
+        for obj in gc.get_objects():
+            try:
+                if not torch.is_tensor(obj) or not obj.is_cuda:
+                    continue
+                storage = obj.untyped_storage()
+                ptr = int(storage.data_ptr())
+                nbytes = int(storage.nbytes())
+                device = str(obj.device)
+                key = (ptr, nbytes, device)
+                if key in seen_storages:
+                    continue
+                seen_storages.add(key)
+                tensor_rows.append((ptr, nbytes, device, str(tuple(obj.shape)), str(obj.dtype), type(obj).__name__))
+            except Exception:
+                continue
+
+        lines: list[str] = []
+        for idx, (block_size, requested_size, block_address, segment_type, frame_text) in enumerate(
+            active_blocks, start=1
+        ):
+            if block_address == 0:
+                lines.append(
+                    f"{idx:02d}: block={block_size / (1024**2):.2f} MB address=<unknown> "
+                    f"requested={requested_size / (1024**2):.2f} MB owners=<cannot_match_without_address>"
+                )
+                continue
+            block_end = block_address + block_size
+            matches = []
+            for ptr, nbytes, device, shape, dtype, obj_type in tensor_rows:
+                tensor_end = ptr + nbytes
+                if ptr < block_end and tensor_end > block_address:
+                    matches.append(
+                        f"{nbytes / (1024**2):.2f} MB ptr=0x{ptr:x} {device} "
+                        f"shape={shape} dtype={dtype} type={obj_type}"
+                    )
+            owner_text = "; ".join(matches[:6]) if matches else "<no Python tensor/storage owner found>"
+            lines.append(
+                f"{idx:02d}: block={block_size / (1024**2):.2f} MB "
+                f"requested={requested_size / (1024**2):.2f} MB address=0x{block_address:x} "
+                f"segment={segment_type} owners={owner_text} frame={frame_text}"
+            )
+
+        body = "\n".join(lines) if lines else "<none>"
+        self.logger.info(f"[{tag}] active CUDA block Python owner probe:\n{body}")
+
+    def _log_live_cuda_tensors(self, tag: str, limit: int = 15) -> None:
+        gc.collect()
+        rows: list[tuple[int, str, str, str, str, bool, torch.Tensor]] = []
+        seen_storages: set[tuple[int, int, str]] = set()
+        for obj in gc.get_objects():
+            try:
+                if not torch.is_tensor(obj) or not obj.is_cuda:
+                    continue
+                storage = obj.untyped_storage()
+                storage_bytes = storage.nbytes()
+                key = (storage.data_ptr(), storage_bytes, str(obj.device))
+                if key in seen_storages:
+                    continue
+                seen_storages.add(key)
+                rows.append(
+                    (
+                        storage_bytes,
+                        str(tuple(obj.shape)),
+                        str(obj.dtype),
+                        str(obj.device),
+                        type(obj).__name__,
+                        bool(obj.requires_grad),
+                        obj,
+                    )
+                )
+            except Exception:
+                continue
+
+        rows.sort(key=lambda row: row[0], reverse=True)
+        total_bytes = sum(row[0] for row in rows)
+        top_lines = [
+            (
+                f"{idx:02d}: {storage_bytes / (1024**2):.2f} MB "
+                f"shape={shape} dtype={dtype} device={device} type={obj_type} requires_grad={requires_grad}"
+            )
+            for idx, (storage_bytes, shape, dtype, device, obj_type, requires_grad, _) in enumerate(
+                rows[:limit], start=1
+            )
+        ]
+        top_text = "\n".join(top_lines) if top_lines else "<none>"
+        self.logger.info(
+            f"[{tag}] live CUDA tensors visible to Python: total={total_bytes / (1024**2):.2f} MB "
+            f"unique_storages={len(rows)}\n{top_text}"
+        )
+        if rows:
+            self.logger.info(f"[{tag}] largest CUDA tensor referrers:\n{self._format_tensor_referrers(rows[0][-1])}")
+
+    def _format_tensor_referrers(self, tensor: torch.Tensor, limit: int = 20) -> str:
+        lines: list[str] = []
+        for ref in gc.get_referrers(tensor):
+            if ref is lines:
+                continue
+            try:
+                ref_type = type(ref).__name__
+                detail = ""
+                if isinstance(ref, dict):
+                    keys = []
+                    for key, value in list(ref.items())[:200]:
+                        if value is tensor:
+                            keys.append(repr(key))
+                    detail = f" keys=[{', '.join(keys[:8])}]" if keys else f" len={len(ref)}"
+                elif isinstance(ref, (list, tuple)):
+                    indices = [str(idx) for idx, value in enumerate(ref[:200]) if value is tensor]
+                    detail = f" indices=[{', '.join(indices[:8])}]" if indices else f" len={len(ref)}"
+                else:
+                    attrs = []
+                    for name, value in vars(ref).items() if hasattr(ref, "__dict__") else []:
+                        if value is tensor:
+                            attrs.append(name)
+                    detail = f" attrs=[{', '.join(attrs[:8])}]" if attrs else ""
+
+                lines.append(f"{len(lines) + 1:02d}: type={ref_type}{detail}")
+                if len(lines) >= limit:
+                    break
+            except Exception:
+                continue
+        return "\n".join(lines) if lines else "<none>"
 
     @ray_method
     def offload_optimizer(self):
         """Offload the optimizer of the training worker."""
+        self._maybe_log_memory_stage("offload_optimizer/before_optimizer_to_cpu")
         self._engine.put_optimizer_to_device("cpu")
+        self._maybe_log_memory_stage("offload_optimizer/after_optimizer_to_cpu_before_empty_cache")
         DEVICE_MODULE.empty_cache()
         self.logger.info(
             f"Offloaded optimizer to CPU. Current allocate {DEVICE_MODULE.memory_allocated() / (1024**2)} MB, "
             f"reserved: {DEVICE_MODULE.memory_reserved() / (1024**2)} MB"
         )
+        self._maybe_log_memory_stage("offload_optimizer/after_empty_cache")
 
     @ray_method
     def onload_model(self):
+        self._maybe_log_memory_stage("onload_model/before_model_to_device")
         self._engine.put_model_to_device(DEVICE)
+        self._maybe_log_memory_stage("onload_model/after_model_to_device")
 
     @ray_method
     def onload_optimizer(self):
+        self._maybe_log_memory_stage("onload_optimizer/before_optimizer_to_device")
         self._engine.put_optimizer_to_device(DEVICE)
+        self._maybe_log_memory_stage("onload_optimizer/after_optimizer_to_device")
 
     @ray_method
     def save(self, checkpoint_path: Path | str, no_save_optimizer: bool = False):
