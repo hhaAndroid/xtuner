@@ -72,7 +72,7 @@ class RLTextTokenizeFn(CachableTokenizeFunction[RolloutState]):
 
         mapped_judger_name: str | None = None
         if self.state != "cache":
-            data_source = item.get("data_source")
+            data_source = item.get("data_source", "math")
             assert data_source is not None, "data_source is required in item"
             extra_info["origin_data_source"] = data_source
             if self.data_judger_mapping is not None:

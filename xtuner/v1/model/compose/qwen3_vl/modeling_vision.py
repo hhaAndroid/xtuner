@@ -83,7 +83,7 @@ class Qwen3VLVisionRotaryEmbedding(nn.Module):
 
     def __init__(self, dim: int, theta: float = 10000.0) -> None:
         super().__init__()
-        inv_freq = 1.0 / (theta ** (torch.arange(0, dim, 2, dtype=torch.float) / dim))
+        inv_freq = 1.0 / (theta ** (torch.arange(0, dim, 2, dtype=torch.int64, device="cpu").float() / dim))
         self.register_buffer("inv_freq", inv_freq, persistent=False)
 
     def forward(self, seqlen: int) -> torch.Tensor:
@@ -100,16 +100,15 @@ def rotate_half(x):
 
 
 def apply_rotary_pos_emb_vision(
-    q: torch.Tensor, k: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor
+    q: torch.Tensor,
+    k: torch.Tensor,
+    cos: torch.Tensor,
+    sin: torch.Tensor,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    orig_q_dtype = q.dtype
-    orig_k_dtype = k.dtype
-    q, k = q.float(), k.float()
-    cos, sin = cos.unsqueeze(-2).float(), sin.unsqueeze(-2).float()
+    cos = cos.unsqueeze(-2).to(q.dtype)
+    sin = sin.unsqueeze(-2).to(q.dtype)
     q_embed = (q * cos) + (rotate_half(q) * sin)
     k_embed = (k * cos) + (rotate_half(k) * sin)
-    q_embed = q_embed.to(orig_q_dtype)
-    k_embed = k_embed.to(orig_k_dtype)
     return q_embed, k_embed
 
 

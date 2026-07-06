@@ -84,7 +84,7 @@ class SamplerConfig(BaseModel):
         else:
             tokenizer_obj = tokenizer
         dataloader = self.dataloader_cfg.build(
-            tokenizer=tokenizer_obj, dp_mesh=None, global_batch_size=1, micro_batch_size=1, seed=1
+            tokenizer=tokenizer_obj, dp_mesh=None, global_batch_size=1, micro_batch_size=1, seed=114514
         )
         return Sampler(
             dataloader=dataloader,

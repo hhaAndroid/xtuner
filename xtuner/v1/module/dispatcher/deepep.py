@@ -108,7 +108,7 @@ class DeepEPDispatch(torch.autograd.Function):
             num_recv_tokens_per_expert_list,
             handle,
             event,
-        ) = dispatch_forward(x, topk_idx, topk_weights, num_experts, group, forward_previous_event)
+        ) = dispatch_forward(x, topk_idx.contiguous(), topk_weights, num_experts, group, forward_previous_event)
         # save deep comm handle
         if not is_async:
             event.current_stream_wait()

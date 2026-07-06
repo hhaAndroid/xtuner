@@ -129,3 +129,19 @@ def kl_penalty(
         raise NotImplementedError
 
     return (loss * loss_weights.to(loss.dtype)).sum()
+
+
+def tv_loss(
+    mtp_logprobs: torch.Tensor,
+    rollout_logprobs: torch.Tensor,
+    loss_weights: torch.Tensor,
+) -> torch.Tensor:
+    # 数值稳定版 tv loss
+    # log_ratio = log[p(y) / q(y)]
+    log_ratio = (mtp_logprobs - rollout_logprobs.detach()).float()
+
+    # (1 - p/q) + log_ratio > 0 时，p >= q，loss 恰好为 0；
+    # log_ratio <= 0 时，loss = 1 - exp(log_ratio)。
+    token_loss = -torch.expm1(log_ratio.clamp_max(0.0))
+
+    return (token_loss * loss_weights.to(token_loss.dtype)).sum()

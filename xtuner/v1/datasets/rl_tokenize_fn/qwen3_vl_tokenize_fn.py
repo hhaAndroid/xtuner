@@ -1,5 +1,6 @@
 import os
 from typing import Any, cast
+import random
 
 from xtuner.v1.data_proto.rl_data import RolloutState
 
@@ -60,10 +61,14 @@ class RLQwen3VLTokenizeFunction(Qwen3VLTokenizeFunction):
         *args,
         ignore_multimodal_info: bool = False,
         data_judger_mapping: dict[str, str] | None = None,
+        random_system_prompt: str | None = None,
+        random_system_prompt_prob: float = 0.0,
         **kwargs,
     ):
         self.ignore_multimodal_info = ignore_multimodal_info
         self.data_judger_mapping = data_judger_mapping
+        self.random_system_prompt = random_system_prompt
+        self.random_system_prompt_prob = random_system_prompt_prob
         super().__init__(*args, **kwargs)
 
     def __call__(self, item: dict, media_root: str = "", **kwargs) -> RolloutState | CacheItem:
@@ -81,6 +86,10 @@ class RLQwen3VLTokenizeFunction(Qwen3VLTokenizeFunction):
             if messages[0]["role"] == "system":
                 messages = messages[1:]
             messages = [{"role": "system", "content": system_prompt}] + messages
+        elif self.random_system_prompt is not None:
+            # 以 random_system_prompt_prob 概率加入默认 system prompt
+            if random.random() < self.random_system_prompt_prob and messages[0]["role"] != "system":
+                messages = [{"role": "system", "content": self.random_system_prompt}] + messages
 
         data = super().__call__({"messages": messages, "tools": tools}, media_root=media_root)
 
@@ -114,7 +123,7 @@ class RLQwen3VLTokenizeFunction(Qwen3VLTokenizeFunction):
                 if "image_grid_thw" in data:
                     mm_info["image_grid_thw"] = data["image_grid_thw"]
 
-            data_source = item.get("data_source")
+            data_source = item.get("data_source", "math")
             assert data_source is not None, "data_source is required in item"
             extra_info["origin_data_source"] = data_source
             data_judger_mapping = getattr(self, "data_judger_mapping", None)
@@ -142,6 +151,8 @@ class RLQwen3VLTokenizeFunction(Qwen3VLTokenizeFunction):
 class RLQwen3VLTokenizeFnConfig(Qwen3VLTokenizeFnConfig):
     ignore_multimodal_info: bool = False  # eval is True
     data_judger_mapping: dict[str, str] | None = None  # {origin_data_source: judger_name}
+    random_system_prompt: str | None = None  # 随机加入的 system prompt，None 表示不加入
+    random_system_prompt_prob: float = 0.0  # 加入 random_system_prompt 的概率
 
     def build(
         self, tokenizer, tokenizer_hash: str | None = None, anno_name: str = "", **kwargs
@@ -169,4 +180,6 @@ class RLQwen3VLTokenizeFnConfig(Qwen3VLTokenizeFnConfig):
             add_generation_prompt=self.add_generation_prompt,
             enable_thinking=self.enable_thinking,
             data_judger_mapping=self.data_judger_mapping,
+            random_system_prompt=self.random_system_prompt,
+            random_system_prompt_prob=self.random_system_prompt_prob,
         )

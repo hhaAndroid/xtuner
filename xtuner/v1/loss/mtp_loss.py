@@ -177,7 +177,7 @@ class MTPLossContext(LMHeadLossContext):
         loss_kwargs: MTPLossKwargs,  # type: ignore[override]
     ) -> tuple[torch.Tensor, tuple[torch.Tensor | None, dict[str, Any]]]:
         if loss_kwargs.logprobs is not None:
-            return self._kl_loss_fn(hidden_states, head_weight, head_bias, loss_kwargs)
+            return self._tv_loss_fn(hidden_states, head_weight, head_bias, loss_kwargs)
         return super().loss_fn(hidden_states, head_weight, head_bias, loss_kwargs)
 
     def _kl_loss_fn(
@@ -214,3 +214,37 @@ class MTPLossContext(LMHeadLossContext):
         )
 
         return kl_loss, (None, {})
+
+    def _tv_loss_fn(
+        self,
+        hidden_states: torch.Tensor,
+        head_weight: torch.Tensor,
+        head_bias: torch.Tensor | None,
+        loss_kwargs: MTPLossKwargs,
+    ) -> tuple[torch.Tensor, tuple[torch.Tensor | None, dict[str, Any]]]:
+        """Compute TV loss between MTP logprobs and rolled rollout logprobs.
+
+        Called per-chunk in chunk mode, so tensors here may be a slice of the full sequence.
+        """
+        from xtuner.v1.rl.loss import tv_loss
+        from xtuner.v1.rl.utils import gather_logprobs
+
+        logits = F.linear(hidden_states, head_weight, head_bias).float()
+
+        shifted_labels = loss_kwargs.shifted_labels
+        loss_weight = loss_kwargs.loss_weight
+        rollout_logprobs = loss_kwargs.logprobs
+
+        assert rollout_logprobs is not None
+        assert loss_weight is not None, "loss_weight can not be None"
+
+        mtp_logprobs = gather_logprobs(logits, shifted_labels)
+        loss_weight = loss_weight.flatten()
+
+        tv_loss = tv_loss(
+            mtp_logprobs.flatten(),
+            rollout_logprobs.flatten(),
+            loss_weight,
+        )
+
+        return tv_loss, (None, {})

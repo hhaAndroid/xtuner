@@ -1045,7 +1045,7 @@ class TrajectoryProduceStrategy(ProduceStrategy):
                 # stalled-detection path will exit once the in-flight tasks
                 # drain. This guarantees the producer never sends more
                 # trajectories than the dataset contains.
-                logger.info(
+                logger.debug(
                     f"[{ctx.task_name}] sampler exhausted after {preloaded} preloads "
                     f"this round; stopping further preload."
                 )
