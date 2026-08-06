@@ -19,7 +19,6 @@ from xtuner.v1.train.trainer import LoadCheckpointConfig
 from xtuner.v1.rl.utils import AcceleratorResourcesConfig
 from xtuner.v1.train.rl_trainer import RLColocateTrainerConfig
 
-
 # export LMDEPLOY_FP32_MAMBA_SSM_DTYPE=1
 
 from recipe.math_code_interpreter.xtuner_dataset import RLMathTokenizeFnConfig as MathTrainTokenizeFnConfig
@@ -111,6 +110,19 @@ debug_rollout_dir = os.environ.get("DEBUG_ROLLOUT_DIR", "")
 debug_train = _env_bool("DEBUG_TRAIN")
 debug_rollout = _env_bool("DEBUG_ROLLOUT")
 enable_return_routed_experts = True
+sglang_mamba_radix_cache_strategy = os.environ.get(
+    "SGLANG_MAMBA_RADIX_CACHE_STRATEGY", "extra_buffer"
+).strip().lower()
+sglang_disable_radix_cache = _env_bool("SGLANG_DISABLE_RADIX_CACHE", False)
+if sglang_mamba_radix_cache_strategy not in {"extra_buffer", "no_buffer"}:
+    raise ValueError(
+        "SGLANG_MAMBA_RADIX_CACHE_STRATEGY must be one of "
+        "{'extra_buffer', 'no_buffer'}, got "
+        f"{sglang_mamba_radix_cache_strategy!r}."
+    )
+# no_buffer cannot safely use SGLang's overlap scheduler. extra_buffer keeps
+# ping-pong Mamba states specifically so overlap scheduling can remain enabled.
+sglang_disable_overlap_schedule = sglang_mamba_radix_cache_strategy == "no_buffer"
 
 experimental_name = os.environ.get("EXPERIMENT_NAME", "localhost_agent_rl")
 total_epochs = 10
@@ -127,9 +139,17 @@ rollout_tensor_parallel_size = int(os.environ.get("ROLLOUT_TENSOR_PARALLEL_SIZE"
 rollout_expert_parallel_size = int(os.environ.get("ROLLOUT_EXPERT_PARALLEL_SIZE", 1))
 train_ep_size = int(os.environ.get("TRAIN_EP_SIZE", 4))
 speculative_num_draft_tokens = int(os.environ.get("SPECULATIVE_NUM_DRAFT_TOKENS", 3))
+sglang_speculative_num_steps = int(
+    os.environ.get("SGLANG_SPECULATIVE_NUM_STEPS", speculative_num_draft_tokens - 1)
+)
+if speculative_num_draft_tokens != sglang_speculative_num_steps + 1:
+    raise ValueError(
+        "For SGLang EAGLE with topk=1, "
+        "SPECULATIVE_NUM_DRAFT_TOKENS must equal "
+        "SGLANG_SPECULATIVE_NUM_STEPS + 1; got "
+        f"{speculative_num_draft_tokens} and {sglang_speculative_num_steps}."
+    )
 mamba_prefix_cache_state_interval = int(os.environ.get("MAMBA_PREFIX_CACHE_STATE_INTERVAL", 256))
-lmdeploy_enable_prefix_caching = _env_bool("LMDEPLOY_ENABLE_PREFIX_CACHING", True)
-lmdeploy_prefix_cache_state_budget = int(os.environ.get("LMDEPLOY_PREFIX_CACHE_STATE_BUDGET", 0))
 train_optimizer_steps = 8
 hf_interval = 1000
 fp32_lm_head = True
@@ -165,26 +185,36 @@ rollout_config = RolloutConfig(
     rollout_max_batch_size_per_instance=128,
     rollout_timeout=1200,
     session_server_timeout=1200,
+    extra_rollout_config=dict(
+        sglang_log_level="info",
+        sglang_log_level_http="info",
+        # Keep cumulative text chunks by default. The local SGLang OpenAI chat
+        # serving path still slices text/tool deltas from cumulative content.
+        sglang_incremental_streaming_output=_env_bool("SGLANG_INCREMENTAL_STREAMING_OUTPUT", False),
+        sglang_tool_call_parser="qwen3_coder",
+        sglang_reasoning_parser="qwen3",
+        # lagent asks for 64K completion tokens on every turn. Let SGLang cap
+        # that request against the actual prompt length and EAGLE reserve.
+        sglang_allow_auto_truncate=True,
+        sglang_speculative_algorithm="EAGLE",
+        sglang_speculative_num_steps=sglang_speculative_num_steps,
+        sglang_speculative_eagle_topk=1,
+        sglang_speculative_num_draft_tokens=speculative_num_draft_tokens,
+        # Select extra_buffer or no_buffer with
+        # SGLANG_MAMBA_RADIX_CACHE_STRATEGY. extra_buffer maintains ping-pong
+        # Mamba state snapshots and enables overlap scheduling; no_buffer uses
+        # fewer slots per request and requires overlap scheduling to be off.
+        # Keep the Mamba strategy and overlap scheduler unchanged when this is
+        # disabled, so SGLANG_DISABLE_RADIX_CACHE isolates radix-cache impact.
+        sglang_disable_radix_cache=sglang_disable_radix_cache,
+        sglang_mamba_radix_cache_strategy=sglang_mamba_radix_cache_strategy,
+        sglang_mamba_track_interval=mamba_prefix_cache_state_interval,
+        sglang_disable_overlap_schedule=sglang_disable_overlap_schedule,
+        sglang_schedule_policy="lpm",
+        sglang_enable_metrics=True,
+    ),
     health_check_interval_seconds=30.0,
     health_check_failure_threshold=3,
-    extra_rollout_config=dict(
-        lmdeploy_log_level="INFO",
-        lmdeploy_uvicorn_log_level="INFO",
-        lmdeploy_tool_call_parser="qwen3coder",
-        lmdeploy_reasoning_parser="default",
-        lmdeploy_speculative_algorithm="qwen3_5_mtp",
-        lmdeploy_speculative_num_draft_tokens=speculative_num_draft_tokens,
-        lmdeploy_enable_prefix_caching=lmdeploy_enable_prefix_caching,
-        # A zero state budget does not disable SSM prefix caching: cached
-        # checkpoints can borrow idle runtime state slots. Reserve extra slots
-        # with LMDEPLOY_PREFIX_CACHE_STATE_BUDGET when higher concurrency needs
-        # cache checkpoints to survive independently of runtime availability.
-        lmdeploy_prefix_cache_state_budget=lmdeploy_prefix_cache_state_budget,
-        lmdeploy_prefix_cache_decode_state_interval=(
-            mamba_prefix_cache_state_interval if lmdeploy_enable_prefix_caching else 0
-        ),
-        lmdeploy_enable_metrics=True,
-    ),
 )
 
 training_sample_params = SampleParams(

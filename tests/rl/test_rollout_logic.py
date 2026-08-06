@@ -23,7 +23,7 @@ from xtuner.v1.data_proto.rl_data import RolloutState, SampleParams, Status
 from xtuner.v1.rl.agent_loop import AgentLoopConfig
 from xtuner.v1.rl.rollout.controller import RolloutController
 from xtuner.v1.rl.rollout.health_manager import RolloutHealthManager
-from xtuner.v1.rl.rollout.lmdeploy import LMDeployWorker
+from xtuner.v1.rl.rollout.lmdeploy import LMDeployWorker, _pop_engine_config_overrides
 from xtuner.v1.rl.rollout.rollout_topology import RolloutEngine, RolloutTopology, RolloutServerProcess
 from xtuner.v1.rl.rollout.proxy_manager import RolloutProxyManager
 from xtuner.v1.rl.rollout.worker_registry import (
@@ -313,6 +313,48 @@ class TestRolloutTopologyAPI(unittest.TestCase):
             self._rollout_info(config=config, targets=targets, train_rank=8).ipc_rank_mesh,
             (tuple(range(16)),),
         )
+
+
+class TestLMDeployEngineConfigRouting(unittest.TestCase):
+    def test_pytorch_engine_options_do_not_leak_into_server_kwargs(self):
+        server_kwargs = {
+            "enable_prefix_caching": True,
+            "prefix_cache_state_budget": 7,
+            "prefix_cache_decode_state_interval": 256,
+            "enable_metrics": False,
+            "tool_call_parser": "qwen3coder",
+        }
+
+        engine_kwargs = _pop_engine_config_overrides(server_kwargs, "pytorch")
+
+        self.assertEqual(
+            engine_kwargs,
+            {
+                "enable_prefix_caching": True,
+                "prefix_cache_state_budget": 7,
+                "prefix_cache_decode_state_interval": 256,
+                "enable_metrics": False,
+            },
+        )
+        self.assertEqual(server_kwargs, {"tool_call_parser": "qwen3coder"})
+
+    def test_turbomind_keeps_pytorch_only_state_options_out_of_engine_config(self):
+        server_kwargs = {
+            "enable_prefix_caching": True,
+            "prefix_cache_state_budget": 7,
+            "enable_metrics": False,
+        }
+
+        engine_kwargs = _pop_engine_config_overrides(server_kwargs, "turbomind")
+
+        self.assertEqual(
+            engine_kwargs,
+            {
+                "enable_prefix_caching": True,
+                "enable_metrics": False,
+            },
+        )
+        self.assertEqual(server_kwargs, {"prefix_cache_state_budget": 7})
 
 
 class TestRolloutController(unittest.IsolatedAsyncioTestCase):

@@ -260,6 +260,7 @@ class SessionServer:
         request_timeout: float = 1200.0,
         read_bufsize: int = 2**26,
         enable_return_routed_experts: bool = False,
+        rollout_backend: str | None = None,
     ):
         self.worker_base_url = worker_base_url.rstrip("/")
         self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_path, trust_remote_code=True)
@@ -268,13 +269,37 @@ class SessionServer:
         self.request_timeout = request_timeout
         self.read_bufsize = read_bufsize
         self.enable_return_routed_experts = enable_return_routed_experts
+        self.rollout_backend = rollout_backend
         self.store = get_store()
         self.stop_word = self.tokenizer.eos_token or ""
 
         self._app: Optional[web.Application] = None
         self._runner: Optional[web.AppRunner] = None
         self._site: Optional[web.TCPSite] = None
-        self._lmdeploy_actor: Optional[ray.actor.ActorHandle] = None
+        self._shared_store_actor: Optional[ray.actor.ActorHandle] = None
+
+    def _adapt_worker_request(self, worker_req: dict) -> dict:
+        """Translate proxy-only extension fields to the backend's API."""
+        if self.rollout_backend != "sglang":
+            return worker_req
+
+        # XTuner/LMDeploy use 0 for disabled top-k; SGLang uses -1.
+        if worker_req.get("top_k") == 0:
+            worker_req["top_k"] = -1
+
+        # SGLang's OpenAI endpoint exposes token logprobs through the standard
+        # `logprobs` field. SessionServer later uses them to rebuild the exact
+        # training trace when streaming responses do not carry output_ids.
+        wants_logprobs = _bool_request_value(
+            worker_req.pop("return_logprob", worker_req.get("logprobs")), False
+        )
+        worker_req["logprobs"] = wants_logprobs
+        if not wants_logprobs:
+            worker_req.pop("top_logprobs", None)
+        # The XTuner SGLang branch accepts pre-tokenized input_ids while still
+        # using non-empty messages for stop/tool-parser metadata. Its sglext
+        # response returns the exact generated ids requested here.
+        return worker_req
 
     async def on_request(self, req_body: dict, fmt: str, *, trace_enabled: bool = True) -> dict:
         """Normalize the request to drive the prefix cache + inject extension
@@ -308,8 +333,8 @@ class SessionServer:
                 worker_req.pop("top_logprobs", None)
                 worker_req["return_logprob"] = False
             worker_req["return_token_ids"] = False
-            worker_req.setdefault("return_routed_experts", True)
-            return worker_req
+            worker_req.setdefault("return_routed_experts", self.enable_return_routed_experts)
+            return self._adapt_worker_request(worker_req)
 
         session_id = req_body["session_id"]
 
@@ -360,7 +385,7 @@ class SessionServer:
         }
         worker_req["input_ids"] = input_ids
         worker_req["return_token_ids"] = True
-        worker_req["return_routed_experts"] = True
+        worker_req["return_routed_experts"] = self.enable_return_routed_experts
         worker_req["return_logprob"] = True
         worker_req["include_stop_str_in_output"] = True
 
@@ -375,7 +400,10 @@ class SessionServer:
         else:
             worker_req["messages"] = []
 
-        return worker_req
+        if self.rollout_backend == "sglang" and fmt == FMT_OPENAI:
+            worker_req["messages"] = copy.deepcopy(req_body["messages"])
+
+        return self._adapt_worker_request(worker_req)
 
     async def on_response(self, worker_resp: dict, fmt: str, orig_req_body: dict) -> dict:
         """Trace the assistant turn into ``trace_store`` (always in OpenAI
@@ -410,9 +438,19 @@ class SessionServer:
             tools = openai_tools
         else:
             choice = worker_resp["choices"][0]
-            output_token_ids = choice.get("output_ids")
-            output_token_logprobs = choice.get("output_token_logprobs")
-            raw_routed_expert = choice.get("routed_experts")
+            sglext = worker_resp.get("sglext") or {}
+            output_token_ids = choice.get("output_ids", sglext.get("output_ids"))
+            output_token_logprobs = choice.get(
+                "output_token_logprobs", sglext.get("output_token_logprobs")
+            )
+            standard_output_logprobs = choice.get("_standard_output_logprobs")
+            if standard_output_logprobs is None and isinstance(choice.get("logprobs"), dict):
+                standard_output_logprobs = [
+                    float(item["logprob"])
+                    for item in choice["logprobs"].get("content") or []
+                    if isinstance(item, dict) and item.get("logprob") is not None
+                ]
+            raw_routed_expert = choice.get("routed_experts", sglext.get("routed_experts"))
             assistant_msg = choice["message"]
             messages = orig_req_body["messages"]
             tools = orig_req_body.get("tools", None)
@@ -427,11 +465,6 @@ class SessionServer:
         old_prompt = self.tokenizer.apply_chat_template(
             canonicalize_messages_for_chat_template(messages), tools=tools, add_generation_prompt=True, tokenize=False
         )
-        if output_token_ids is None:
-            raise RuntimeError(
-                "SessionServer response has no output_ids; cannot export a training trace for this assistant turn."
-            )
-        output_logprobs = _extract_output_logprobs(output_token_logprobs, output_token_ids)
 
         full_messages = [*messages, assistant_msg]
         new_prompt = (
@@ -443,6 +476,26 @@ class SessionServer:
             )
         ).rstrip()
         assert new_prompt.startswith(old_prompt) and new_prompt.endswith(self.stop_word)
+
+        if output_token_ids is None:
+            raise RuntimeError(
+                "SessionServer response has no output_ids; cannot export an exact training trace. "
+                "For SGLang, use the XTuner sglext return_token_ids protocol."
+            )
+
+        if output_token_logprobs is not None:
+            output_logprobs = _extract_output_logprobs(output_token_logprobs, output_token_ids)
+        elif fmt == FMT_OPENAI and standard_output_logprobs is not None:
+            if len(standard_output_logprobs) != len(output_token_ids):
+                raise RuntimeError(
+                    "SessionServer reconstructed output ids do not align with standard OpenAI logprobs: "
+                    f"output_ids_len={len(output_token_ids)}, logprobs_len={len(standard_output_logprobs)}"
+                )
+            output_logprobs = standard_output_logprobs
+        else:
+            raise RuntimeError(
+                "SessionServer response has neither output_token_logprobs nor standard OpenAI logprobs."
+            )
 
         # Re-derive the input delta the worker processed. on_request no longer
         # persists it (that would leave a None-expert placeholder in the store),
@@ -738,10 +791,13 @@ class SessionServer:
 
     async def _decode_routed_experts(self, routed_experts: Any) -> np.ndarray:
         if isinstance(routed_experts, str):
-            if self._lmdeploy_actor is None:
-                self._lmdeploy_actor = ray.get_actor("shared_store", namespace="lmdeploy")
-            assert self._lmdeploy_actor is not None, "LMDeploy actor should be available in the shared store."
-            routed_experts_data = await self._lmdeploy_actor.get.remote(routed_experts)
+            namespace = "sglang" if self.rollout_backend == "sglang" else "lmdeploy"
+            if self._shared_store_actor is None:
+                self._shared_store_actor = ray.get_actor("shared_store", namespace=namespace)
+            assert self._shared_store_actor is not None, (
+                f"{namespace} actor should be available in the shared store."
+            )
+            routed_experts_data = await self._shared_store_actor.get.remote(routed_experts)
             return np.asarray(routed_experts_data)
         return np.asarray(routed_experts)
 
@@ -854,6 +910,7 @@ class SessionServer:
         message: dict[str, Any] = {"choices": [{"message": {"role": "assistant", "content": ""}}]}
         content_parts: list[str] = []
         tool_calls_map: dict[int, dict[str, Any]] = {}
+        standard_output_logprobs: list[float] = []
         usage: dict[str, Any] = {}
 
         for event in events:
@@ -883,6 +940,12 @@ class SessionServer:
                         choice["output_token_logprobs"]
                     )
 
+                choice_logprobs = choice.get("logprobs")
+                if isinstance(choice_logprobs, dict):
+                    for token_logprob in choice_logprobs.get("content") or []:
+                        if isinstance(token_logprob, dict) and token_logprob.get("logprob") is not None:
+                            standard_output_logprobs.append(float(token_logprob["logprob"]))
+
                 if delta.get("reasoning_content"):
                     assistant_msg = message["choices"][0]["message"]
                     assistant_msg["reasoning_content"] = (
@@ -910,10 +973,22 @@ class SessionServer:
             if event.get("usage") is not None:
                 usage = event["usage"]
 
+            sglext = event.get("sglext")
+            if isinstance(sglext, dict):
+                target_choice = message["choices"][0]
+                if sglext.get("routed_experts") is not None:
+                    target_choice["routed_experts"] = sglext["routed_experts"]
+                if sglext.get("output_ids") is not None:
+                    target_choice["output_ids"] = sglext["output_ids"]
+                if sglext.get("output_token_logprobs") is not None:
+                    target_choice["output_token_logprobs"] = sglext["output_token_logprobs"]
+
         msg = message["choices"][0]["message"]
         msg["content"] = "".join(content_parts)
         if tool_calls_map:
             msg["tool_calls"] = [tool_calls_map[i] for i in sorted(tool_calls_map)]
+        if standard_output_logprobs:
+            message["choices"][0]["_standard_output_logprobs"] = standard_output_logprobs
         if usage:
             message["usage"] = usage
 
@@ -922,8 +997,8 @@ class SessionServer:
             raise RuntimeError("Upstream SSE stream ended without [DONE].")
         if not assistant_choice.get("finish_reason"):
             raise RuntimeError("Upstream SSE stream ended without terminal finish_reason.")
-        if assistant_choice.get("output_ids") is None:
-            raise RuntimeError("Upstream SSE stream ended without output_ids.")
+        if assistant_choice.get("output_ids") is None and not standard_output_logprobs:
+            raise RuntimeError("Upstream SSE stream ended without output_ids or standard OpenAI logprobs.")
 
         return message
 
@@ -1044,6 +1119,7 @@ class SessionServerActor:
         port: int,
         request_timeout: float,
         enable_return_routed_experts: bool = False,
+        rollout_backend: str | None = None,
     ):
         self.worker_base_url = worker_base_url
         self.tokenizer_path = tokenizer_path
@@ -1051,6 +1127,7 @@ class SessionServerActor:
         self.port = port
         self.request_timeout = request_timeout
         self.enable_return_routed_experts = enable_return_routed_experts
+        self.rollout_backend = rollout_backend
         self.server: SessionServer | None = None
 
     @property
@@ -1068,6 +1145,7 @@ class SessionServerActor:
             port=self.port,
             request_timeout=self.request_timeout,
             enable_return_routed_experts=self.enable_return_routed_experts,
+            rollout_backend=self.rollout_backend,
         )
         await self.server.start()
         return self.server.url

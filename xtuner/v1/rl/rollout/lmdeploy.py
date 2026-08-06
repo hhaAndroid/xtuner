@@ -17,6 +17,38 @@ from .worker import RolloutConfig, RolloutWorker
 SHARED_STORE = "shared_store"
 SHARED_STORE_NAMESPACE = "lmdeploy"
 
+_COMMON_ENGINE_CONFIG_OVERRIDE_KEYS = frozenset(
+    {
+        "enable_metrics",
+        "enable_prefix_caching",
+    }
+)
+_PYTORCH_ENGINE_CONFIG_OVERRIDE_KEYS = _COMMON_ENGINE_CONFIG_OVERRIDE_KEYS | frozenset(
+    {
+        "prefix_cache_decode_state_interval",
+        "prefix_cache_state_budget",
+    }
+)
+
+
+def _pop_engine_config_overrides(lmdeploy_config_kwargs: dict[str, Any], backend: str) -> dict[str, Any]:
+    """Move engine-owned ``lmdeploy_*`` options out of API-server kwargs.
+
+    ``serve`` forwards unknown kwargs toward ``Engine.from_pretrained``, where
+    they are ignored (and the mp-engine path drops them entirely). Prefix-cache
+    and metrics switches must therefore be set on the engine config itself.
+    """
+    keys = (
+        _PYTORCH_ENGINE_CONFIG_OVERRIDE_KEYS
+        if backend == "pytorch"
+        else _COMMON_ENGINE_CONFIG_OVERRIDE_KEYS
+    )
+    return {
+        key: lmdeploy_config_kwargs.pop(key)
+        for key in keys
+        if key in lmdeploy_config_kwargs
+    }
+
 
 def run_lmdeploy_server_wrapper(lmdeploy_config_namespace: Namespace):
     """Wrapper function to run the LMDeploy API server.
@@ -387,7 +419,7 @@ class LMDeployWorker(RolloutWorker):
                 num_speculative_tokens=speculative_num_draft_tokens,
             )
 
-        extra_engine_config: Dict[str, Any] = {}
+        extra_engine_config: Dict[str, Any] = _pop_engine_config_overrides(lmdeploy_config_kwargs, backend)
         if backend == "pytorch" and self.config.enable_return_routed_experts:
             extra_engine_config["enable_return_routed_experts"] = True
         if backend == "pytorch" and self.config.router_n_groups:
@@ -436,6 +468,7 @@ class LMDeployWorker(RolloutWorker):
                 session_len=self.config.context_length,
                 model_format="fp8" if self.config.enable_float8 else None,
                 cache_max_entry_count=self.config.gpu_memory_utilization,
+                **extra_engine_config,
             )
         )
         if backend == "pytorch" and self.accelerator == "NPU":
