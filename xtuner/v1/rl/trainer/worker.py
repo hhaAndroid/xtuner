@@ -49,6 +49,7 @@ from xtuner.v1.rl.loss import (
     BaseRLLossContext,
     DistillationLossConfig,
     DistillationLossContext,
+    compute_reverse_kl_distribution_metrics,
     finalize_distillation_metrics,
     finalize_train_policy_metrics,
     kl_penalty,
@@ -217,6 +218,7 @@ class WorkerLogItem(TypedDict):
     rollout_entropy: NotRequired[float]
     mismatch_metrics: NotRequired[dict[str, float]]
     rollout_is_metrics: NotRequired[dict[str, float]]
+    distillation_metrics: NotRequired[dict[str, float]]
     train_metrics: List[WorkerTrainLogItem]
     sft_train_metrics: NotRequired[dict[str, float]]
 
@@ -720,6 +722,64 @@ class TrainingWorker(SingleAcceleratorWorker):
         for old_logprobs, loss_ctx in zip(old_logprobs_list, loss_ctx_list):
             loss_ctx.loss_kwargs.old_logprobs = old_logprobs
 
+        if isinstance(loss_cfg, DistillationLossConfig) and loss_cfg.loss_mode == "k1":
+            reverse_kl_metric_names = {
+                "reverse_kl": "reverse_kl_mean",
+                "abs_logprob_loss": "reverse_kl_abs_mean",
+                "reverse_kl_variance": "reverse_kl_variance",
+                "reverse_kl_p1": "reverse_kl_p1",
+                "reverse_kl_p50": "reverse_kl_p50",
+                "reverse_kl_p99": "reverse_kl_p99",
+                "reverse_kl_p999": "reverse_kl_p999",
+                "reverse_kl_max_abs": "reverse_kl_max_abs",
+                "reverse_kl_token_count": "reverse_kl_token_count",
+            }
+            distillation_metrics: dict[str, float] = {}
+
+            rollout_reverse_kl_values = torch.cat(
+                [cast(DistillationLossContext, loss_ctx).raw_reverse_kl_values() for loss_ctx in loss_ctx_list]
+            )
+            rollout_reverse_kl_metrics = compute_reverse_kl_distribution_metrics(rollout_reverse_kl_values)
+            distillation_metrics.update(
+                {
+                    f"rollout/{reverse_kl_metric_names[name]}": value.item()
+                    for name, value in rollout_reverse_kl_metrics.items()
+                }
+            )
+
+            distillation_config = self.config.distillation_config
+            if distillation_config is not None:
+                if len(teacher_indices_list) != len(loss_ctx_list):
+                    raise ValueError(
+                        "teacher_indices must be present for every distillation loss context: "
+                        f"{len(teacher_indices_list)} vs {len(loss_ctx_list)}"
+                    )
+                # Every rank iterates every Teacher in the same order so all
+                # ranks enter the same distribution-metric collectives.
+                for teacher_index, teacher_config in enumerate(distillation_config.teachers):
+                    teacher_reverse_kl_values = torch.cat(
+                        [
+                            cast(DistillationLossContext, loss_ctx).raw_reverse_kl_values(
+                                teacher_indices == teacher_index
+                            )
+                            for loss_ctx, teacher_indices in zip(loss_ctx_list, teacher_indices_list)
+                        ]
+                    )
+                    teacher_metrics = compute_reverse_kl_distribution_metrics(teacher_reverse_kl_values)
+                    teacher_token_count = teacher_metrics["reverse_kl_token_count"].item()
+                    teacher_prefix = f"teacher/{teacher_config.name}"
+                    distillation_metrics[f"{teacher_prefix}/reverse_kl_token_count"] = teacher_token_count
+                    if teacher_token_count > 0:
+                        distillation_metrics.update(
+                            {
+                                f"{teacher_prefix}/{reverse_kl_metric_names[name]}": value.item()
+                                for name, value in teacher_metrics.items()
+                                if name != "reverse_kl_token_count"
+                            }
+                        )
+
+            worker_log_item["distillation_metrics"] = distillation_metrics
+
         logger_msg = f"Rollout {rollout_idx}: "
 
         # compute entropy
@@ -847,8 +907,7 @@ class TrainingWorker(SingleAcceleratorWorker):
             raw_reverse_kl_values: torch.Tensor | None = None
             if isinstance(loss_cfg, DistillationLossConfig) and loss_cfg.loss_mode == "k1":
                 local_reverse_kl_values = [
-                    cast(DistillationLossContext, loss_ctx).raw_reverse_kl_values()
-                    for loss_ctx in batches_loss_ctx
+                    cast(DistillationLossContext, loss_ctx).raw_reverse_kl_values() for loss_ctx in batches_loss_ctx
                 ]
                 raw_reverse_kl_values = torch.cat(local_reverse_kl_values)
 

@@ -70,9 +70,28 @@ DEVICE_MODULE = get_torch_device_module()
 _DISTILLATION_METRIC_PREFIXES = (
     "reduced_distillation_",
     "reduced_topk_opd_",
-    "opd_",
     "topk_opd_",
 )
+
+_ROLLOUT_REVERSE_KL_TB_KEYS = {
+    "rollout/reverse_kl_mean": "opd/reverse_kl",
+    "rollout/reverse_kl_abs_mean": "opd/abs_logprob_loss",
+    "rollout/reverse_kl_variance": "opd/reverse_kl_variance",
+    "rollout/reverse_kl_p1": "opd/reverse_kl_p1",
+    "rollout/reverse_kl_p50": "opd/reverse_kl_p50",
+    "rollout/reverse_kl_p99": "opd/reverse_kl_p99",
+    "rollout/reverse_kl_p999": "opd/reverse_kl_p999",
+    "rollout/reverse_kl_max_abs": "opd/reverse_kl_max_abs",
+    "rollout/reverse_kl_token_count": "opd/reverse_kl_token_count",
+}
+
+_MINI_BATCH_REVERSE_KL_KEYS = {
+    "opd_reverse_kl": "reverse_kl_mean",
+    "opd_reverse_kl_p50": "reverse_kl_p50",
+    "opd_reverse_kl_p99": "reverse_kl_p99",
+    "opd_reverse_kl_variance": "reverse_kl_variance",
+    "opd_reverse_kl_token_count": "reverse_kl_token_count",
+}
 
 
 def _to_cpu_tensor(value: np.ndarray | None, *, dtype: torch.dtype | None = None) -> torch.Tensor | None:
@@ -1068,9 +1087,11 @@ class BaseRLTrainer:
         training_samples = 0
 
         data_batches = []
-        teacher_index_by_data_source = (
-            self._train_teacher_config.teacher_index_by_data_source if self._train_teacher_config is not None else None
-        )
+        teacher_index_by_data_source = None
+        if self._distillation_config is not None:
+            configured_teacher_indices = self._distillation_config.teacher_index_by_data_source
+            if isinstance(configured_teacher_indices, dict):
+                teacher_index_by_data_source = configured_teacher_indices
 
         for j, group in enumerate(data_groups):
             if not is_valid_for_training(group, self.logger):
@@ -1480,6 +1501,12 @@ class BaseRLTrainer:
             all_scalars.update({f"{k}": v for k, v in rank0_mismatch_metrics.items()})
             all_scalars.update({"entropy/rollout": rank0_rollout_entropy})
             all_scalars.update({"entropy/train": rank0_log_item["train_entropy"]})
+            rank0_distillation_metrics = rank0_log_item.get("distillation_metrics", {})
+            for metric_name, metric_value in rank0_distillation_metrics.items():
+                tensorboard_name = _ROLLOUT_REVERSE_KL_TB_KEYS.get(metric_name)
+                if tensorboard_name is None:
+                    tensorboard_name = f"opd/{metric_name}"
+                all_scalars[tensorboard_name] = metric_value
             if "teacher_compute_time" in rank0_log_item:
                 all_scalars["time/train_teacher_compute"] = rank0_log_item["teacher_compute_time"]
             if "teacher_onload_time" in rank0_log_item:
@@ -1499,8 +1526,6 @@ class BaseRLTrainer:
                     all_scalars.update({f"train_metrics/worker_{worker_idx}/step_avg_{key}": avg_value})
                     if worker_idx == 0 and key.startswith(_DISTILLATION_METRIC_PREFIXES):
                         all_scalars[f"distillation/{key}"] = avg_value
-                        if key in ("opd_reverse_kl", "opd_abs_logprob_loss"):
-                            all_scalars[key] = avg_value
 
                 rank_sft_log = log_item["sft_train_metrics"]
                 for k, v in rank_sft_log.items():
@@ -1677,8 +1702,20 @@ class BaseRLTrainer:
 
                 metrics: dict[str, Any] = dict(mini_batch_log)
 
+                tag_scalar_dict = {
+                    f"train_metrics/worker_{worker_idx}/{key}": float(value) for key, value in metrics.items()
+                }
+                if worker_idx == 0:
+                    tag_scalar_dict.update(
+                        {
+                            f"opd/mini_batch/{metric_name}": float(metrics[source_key])
+                            for source_key, metric_name in _MINI_BATCH_REVERSE_KL_KEYS.items()
+                            if source_key in metrics
+                        }
+                    )
+
                 self._exp_tracker.add_scalars(
-                    tag_scalar_dict={f"train_metrics/worker_{worker_idx}/{k}": float(v) for k, v in metrics.items()},
+                    tag_scalar_dict=tag_scalar_dict,
                     global_step=current_global_step,
                 )
         self._global_train_step += len(workers_log_item[0]["train_metrics"])

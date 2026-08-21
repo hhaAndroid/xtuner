@@ -102,9 +102,11 @@ def compute_reverse_kl_distribution_metrics(
             "abs_logprob_loss": zero,
             "reverse_kl_variance": zero,
             "reverse_kl_p1": zero,
+            "reverse_kl_p50": zero,
             "reverse_kl_p99": zero,
             "reverse_kl_p999": zero,
             "reverse_kl_max_abs": zero,
+            "reverse_kl_token_count": zero,
         }
 
     if values.numel() > 0:
@@ -120,8 +122,9 @@ def compute_reverse_kl_distribution_metrics(
     mean = global_sum / global_count
     variance = torch.clamp(global_square_sum / global_count - mean.square(), min=0.0)
 
+    quantiles: tuple[torch.Tensor, ...]
     if global_min == global_max:
-        quantiles = (global_min, global_min, global_min)
+        quantiles = (global_min, global_min, global_min, global_min)
     else:
         histogram = torch.histc(
             values,
@@ -134,16 +137,12 @@ def compute_reverse_kl_distribution_metrics(
         cumulative = histogram.cumsum(dim=0)
         bin_width = (global_max - global_min) / histogram_bins
         quantiles_list = []
-        for quantile_level in (0.01, 0.99, 0.999):
+        for quantile_level in (0.01, 0.5, 0.99, 0.999):
             zero_based_rank = quantile_level * (global_count - 1.0)
             lower_rank = zero_based_rank.floor()
             upper_rank = zero_based_rank.ceil()
-            lower_bin_idx = torch.searchsorted(cumulative, lower_rank + 1.0).clamp(
-                max=histogram_bins - 1
-            )
-            upper_bin_idx = torch.searchsorted(cumulative, upper_rank + 1.0).clamp(
-                max=histogram_bins - 1
-            )
+            lower_bin_idx = torch.searchsorted(cumulative, lower_rank + 1.0).clamp(max=histogram_bins - 1)
+            upper_bin_idx = torch.searchsorted(cumulative, upper_rank + 1.0).clamp(max=histogram_bins - 1)
             lower_value = global_min + (lower_bin_idx + 0.5) * bin_width
             upper_value = global_min + (upper_bin_idx + 0.5) * bin_width
             interpolation = zero_based_rank - lower_rank
@@ -156,9 +155,11 @@ def compute_reverse_kl_distribution_metrics(
         "abs_logprob_loss": global_abs_sum / global_count,
         "reverse_kl_variance": variance,
         "reverse_kl_p1": quantiles[0],
-        "reverse_kl_p99": quantiles[1],
-        "reverse_kl_p999": quantiles[2],
+        "reverse_kl_p50": quantiles[1],
+        "reverse_kl_p99": quantiles[2],
+        "reverse_kl_p999": quantiles[3],
         "reverse_kl_max_abs": global_max_abs,
+        "reverse_kl_token_count": global_count,
     }
 
 
@@ -268,13 +269,20 @@ class DistillationLossContext(BaseRLLossContext):
         super().__init__(loss_cfg, loss_kwargs)
         self.policy_loss_fn = get_policy_loss_fn(self.loss_cfg.policy_loss_cfg.get("loss_type", "vanilla"))
 
-    def raw_reverse_kl_values(self) -> torch.Tensor:
+    def raw_reverse_kl_values(self, selection_mask: torch.Tensor | None = None) -> torch.Tensor:
         """Return valid-token reverse KL before any distillation-loss clamp."""
         if self.loss_cfg.loss_mode != "k1":
             raise ValueError("raw reverse-KL metrics are only defined for loss_mode='k1'")
         old_logprobs = cast(torch.Tensor, self.loss_kwargs.old_logprobs)
         teacher_logprobs = cast(torch.Tensor, self.loss_kwargs.teacher_logprobs)
         valid_mask = self.loss_kwargs.shifted_labels != self.loss_cfg.ignore_idx
+        if selection_mask is not None:
+            if selection_mask.shape != valid_mask.shape:
+                raise ValueError(
+                    "reverse-KL selection mask must align with shifted labels: "
+                    f"{selection_mask.shape} vs {valid_mask.shape}"
+                )
+            valid_mask = valid_mask & selection_mask.bool()
         return (old_logprobs - teacher_logprobs)[valid_mask].detach()
 
     @staticmethod
@@ -512,9 +520,7 @@ def finalize_distillation_metrics(
 
     if raw_reverse_kl_values is not None:
         distribution_metrics = compute_reverse_kl_distribution_metrics(raw_reverse_kl_values)
-        extra_info_dict.update(
-            {f"opd_{name}": value.item() for name, value in distribution_metrics.items()}
-        )
+        extra_info_dict.update({f"opd_{name}": value.item() for name, value in distribution_metrics.items()})
 
     if "reduced_topk_opd_valid_count" in extra_info_dict:
         topk_keys = (
