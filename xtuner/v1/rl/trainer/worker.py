@@ -395,8 +395,6 @@ class TrainingWorker(SingleAcceleratorWorker):
 
         if not worker_cfg.fsdp_cfg.torch_compile:
             worker_cfg.model_cfg.compile_cfg = False
-        self._engine = self._build_engine(worker_cfg)
-
         self._has_ref = False
         if worker_cfg.loss_cfg.use_kl_loss:
             self._has_ref = True
@@ -413,6 +411,8 @@ class TrainingWorker(SingleAcceleratorWorker):
                 distillation_config,
                 chunk_size=worker_cfg.loss_cfg.chunk_size,
             )
+
+        self._engine = self._build_engine(worker_cfg)
 
         self._optimizer_steps = worker_cfg.optimizer_steps
         profile_step = worker_cfg.profile_step
@@ -595,10 +595,7 @@ class TrainingWorker(SingleAcceleratorWorker):
         teacher_indices_list: list[torch.Tensor],
         loss_ctx_list: list[BaseRLLossContext],
     ) -> TrainTeacherTimings:
-        self._engine.put_model_to_device("cpu")
-        self._engine.put_optimizer_to_device("cpu")
-        if hasattr(DEVICE_MODULE, "empty_cache"):
-            DEVICE_MODULE.empty_cache()
+        self._offload_actor_and_optimizer()
         try:
             assert self._train_teacher_manager is not None
             outputs = self._train_teacher_manager.compute_logprobs(
@@ -622,6 +619,12 @@ class TrainingWorker(SingleAcceleratorWorker):
             if self._train_teacher_manager is not None:
                 self._train_teacher_manager.offload_all_to_cpu()
             self._onload_actor_and_optimizer()
+
+    def _offload_actor_and_optimizer(self) -> None:
+        self._engine.put_model_to_device("cpu")
+        self._engine.put_optimizer_to_device("cpu")
+        if hasattr(DEVICE_MODULE, "empty_cache"):
+            DEVICE_MODULE.empty_cache()
 
     def _onload_actor_and_optimizer(self) -> None:
         self._engine.put_model_to_device(DEVICE)
@@ -863,7 +866,6 @@ class TrainingWorker(SingleAcceleratorWorker):
         # When sp_mesh.size() > 1, get the sp_split shifted_labels and rollout_logprobs
         shifted_labels_list = [loss_ctx.loss_kwargs.shifted_labels for loss_ctx in loss_ctx_list]
         rollout_logprobs_list = [loss_ctx.loss_kwargs.rollout_logprobs for loss_ctx in loss_ctx_list]
-
         worker_log_item: WorkerLogItem = {"train_entropy": 0.0, "train_metrics": [], "sft_train_metrics": {}}
         if self._train_teacher_manager is not None:
             # Training-side Teachers share the training workers' devices. Keep
