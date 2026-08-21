@@ -48,6 +48,7 @@ from xtuner.v1.rl.loss import (
     BaseRLLossConfig,
     BaseRLLossContext,
     DistillationLossConfig,
+    DistillationLossContext,
     finalize_distillation_metrics,
     finalize_train_policy_metrics,
     kl_penalty,
@@ -843,6 +844,13 @@ class TrainingWorker(SingleAcceleratorWorker):
             global_train_step = self._global_train_step + 1
             batches_seq_ctx = seq_ctx_list[i : i + iters_per_step]
             batches_loss_ctx = batched_loss_ctx_list[i : i + iters_per_step]
+            raw_reverse_kl_values: torch.Tensor | None = None
+            if isinstance(loss_cfg, DistillationLossConfig) and loss_cfg.loss_mode == "k1":
+                local_reverse_kl_values = [
+                    cast(DistillationLossContext, loss_ctx).raw_reverse_kl_values()
+                    for loss_ctx in batches_loss_ctx
+                ]
+                raw_reverse_kl_values = torch.cat(local_reverse_kl_values)
 
             engine_input = [
                 ModelItem(seq_ctx=seq_ctx, loss_ctx={"lm": loss_ctx})
@@ -892,7 +900,11 @@ class TrainingWorker(SingleAcceleratorWorker):
             }
             extra_info_dict = finalize_train_policy_metrics(extra_info_dict, DEVICE)
             if isinstance(loss_cfg, DistillationLossConfig):
-                extra_info_dict = finalize_distillation_metrics(extra_info_dict, DEVICE)
+                extra_info_dict = finalize_distillation_metrics(
+                    extra_info_dict,
+                    DEVICE,
+                    raw_reverse_kl_values=raw_reverse_kl_values,
+                )
             train_step_info.pop("total_loss")  # type: ignore[misc]
             max_memory = DEVICE_MODULE.max_memory_allocated() / (1024**3)  # type: ignore[attr-defined]
             reserved_memory = DEVICE_MODULE.max_memory_reserved() / (1024**3)  # type: ignore[attr-defined]

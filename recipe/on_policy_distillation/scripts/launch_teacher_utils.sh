@@ -10,8 +10,14 @@ TEACHER_HEALTH_URLS=()
 TEACHER_MODEL_INFO_URLS=()
 TEACHER_LOG_FILES=()
 TEACHER_PIDS=()
+TEACHER_LOCAL_DEVICES=()
+TEACHER_COMMAND_OFFSETS=()
+TEACHER_COMMAND_COUNTS=()
+TEACHER_COMMAND_ARGS=()
+TEACHER_RESTART_COUNTS=()
+TEACHER_MAX_RESTARTS="${TEACHER_MAX_RESTARTS:-3}"
 STUDENT_CUDA_VISIBLE_DEVICES=
-XTUNER_RL_NUM_WORKERS=
+unset XTUNER_RL_NUM_WORKERS
 
 start_single_teacher_server() {
     _start_teacher_servers "$1" "$2" "$3" "1"
@@ -27,6 +33,7 @@ wait_for_teacher_servers() {
     local teacher_index
     local pid
     local log_file
+    local restart_count
     local -a teacher_ready=()
     local -a health_check_pids=()
     local -a pending_names=()
@@ -45,7 +52,29 @@ wait_for_teacher_servers() {
             pid="${TEACHER_PIDS[teacher_index]}"
             log_file="${TEACHER_LOG_FILES[teacher_index]}"
             if [[ -n "${pid}" ]] && ! kill -0 "${pid}" 2>/dev/null; then
-                echo "Teacher ${TEACHER_NAMES[teacher_index]} exited before becoming ready." >&2
+                restart_count=${TEACHER_RESTART_COUNTS[teacher_index]}
+                if (( restart_count < TEACHER_MAX_RESTARTS )); then
+                    restart_count=$((restart_count + 1))
+                    TEACHER_RESTART_COUNTS[teacher_index]=${restart_count}
+                    echo \
+                        "Teacher ${TEACHER_NAMES[teacher_index]} exited before becoming ready;" \
+                        "restarting (${restart_count}/${TEACHER_MAX_RESTARTS})." >&2
+                    kill -TERM -- "-${pid}" 2>/dev/null || true
+                    sleep 2
+                    kill -KILL -- "-${pid}" 2>/dev/null || true
+                    wait "${pid}" 2>/dev/null || true
+                    if [[ -n "${log_file}" ]]; then
+                        printf '\n===== Restart %s/%s at %s =====\n' \
+                            "${restart_count}" "${TEACHER_MAX_RESTARTS}" "$(date '+%F %T')" \
+                            >>"${log_file}"
+                    fi
+                    teacher_ready[teacher_index]=0
+                    _start_teacher_process "${teacher_index}"
+                    continue
+                fi
+                echo \
+                    "Teacher ${TEACHER_NAMES[teacher_index]} exited before becoming ready after" \
+                    "${TEACHER_MAX_RESTARTS} restart(s)." >&2
                 if [[ -n "${log_file}" ]]; then
                     tail -n 50 "${log_file}" >&2 || true
                 fi
@@ -135,6 +164,23 @@ stop_teacher_servers() {
     TEACHER_PIDS=()
 }
 
+_start_teacher_process() {
+    local teacher_index=$1
+    local command_offset=${TEACHER_COMMAND_OFFSETS[teacher_index]}
+    local command_count=${TEACHER_COMMAND_COUNTS[teacher_index]}
+    local teacher_log_file=${TEACHER_LOG_FILES[teacher_index]}
+    local -a teacher_command=(
+        "${TEACHER_COMMAND_ARGS[@]:command_offset:command_count}"
+    )
+
+    setsid env \
+        PYTHONUNBUFFERED=1 \
+        CUDA_VISIBLE_DEVICES="${TEACHER_LOCAL_DEVICES[teacher_index]}" \
+        "${teacher_command[@]}" \
+        >>"${teacher_log_file}" 2>&1 &
+    TEACHER_PIDS[teacher_index]=$!
+}
+
 _start_teacher_servers() {
     local config_file=$1
     local backend=$2
@@ -165,8 +211,13 @@ _start_teacher_servers() {
     TEACHER_MODEL_INFO_URLS=()
     TEACHER_LOG_FILES=()
     TEACHER_PIDS=()
+    TEACHER_LOCAL_DEVICES=()
+    TEACHER_COMMAND_OFFSETS=()
+    TEACHER_COMMAND_COUNTS=()
+    TEACHER_COMMAND_ARGS=()
+    TEACHER_RESTART_COUNTS=()
     STUDENT_CUDA_VISIBLE_DEVICES=
-    XTUNER_RL_NUM_WORKERS=
+    unset XTUNER_RL_NUM_WORKERS
     mkdir -p "${work_dir}"
 
     # Command builder output:
@@ -218,6 +269,11 @@ _start_teacher_servers() {
             "${teacher_fields[@]:teacher_field_offset:teacher_command_arg_count}"
         )
         teacher_field_offset=$((teacher_field_offset + teacher_command_arg_count))
+        TEACHER_LOCAL_DEVICES+=("${teacher_local_devices}")
+        TEACHER_COMMAND_OFFSETS+=("${#TEACHER_COMMAND_ARGS[@]}")
+        TEACHER_COMMAND_COUNTS+=("${teacher_command_arg_count}")
+        TEACHER_COMMAND_ARGS+=("${teacher_command[@]}")
+        TEACHER_RESTART_COUNTS+=(0)
 
         if (( teacher_command_arg_count == 0 )); then
             if [[ -n "${expected_teacher_count}" ]]; then
@@ -252,12 +308,9 @@ _start_teacher_servers() {
         echo "Teacher endpoint: ${teacher_endpoint}"
         echo "Teacher log: ${teacher_log_file}"
 
-        setsid env \
-            PYTHONUNBUFFERED=1 \
-            CUDA_VISIBLE_DEVICES="${teacher_local_devices}" \
-            "${teacher_command[@]}" \
-            >"${teacher_log_file}" 2>&1 &
-        TEACHER_PIDS+=("$!")
+        TEACHER_PIDS+=("")
+        : >"${teacher_log_file}"
+        _start_teacher_process "${teacher_index}"
     done
 
     if (( teacher_field_offset != ${#teacher_fields[@]} )); then

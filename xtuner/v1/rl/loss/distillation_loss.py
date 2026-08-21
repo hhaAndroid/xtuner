@@ -67,6 +67,101 @@ def compute_topk_distillation_kl(
     return loss, student_selected_mass, teacher_selected_mass
 
 
+@torch.no_grad()
+def compute_reverse_kl_distribution_metrics(
+    reverse_kl_values: torch.Tensor,
+    *,
+    histogram_bins: int = 8192,
+) -> dict[str, torch.Tensor]:
+    """Compute global raw token-level reverse-KL distribution metrics.
+
+    Moments and extrema are exact. Quantiles are estimated from a global
+    histogram so token values do not need to be gathered across ranks.
+    """
+    if histogram_bins <= 0:
+        raise ValueError("histogram_bins must be positive")
+
+    values = reverse_kl_values.detach().float().reshape(-1)
+    device = values.device
+    local_moments = torch.stack(
+        (
+            torch.tensor(float(values.numel()), device=device),
+            values.sum(),
+            values.abs().sum(),
+            values.square().sum(),
+        )
+    )
+    if dist.is_initialized():
+        dist.all_reduce(local_moments, op=dist.ReduceOp.SUM)
+
+    global_count, global_sum, global_abs_sum, global_square_sum = local_moments
+    if global_count.item() == 0:
+        zero = values.new_zeros(())
+        return {
+            "reverse_kl": zero,
+            "abs_logprob_loss": zero,
+            "reverse_kl_variance": zero,
+            "reverse_kl_p1": zero,
+            "reverse_kl_p99": zero,
+            "reverse_kl_p999": zero,
+            "reverse_kl_max_abs": zero,
+        }
+
+    if values.numel() > 0:
+        local_extrema = torch.stack((-values.min(), values.max(), values.abs().max()))
+    else:
+        local_extrema = torch.full((3,), -torch.inf, device=device)
+    if dist.is_initialized():
+        dist.all_reduce(local_extrema, op=dist.ReduceOp.MAX)
+    global_min = -local_extrema[0]
+    global_max = local_extrema[1]
+    global_max_abs = local_extrema[2]
+
+    mean = global_sum / global_count
+    variance = torch.clamp(global_square_sum / global_count - mean.square(), min=0.0)
+
+    if global_min == global_max:
+        quantiles = (global_min, global_min, global_min)
+    else:
+        histogram = torch.histc(
+            values,
+            bins=histogram_bins,
+            min=global_min.item(),
+            max=global_max.item(),
+        )
+        if dist.is_initialized():
+            dist.all_reduce(histogram, op=dist.ReduceOp.SUM)
+        cumulative = histogram.cumsum(dim=0)
+        bin_width = (global_max - global_min) / histogram_bins
+        quantiles_list = []
+        for quantile_level in (0.01, 0.99, 0.999):
+            zero_based_rank = quantile_level * (global_count - 1.0)
+            lower_rank = zero_based_rank.floor()
+            upper_rank = zero_based_rank.ceil()
+            lower_bin_idx = torch.searchsorted(cumulative, lower_rank + 1.0).clamp(
+                max=histogram_bins - 1
+            )
+            upper_bin_idx = torch.searchsorted(cumulative, upper_rank + 1.0).clamp(
+                max=histogram_bins - 1
+            )
+            lower_value = global_min + (lower_bin_idx + 0.5) * bin_width
+            upper_value = global_min + (upper_bin_idx + 0.5) * bin_width
+            interpolation = zero_based_rank - lower_rank
+            quantile = lower_value + interpolation * (upper_value - lower_value)
+            quantiles_list.append(torch.clamp(quantile, min=global_min, max=global_max))
+        quantiles = tuple(quantiles_list)
+
+    return {
+        "reverse_kl": mean,
+        "abs_logprob_loss": global_abs_sum / global_count,
+        "reverse_kl_variance": variance,
+        "reverse_kl_p1": quantiles[0],
+        "reverse_kl_p99": quantiles[1],
+        "reverse_kl_p999": quantiles[2],
+        "reverse_kl_max_abs": global_max_abs,
+    }
+
+
 class DistillationLossConfig(BaseRLLossConfig):
     """Configuration shared by sampled-token PG-OPD and direct GKD losses."""
 
@@ -172,6 +267,15 @@ class DistillationLossContext(BaseRLLossContext):
     def __init__(self, loss_cfg: DistillationLossConfig, loss_kwargs: DistillationLossKwargs):
         super().__init__(loss_cfg, loss_kwargs)
         self.policy_loss_fn = get_policy_loss_fn(self.loss_cfg.policy_loss_cfg.get("loss_type", "vanilla"))
+
+    def raw_reverse_kl_values(self) -> torch.Tensor:
+        """Return valid-token reverse KL before any distillation-loss clamp."""
+        if self.loss_cfg.loss_mode != "k1":
+            raise ValueError("raw reverse-KL metrics are only defined for loss_mode='k1'")
+        old_logprobs = cast(torch.Tensor, self.loss_kwargs.old_logprobs)
+        teacher_logprobs = cast(torch.Tensor, self.loss_kwargs.teacher_logprobs)
+        valid_mask = self.loss_kwargs.shifted_labels != self.loss_cfg.ignore_idx
+        return (old_logprobs - teacher_logprobs)[valid_mask].detach()
 
     @staticmethod
     def build_batches(  # type: ignore[override]
@@ -348,11 +452,6 @@ class DistillationLossContext(BaseRLLossContext):
                 for key, value in topk_metrics.items()
             },
         }
-        if self.loss_cfg.loss_mode == "k1":
-            extra_info["reduced_opd_reverse_kl_sum"] = (per_token_distillation_loss.detach() * valid_float).sum()
-            extra_info["reduced_opd_abs_logprob_loss_sum"] = (
-                per_token_distillation_loss.detach().abs() * valid_float
-            ).sum()
         if self.loss_cfg.uses_topk_targets:
             extra_info["reduced_topk_opd_kl_sum"] = (per_token_distillation_loss.detach() * valid_float).sum()
             extra_info["reduced_topk_opd_valid_count"] = valid_float.sum()
@@ -384,6 +483,7 @@ class DistillationLossContext(BaseRLLossContext):
 def finalize_distillation_metrics(
     extra_info_dict: dict[str, Any],
     device: str | torch.device,
+    raw_reverse_kl_values: torch.Tensor | None = None,
 ) -> dict[str, Any]:
     def reduce_values(keys: tuple[str, ...]) -> dict[str, float]:
         values = torch.tensor(
@@ -401,14 +501,6 @@ def finalize_distillation_metrics(
             "reduced_distillation_abs_loss_sum",
             "reduced_distillation_valid_count",
         ]
-        has_opd_metrics = "reduced_opd_reverse_kl_sum" in extra_info_dict
-        if has_opd_metrics:
-            distillation_keys.extend(
-                [
-                    "reduced_opd_reverse_kl_sum",
-                    "reduced_opd_abs_logprob_loss_sum",
-                ]
-            )
         values = reduce_values(tuple(distillation_keys))
         valid_count = values["reduced_distillation_valid_count"]
         extra_info_dict["reduced_distillation_kl"] = (
@@ -417,13 +509,12 @@ def finalize_distillation_metrics(
         extra_info_dict["reduced_distillation_abs_loss"] = (
             values["reduced_distillation_abs_loss_sum"] / valid_count if valid_count > 0 else 0.0
         )
-        if has_opd_metrics:
-            extra_info_dict["opd_reverse_kl"] = (
-                values["reduced_opd_reverse_kl_sum"] / valid_count if valid_count > 0 else 0.0
-            )
-            extra_info_dict["opd_abs_logprob_loss"] = (
-                values["reduced_opd_abs_logprob_loss_sum"] / valid_count if valid_count > 0 else 0.0
-            )
+
+    if raw_reverse_kl_values is not None:
+        distribution_metrics = compute_reverse_kl_distribution_metrics(raw_reverse_kl_values)
+        extra_info_dict.update(
+            {f"opd_{name}": value.item() for name, value in distribution_metrics.items()}
+        )
 
     if "reduced_topk_opd_valid_count" in extra_info_dict:
         topk_keys = (

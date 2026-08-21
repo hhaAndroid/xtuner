@@ -111,8 +111,6 @@ class ModelForwardExtraLogInfo(dict):
             "reduced_distillation_kl_sum",
             "reduced_distillation_abs_loss_sum",
             "reduced_distillation_valid_count",
-            "reduced_opd_reverse_kl_sum",
-            "reduced_opd_abs_logprob_loss_sum",
             "reduced_topk_opd_kl_sum",
             "reduced_topk_opd_loss_sum",
             "reduced_topk_opd_student_selected_mass_sum",

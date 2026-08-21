@@ -9,6 +9,7 @@ from .distillation_loss import (
     DistillationLossConfig,
     DistillationLossContext,
     DistillationLossKwargs,
+    compute_reverse_kl_distribution_metrics,
     compute_topk_distillation_kl,
     finalize_distillation_metrics,
 )
