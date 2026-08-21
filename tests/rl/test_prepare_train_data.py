@@ -33,7 +33,9 @@ class TestPrepareTrainData(unittest.TestCase):
     def _build_trainer(self, advantages: list[float]):
         trainer = BaseRLTrainer.__new__(BaseRLTrainer)
         trainer._advantage_estimator = _FakeAdvantageEstimator(advantages)
-        trainer._opd_config = None
+        trainer._distillation_config = None
+        trainer._distillation_loss_cfg = None
+        trainer._train_teacher_config = None
         trainer.tokenizer = MagicMock(return_value={"input_ids": torch.tensor([[999]])})
         trainer.logger = MagicMock()
         return trainer
@@ -54,6 +56,9 @@ class TestPrepareTrainData(unittest.TestCase):
         position_ids: np.ndarray | None = None,
         mm_info: dict | None = None,
         extra_fields: dict | None = None,
+        input_ids: list[int] | None = None,
+        labels: list[int] | None = None,
+        teacher_logprobs: list[float] | None = None,
     ) -> RolloutState:
         return RolloutState(
             rollout_id=uid,
@@ -71,6 +76,9 @@ class TestPrepareTrainData(unittest.TestCase):
             position_ids=position_ids,
             mm_info=mm_info,
             extra_fields=extra_fields or {},
+            input_ids=input_ids,
+            labels=labels,
+            teacher_logprobs=teacher_logprobs,
         )
 
     def _prepare(self, trainer, data_groups, pack_max_length=128):
@@ -123,7 +131,7 @@ class TestPrepareTrainData(unittest.TestCase):
 
         self.assertIsNone(state.response_mask)
         self.assertEqual(data_batches[0]["shifted_labels"].tolist(), [[-100, -100, 30, 31]])
-        self.assertEqual(data_batches[0]["advantage"], [1.0, 1.0, 1.0, 1.0, 1.0])
+        self.assertEqual(data_batches[0]["advantage"], [0.0, 0.0, 1.0, 1.0])
 
     def test_multi_sample_group_uses_each_sample_reward_and_advantage(self):
         # 同一个 prompt 下的多个 response 要分别使用自己的 reward 和 advantage。
@@ -168,6 +176,30 @@ class TestPrepareTrainData(unittest.TestCase):
         self.assertIs(seq_ctx.pixel_values, pixel_values)
         self.assertEqual(seq_ctx.image_grid_thw.dtype, torch.long)
         self.assertEqual(seq_ctx.image_grid_thw.tolist(), [[1, 2, 3]])
+
+    def test_agentic_path_aligns_rollout_teacher_logprobs_with_shifted_labels(self):
+        trainer = self._build_trainer([0.5])
+        trainer._distillation_config = MagicMock(
+            rollout_teachers=[object()],
+            data_source_teacher_map={"agent": "teacher"},
+        )
+        trainer._distillation_loss_cfg = MagicMock(task_adv_weight=1.0)
+        state = self._state(
+            input_ids=[10, 11, 20, 30, 31, 40],
+            labels=[-100, -100, 20, -100, -100, 40],
+            logprobs=[0.0, -0.1, -0.2, -0.3, -0.4, -0.5],
+            teacher_logprobs=[-1.0, -1.1, -1.2, -1.3],
+            extra_fields={"origin_data_source": "agent"},
+        )
+
+        data_batches, _ = self._prepare(trainer, [[state]])
+
+        batch = data_batches[0]
+        self.assertEqual(batch["shifted_labels"].tolist(), [[-100, 20, -100, -100, 40]])
+        torch.testing.assert_close(
+            batch["teacher_logprobs"],
+            torch.tensor([[0.0, -1.0, -1.1, -1.2, -1.3]], dtype=torch.float32),
+        )
 
     def test_invalid_group_is_skipped(self):
         # FAILED/FILTERED/ABORTED group 不能进入训练 batch，也不能贡献训练样本数。
