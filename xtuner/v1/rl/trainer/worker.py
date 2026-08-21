@@ -7,6 +7,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import (
     TYPE_CHECKING,
+    Any,
     Iterable,
     List,
     Sequence,
@@ -76,6 +77,137 @@ from ..rollout_is import merge_rollout_is_metrics
 
 DEVICE = get_device()
 DEVICE_MODULE = get_torch_device_module()
+
+
+def split_captured_token_opd_kl(
+    captured: torch.Tensor,
+    expected_lengths: Sequence[int],
+) -> list[torch.Tensor]:
+    """Restore one per-packed-batch tensor from eager or chunk loss output."""
+    if not expected_lengths:
+        return []
+    if captured.dim() == 0 or captured.size(0) != len(expected_lengths):
+        raise ValueError(
+            "Captured token OPD KL must have one leading entry per packed batch: "
+            f"shape={tuple(captured.shape)}, batches={len(expected_lengths)}"
+        )
+
+    restored = []
+    for batch_index, expected_length in enumerate(expected_lengths):
+        flattened = captured[batch_index].reshape(-1)
+        if flattened.numel() < expected_length:
+            raise ValueError(
+                "Captured token OPD KL is shorter than shifted labels: "
+                f"batch={batch_index}, {flattened.numel()} vs {expected_length}"
+            )
+        padding = flattened[expected_length:]
+        if padding.numel() > 0 and not torch.isnan(padding).all():
+            raise ValueError(
+                "Captured token OPD KL has unexpected non-NaN values after the packed batch boundary: "
+                f"batch={batch_index}, extra={padding.numel()}"
+            )
+        restored.append(flattened[:expected_length].reshape(1, -1))
+    return restored
+
+
+def build_token_opd_kl_shard(
+    token_opd_kl_list: Sequence[torch.Tensor],
+    shifted_labels_list: Sequence[torch.Tensor],
+    trajectory_infos_list: Sequence[Sequence[dict[str, Any]]],
+    *,
+    target_type: str,
+    loss_mode: str,
+    definition: str,
+    ignore_idx: int = -100,
+) -> dict[str, Any]:
+    """Slice packed token diagnostics back into trajectories and stage them on CPU."""
+    if not (len(token_opd_kl_list) == len(shifted_labels_list) == len(trajectory_infos_list)):
+        raise ValueError(
+            "Token OPD KL, shifted labels and trajectory metadata must have the same batch count: "
+            f"{len(token_opd_kl_list)}, {len(shifted_labels_list)}, {len(trajectory_infos_list)}"
+        )
+
+    response_tensors = []
+    trajectories = []
+    output_offset = 0
+    for batch_index, (token_opd_kl, shifted_labels, trajectory_infos) in enumerate(
+        zip(token_opd_kl_list, shifted_labels_list, trajectory_infos_list)
+    ):
+        flat_values = token_opd_kl.detach().float().reshape(-1)
+        flat_labels = shifted_labels.detach().reshape(-1)
+        if flat_values.numel() != flat_labels.numel():
+            raise ValueError(
+                "Token OPD KL must align with shifted labels before trajectory slicing: "
+                f"batch={batch_index}, {flat_values.numel()} vs {flat_labels.numel()}"
+            )
+        if not trajectory_infos and (flat_labels != ignore_idx).any():
+            raise ValueError(f"Missing OPD trajectory metadata for non-padding packed batch {batch_index}")
+
+        for trajectory_info in trajectory_infos:
+            response_start = int(trajectory_info["response_start"])
+            response_length = int(trajectory_info["response_length"])
+            response_end = response_start + response_length
+            if response_start < 0 or response_length < 0 or response_end > flat_values.numel():
+                raise ValueError(
+                    "OPD trajectory range is outside the packed batch: "
+                    f"batch={batch_index}, start={response_start}, length={response_length}, "
+                    f"packed_length={flat_values.numel()}"
+                )
+
+            response_values = flat_values[response_start:response_end].clone()
+            response_labels = flat_labels[response_start:response_end]
+            valid_mask = response_labels != ignore_idx
+            response_values.masked_fill_(~valid_mask, float("nan"))
+            response_values = response_values.to(device="cpu", dtype=torch.float16)
+            response_tensors.append(response_values)
+
+            trajectory = {
+                "rollout_id": str(trajectory_info["rollout_id"]),
+                "group_id": str(trajectory_info["group_id"]),
+                "offset": output_offset,
+                "length": response_length,
+                "valid_tokens": int(valid_mask.sum().item()),
+            }
+            for key in ("agent_trace_segment_index", "agent_trace_segment_count"):
+                if key in trajectory_info:
+                    trajectory[key] = trajectory_info[key]
+            trajectories.append(trajectory)
+            output_offset += response_length
+
+    opd_kl = torch.cat(response_tensors) if response_tensors else torch.empty(0, dtype=torch.float16)
+    return {
+        "format_version": 2,
+        "target_type": target_type,
+        "loss_mode": loss_mode,
+        "definition": definition,
+        "opd_kl": opd_kl,
+        "trajectories": trajectories,
+    }
+
+
+def merge_token_opd_kl_shards(shards: Sequence[dict[str, Any]]) -> dict[str, Any]:
+    if not shards:
+        raise ValueError("At least one token OPD KL shard is required")
+
+    merged = {key: shards[0][key] for key in ("format_version", "target_type", "loss_mode", "definition")}
+    tensors = []
+    trajectories = []
+    output_offset = 0
+    for shard in shards:
+        for key, expected in merged.items():
+            if shard[key] != expected:
+                raise ValueError(f"Token OPD KL shard field {key!r} does not match: {shard[key]!r} vs {expected!r}")
+        shard_tensor = cast(torch.Tensor, shard["opd_kl"])
+        tensors.append(shard_tensor)
+        for trajectory in shard["trajectories"]:
+            merged_trajectory = dict(trajectory)
+            merged_trajectory["offset"] = int(merged_trajectory["offset"]) + output_offset
+            trajectories.append(merged_trajectory)
+        output_offset += shard_tensor.numel()
+
+    merged["opd_kl"] = torch.cat(tensors) if tensors else torch.empty(0, dtype=torch.float16)
+    merged["trajectories"] = trajectories
+    return merged
 
 
 def calculate_entropy(
@@ -200,6 +332,7 @@ class WorkerInputItem(TypedDict):
     rollout_logprobs: torch.Tensor | None
     teacher_logprobs: NotRequired[torch.Tensor | None]
     teacher_indices: NotRequired[torch.Tensor]
+    opd_trajectory_infos: NotRequired[list[dict[str, Any]]]
 
 
 class WorkerTrainLogItem(TypedDict, total=False):
@@ -219,6 +352,7 @@ class WorkerLogItem(TypedDict):
     mismatch_metrics: NotRequired[dict[str, float]]
     rollout_is_metrics: NotRequired[dict[str, float]]
     distillation_metrics: NotRequired[dict[str, float]]
+    token_opd_kl_shard: NotRequired[str]
     train_metrics: List[WorkerTrainLogItem]
     sft_train_metrics: NotRequired[dict[str, float]]
 
@@ -605,6 +739,26 @@ class TrainingWorker(SingleAcceleratorWorker):
         if self._train_teacher_manager is None:
             self._onload_actor_and_optimizer()
         loss_cfg: BaseRLLossConfig = self.config.loss_cfg
+        save_token_opd_kl = False
+        write_token_opd_kl = False
+        token_opd_kl_target_type = ""
+        token_opd_kl_definition = ""
+        token_opd_kl_shards: list[dict[str, Any]] = []
+        if isinstance(loss_cfg, DistillationLossConfig):
+            save_token_opd_kl_env = os.environ.get("SAVE_TOKEN_OPD_KL", "1")
+            if save_token_opd_kl_env not in ("0", "1"):
+                raise ValueError(f"SAVE_TOKEN_OPD_KL must be '1' or '0', got {save_token_opd_kl_env!r}")
+            save_token_opd_kl = save_token_opd_kl_env == "1"
+            if save_token_opd_kl and self.sp_mesh.size() != 1:
+                raise ValueError("Saving token OPD KL currently requires sp_size=1")
+            data_replicate_size = self._engine.data_replicate_size * self.sp_mesh.size()
+            write_token_opd_kl = save_token_opd_kl and self.rank % data_replicate_size == 0
+            if loss_cfg.uses_sampled_token_targets:
+                token_opd_kl_target_type = "sampled_token"
+                token_opd_kl_definition = "old_logprobs_minus_teacher_logprobs_unclamped"
+            else:
+                token_opd_kl_target_type = "topk"
+                token_opd_kl_definition = "teacher_topk_per_token_kl_unclamped"
         num_batches = len(data_batches)
         iters_per_step = math.ceil(num_batches / self._optimizer_steps)
         if num_batches < self._optimizer_steps:
@@ -617,6 +771,7 @@ class TrainingWorker(SingleAcceleratorWorker):
         seq_ctx_list: list[SequenceContext] = []
         loss_ctx_list: list[BaseRLLossContext] = []
         teacher_indices_list: list[torch.Tensor] = []
+        trajectory_infos_list: list[list[dict[str, Any]]] = []
         mtp_loss_ctx_list: list[list[MTPLossContext]] = []
         prepare_inputs_begin = time.perf_counter()
         for data in data_batches:
@@ -666,6 +821,11 @@ class TrainingWorker(SingleAcceleratorWorker):
                     "advantages": advantages,
                     "rollout_logprobs": rollout_logprobs,
                     "teacher_logprobs": data.get("teacher_logprobs", None),
+                    "capture_token_opd_kl": (
+                        write_token_opd_kl
+                        and isinstance(loss_cfg, DistillationLossConfig)
+                        and loss_cfg.uses_topk_targets
+                    ),
                 },
                 sp_mesh=self.sp_mesh,
             )
@@ -673,6 +833,7 @@ class TrainingWorker(SingleAcceleratorWorker):
             seq_ctx_list.append(seq_ctx)
             assert loss_ctx is not None
             loss_ctx_list.append(loss_ctx)
+            trajectory_infos_list.append(data.get("opd_trajectory_infos", []))
             if self.mtp_config is not None:
                 mtp_loss_ctxs_per_batch: list[MTPLossContext] = []
                 for mtp_idx in range(self.mtp_config.num_layers):
@@ -721,6 +882,25 @@ class TrainingWorker(SingleAcceleratorWorker):
         old_logprobs_list = self.compute_actor_logprobs(seq_ctx_list, shifted_labels_list)
         for old_logprobs, loss_ctx in zip(old_logprobs_list, loss_ctx_list):
             loss_ctx.loss_kwargs.old_logprobs = old_logprobs
+
+        if write_token_opd_kl and isinstance(loss_cfg, DistillationLossConfig) and loss_cfg.uses_sampled_token_targets:
+            sampled_token_opd_kl: list[torch.Tensor] = []
+            for loss_ctx in loss_ctx_list:
+                teacher_logprobs = cast(DistillationLossContext, loss_ctx).loss_kwargs.teacher_logprobs
+                context_old_logprobs = loss_ctx.loss_kwargs.old_logprobs
+                assert teacher_logprobs is not None and context_old_logprobs is not None
+                sampled_token_opd_kl.append(context_old_logprobs - teacher_logprobs)
+            token_opd_kl_shards.append(
+                build_token_opd_kl_shard(
+                    sampled_token_opd_kl,
+                    shifted_labels_list,
+                    trajectory_infos_list,
+                    target_type=token_opd_kl_target_type,
+                    loss_mode=loss_cfg.loss_mode,
+                    definition=token_opd_kl_definition,
+                    ignore_idx=loss_cfg.ignore_idx,
+                )
+            )
 
         if isinstance(loss_cfg, DistillationLossConfig) and loss_cfg.loss_mode == "k1":
             reverse_kl_metric_names = {
@@ -947,6 +1127,28 @@ class TrainingWorker(SingleAcceleratorWorker):
             engine_logs_info = cast(dict[str, float], train_step_info.pop("logs_info"))  # type: ignore[misc]
             engine_extra_info = train_step_info.pop("extra_info")  # type: ignore[misc]
 
+            if write_token_opd_kl and isinstance(loss_cfg, DistillationLossConfig) and loss_cfg.uses_topk_targets:
+                captured_token_opd_kl = engine_extra_info.pop("token_opd_kl", None)
+                if not isinstance(captured_token_opd_kl, torch.Tensor):
+                    raise ValueError("Top-k token OPD KL was not returned by the training forward")
+                batch_lengths = [loss_ctx.loss_kwargs.shifted_labels.numel() for loss_ctx in batches_loss_ctx]
+                restored_token_opd_kl = split_captured_token_opd_kl(
+                    captured_token_opd_kl,
+                    batch_lengths,
+                )
+                batch_shifted_labels = [loss_ctx.loss_kwargs.shifted_labels for loss_ctx in batches_loss_ctx]
+                token_opd_kl_shards.append(
+                    build_token_opd_kl_shard(
+                        restored_token_opd_kl,
+                        batch_shifted_labels,
+                        trajectory_infos_list[i : i + len(batches_loss_ctx)],
+                        target_type=token_opd_kl_target_type,
+                        loss_mode=loss_cfg.loss_mode,
+                        definition=token_opd_kl_definition,
+                        ignore_idx=loss_cfg.ignore_idx,
+                    )
+                )
+
             if isinstance(engine_extra_info, ModelForwardExtraLogInfo):
                 extra_info_dict = engine_extra_info.get()
             else:
@@ -987,6 +1189,18 @@ class TrainingWorker(SingleAcceleratorWorker):
             log_str = f"Rank{self.rank} Rollout {rollout_idx} Step {i}: " + log_str
             self.logger.info(log_str)
             self._global_train_step = global_train_step
+
+        if write_token_opd_kl:
+            token_opd_kl_shard = merge_token_opd_kl_shards(token_opd_kl_shards)
+            output_home = self.log_dir.parent if self.log_dir is not None else Path(os.environ["WORK_DIR"])
+            token_opd_kl_dir = output_home / "train_rollout" / "token_opd_kl"
+            token_opd_kl_dir.mkdir(parents=True, exist_ok=True)
+            token_opd_kl_path = token_opd_kl_dir / f"train_rollout_{rollout_idx}_rank{self.rank}.pt"
+            torch.save(token_opd_kl_shard, token_opd_kl_path)
+            worker_log_item["token_opd_kl_shard"] = str(token_opd_kl_path)
+            self.logger.info(
+                f"Saved {len(token_opd_kl_shard['trajectories'])} token OPD-KL records to {token_opd_kl_path}"
+            )
 
         self._rollout_step += 1
         if self._sft_dataloader is not None and self._rollout_step % self._rollout_steps_per_sft == 0:

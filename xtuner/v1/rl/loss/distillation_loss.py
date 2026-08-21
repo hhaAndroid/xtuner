@@ -221,6 +221,7 @@ class DistillationLossConfig(BaseRLLossConfig):
             is_weights=data.get("rollout_is_weights"),
             teacher_logprobs=data.get("teacher_logprobs"),
             target_token_ids=data.get("target_token_ids"),
+            capture_token_opd_kl=data.get("capture_token_opd_kl", False),
         ).to(DEVICE)
         if sp_mesh is not None and sp_mesh.size() > 1:
             loss_kwargs = loss_kwargs.sp_split(sp_mesh)
@@ -231,6 +232,7 @@ class DistillationLossKwargs(BaseRLLossKwargs):
     teacher_logprobs: torch.Tensor | None = None
     target_token_ids: torch.Tensor | None = None
     distillation_loss_weight: torch.Tensor | None = None
+    capture_token_opd_kl: bool = False
 
     def sp_split(self, sp_mesh: DeviceMesh) -> Self:
         super().sp_split(sp_mesh)
@@ -357,7 +359,7 @@ class DistillationLossContext(BaseRLLossContext):
         self,
         logits: torch.Tensor,
         loss_kwargs: DistillationLossKwargs,
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor | None]:
         target_token_ids = cast(torch.Tensor, loss_kwargs.target_token_ids)
         teacher_logprobs = cast(torch.Tensor, loss_kwargs.teacher_logprobs)
         student_topk_logprobs = torch.gather(logits, dim=-1, index=target_token_ids)
@@ -372,9 +374,19 @@ class DistillationLossContext(BaseRLLossContext):
             self.loss_cfg.log_prob_min_clamp,
             self.loss_cfg.loss_max_clamp,
         )
+        raw_loss = None
+        if loss_kwargs.capture_token_opd_kl:
+            if self.loss_cfg.log_prob_min_clamp is None and self.loss_cfg.loss_max_clamp is None:
+                raw_loss = loss
+            else:
+                raw_loss = compute_topk_distillation_kl(
+                    student_topk_logprobs,
+                    teacher_logprobs,
+                    loss_mode,
+                )[0]
         student_topk_ids = torch.topk(logits.detach(), k=target_token_ids.size(-1), dim=-1).indices
         overlap = (student_topk_ids.unsqueeze(-1) == target_token_ids.detach().unsqueeze(-2)).any(dim=-1)
-        return loss, student_mass, teacher_mass, overlap.float().mean(dim=-1)
+        return loss, student_mass, teacher_mass, overlap.float().mean(dim=-1), raw_loss
 
     def loss_fn(
         self,
@@ -390,6 +402,7 @@ class DistillationLossContext(BaseRLLossContext):
         current_logprobs = gather_logprobs(logits, shifted_labels)
 
         topk_metrics: dict[str, torch.Tensor] = {}
+        raw_token_opd_kl = None
         if self.loss_cfg.uses_sampled_token_targets:
             teacher_logprobs = cast(torch.Tensor, loss_kwargs.teacher_logprobs)
             distillation_student_logprobs = old_logprobs if self.loss_cfg.use_policy_gradient else current_logprobs
@@ -403,6 +416,7 @@ class DistillationLossContext(BaseRLLossContext):
                 student_selected_mass,
                 teacher_selected_mass,
                 overlap_fraction,
+                raw_token_opd_kl,
             ) = self._compute_topk_distillation_loss(logits, loss_kwargs)
             topk_metrics = {
                 "reduced_topk_opd_student_selected_mass_sum": student_selected_mass.detach(),
@@ -463,6 +477,19 @@ class DistillationLossContext(BaseRLLossContext):
         if self.loss_cfg.uses_topk_targets:
             extra_info["reduced_topk_opd_kl_sum"] = (per_token_distillation_loss.detach() * valid_float).sum()
             extra_info["reduced_topk_opd_valid_count"] = valid_float.sum()
+            if raw_token_opd_kl is not None:
+                token_opd_kl = raw_token_opd_kl.detach()
+                if (
+                    self.loss_cfg.mode == "chunk"
+                    and self.loss_cfg.chunk_size is not None
+                    and token_opd_kl.size(1) < self.loss_cfg.chunk_size
+                ):
+                    token_opd_kl = F.pad(
+                        token_opd_kl,
+                        (0, self.loss_cfg.chunk_size - token_opd_kl.size(1)),
+                        value=float("nan"),
+                    )
+                extra_info["token_opd_kl"] = token_opd_kl
 
         cliprange_low = self.loss_cfg.policy_loss_cfg.get("cliprange_low")
         cliprange_high = self.loss_cfg.policy_loss_cfg.get("cliprange_high")

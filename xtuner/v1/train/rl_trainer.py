@@ -1243,6 +1243,22 @@ class BaseRLTrainer:
                         "advantage": actual_advantages,
                         "rollout_logprobs": rollout_logprobs,
                     }
+                    if self._distillation_config is not None:
+                        response_start = next(
+                            (index for index, label in enumerate(shifted_labels) if label != -100),
+                            len(shifted_labels),
+                        )
+                        trajectory_info = {
+                            "rollout_id": group[i].rollout_id,
+                            "group_id": group[i].group_id,
+                            "response_start": response_start,
+                            "response_length": len(shifted_labels) - response_start,
+                        }
+                        for key in ("agent_trace_segment_index", "agent_trace_segment_count"):
+                            value = group[i].extra_fields.get(key)
+                            if value is not None:
+                                trajectory_info[key] = value
+                        data_dict["opd_trajectory_info"] = trajectory_info
                     if teacher_logprobs is not None:
                         data_dict["teacher_logprobs"] = teacher_logprobs
                     if teacher_index is not None:
@@ -1327,6 +1343,13 @@ class BaseRLTrainer:
                     "advantage": actual_advantages,
                     "rollout_logprobs": rollout_logprobs,
                 }
+                if self._distillation_config is not None:
+                    data_dict["opd_trajectory_info"] = {
+                        "rollout_id": group[i].rollout_id,
+                        "group_id": group[i].group_id,
+                        "response_start": len(prompt_ids) - 1,
+                        "response_length": len(response_ids),
+                    }
                 if (
                     self._distillation_config is not None
                     and self._distillation_loss_cfg is not None
@@ -1586,6 +1609,8 @@ class BaseRLTrainer:
                             "judgers": data.extra_fields.get("agent_judgers", None),
                             "finish_info": data.extra_fields.get("agent_finish_info", None),
                             "tool_turns": data.extra_fields.get("agent_tool_turns", None),
+                            "trace_segment_index": data.extra_fields.get("agent_trace_segment_index", None),
+                            "trace_segment_count": data.extra_fields.get("agent_trace_segment_count", None),
                             "artifacts": data.extra_fields.get("agent_artifacts"),
                             "messages": data.extra_fields.get("agent_messages"),
                             "tools": data.extra_fields.get("agent_tools"),

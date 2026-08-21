@@ -25,6 +25,7 @@ class ColateItem(TypedDict):
     rollout_logprobs: torch.Tensor | None
     teacher_logprobs: NotRequired[torch.Tensor | None]
     teacher_indices: NotRequired[torch.Tensor]
+    opd_trajectory_info: NotRequired[dict[str, Any]]
 
 
 def _summarize_process_group_results(results: list[dict[str, Any]]) -> str:
@@ -123,6 +124,18 @@ class TrainingController:
             label_list = [data_batches[i]["shifted_labels"] for i in indices]
             advantage_list = [data_batches[i]["advantage"] for i in indices]
 
+            opd_trajectory_infos = []
+            packed_offset = 0
+            for index in indices:
+                trajectory_info = data_batches[index].get("opd_trajectory_info")
+                if trajectory_info is not None:
+                    packed_trajectory_info = dict(trajectory_info)
+                    packed_trajectory_info["response_start"] = (
+                        int(packed_trajectory_info["response_start"]) + packed_offset
+                    )
+                    opd_trajectory_infos.append(packed_trajectory_info)
+                packed_offset += data_batches[index]["shifted_labels"].numel()
+
             rollout_logprobs_list = None
             if "rollout_logprobs" in data_batches[0] and data_batches[0]["rollout_logprobs"] is not None:
                 rollout_logprobs_list = [data_batches[i]["rollout_logprobs"] for i in indices]
@@ -218,6 +231,7 @@ class TrainingController:
                     "rollout_logprobs": rollout_logprobs,
                     "teacher_logprobs": teacher_logprobs,
                     "teacher_indices": teacher_indices,
+                    "opd_trajectory_infos": opd_trajectory_infos,
                 }
             )
         return packed_data_batches
@@ -320,6 +334,7 @@ class TrainingController:
                 "rollout_logprobs": pad_rollout_logprobs,
                 "teacher_logprobs": pad_teacher_logprobs,
                 "teacher_indices": pad_teacher_indices,
+                "opd_trajectory_infos": [],
             }
             pad_data_samples = [pad_data for _ in range(pad_num)]
             packed_data_batches = packed_data_batches + pad_data_samples
