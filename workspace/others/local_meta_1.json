@@ -1,0 +1,42 @@
+{
+    "videochat2it_vqa_webvid_qa_zh": {
+        "data_augment": false,
+        "sample_ratio": 0.125,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~other~zh~videochat2it_vqa_webvid_qa_zh~3.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~other~zh~videochat2it_vqa_webvid_qa_zh~3.0.0~0.0/multimodal_elements/",
+        "length": 30515
+    },
+    "Vript_Chinese_pretrain_20240926_readable": {
+        "sample_ratio": 0.0125,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~other~unknown~Vript_Chinese_pretrain_20240926_readable~3.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~other~unknown~Vript_Chinese_pretrain_20240926_readable~3.0.0~0.0/multimodal_elements/",
+        "length": 293572
+    },
+    "Vript_pretrain_20240926_readable": {
+        "sample_ratio": 0.0125,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~other~unknown~Vript_pretrain_20240926_readable~3.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~other~unknown~Vript_pretrain_20240926_readable~3.0.0~0.0/multimodal_elements/",
+        "length": 408813
+    },
+    "grounding_didemo-didemo-train_66k_cpt": {
+        "data_augment": false,
+        "sample_ratio": 0.0125,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~mm_video~unknown~grounding_didemo-didemo-train_66k_cpt~3.1.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~mm_video~unknown~grounding_didemo-didemo-train_66k_cpt~3.1.0~0.0/multimodal_elements/",
+        "length": 64254
+    },
+    "videochat2it_vqa_ego_qa": {
+        "data_augment": false,
+        "sample_ratio": 0.125,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~other~unknown~videochat2it_vqa_ego_qa~4.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~other~unknown~videochat2it_vqa_ego_qa~4.0.0~0.0/multimodal_elements/",
+        "length": 7797
+    },
+    "videochat2it_vqa_ego_qa_zh": {
+        "data_augment": false,
+        "sample_ratio": 0.125,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~other~zh~videochat2it_vqa_ego_qa_zh~4.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~other~zh~videochat2it_vqa_ego_qa_zh~4.0.0~0.0/multimodal_elements/",
+        "length": 7797
+    }
+}

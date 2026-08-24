@@ -1,0 +1,68 @@
+https://github.com/Harold-lkk/lagent/tree/lkk/internclaw 
+https://gitee.pjlab.org.cn/L1/_source/L1/xujun/env-gateway-sdk/-/code/
+
+lagent: /mnt/shared-storage-user/huanghaian/code/gateway/lagent   -e 安装 
+env: /mnt/shared-storage-user/huanghaian/code/gateway/env-gateway-sdk 直接安装
+
+
+curl -X 'POST' \
+  'http://s-20260104203038-22bhb-decode.ailab-evalservice.svc:4000/v1/models/new' \
+  -H 'accept: application/json' \
+  -H 'Content-Type: application/json' \
+  -d '{
+  "model_name": "my-model",
+  "api_key": "sk-admin",
+  "api_base": "http://10.0.0.1:8080"
+}'
+
+
+curl -i -X POST "http://0.0.0.0:8000/v1/chat/completions" \
+  -H "Content-Type: application/json" \
+  -d '{}'
+
+
+python examples/v1/scripts/test_tokenize_length_sweep.py --baseline-only
+
+
+python examples/v1/scripts/test_tokenize_length_sweep.py \
+  --num-ray-actors 1 \
+  --num-cpus-per-actor 1 \
+  --num-processes-per-actor 1
+
+controller      16384   512     512     5.9660 
+controller      16384   1024    1024    11.8510
+controller      16384   4096    4096    46.9339
+controller      32768   512     512     11.7725
+
+python examples/v1/scripts/test_tokenize_length_sweep.py \
+  --num-ray-actors 16 \
+  --num-cpus-per-actor 1 \
+  --num-processes-per-actor 1
+
+controller      16384   512     512     1.7514 
+controller      16384   1024    1024    3.2706 
+controller      16384   4096    4096    13.1057
+controller      32768   512     512     3.3116 
+
+
+# 1 还是 2 没有啥区别
+
+python examples/v1/scripts/test_tokenize_length_sweep.py \
+  --num-ray-actors 8 \
+  --num-cpus-per-actor 2 \
+  --num-processes-per-actor 2
+
+controller      16384   512     512     5.9546 
+controller      16384   1024    1024    11.7426
+controller      16384   4096    4096    47.0592
+
+
+
+lagent 一些核心类简单记录
+
+lagent/lagent/adapters/proxy.py:LLMProxyRecorder 类是用于黑盒训练的，目的是给 cc 套一层本地代理，cc 请求先走到这，
+然后捕获轨迹级的 apikey 作为 record key。核心目的是收集轨迹级别的所有信息，数据原样返回，不会改请求本身。
+
+
+
+

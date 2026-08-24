@@ -1,0 +1,20 @@
+{
+  "openhermes2_5_cleaned": {
+    "media_root": "",
+    "annotation": "/mnt/shared-storage-user/llmrazor-share/data/openhermes2_5_cleaned_openhermes2_5_cleaned_1_openai.jsonl",
+    "sample_ratio": 0.5
+  },
+  "llava150k_zh": {
+    "media_root": "/mnt/shared-storage-user/llmrazor-share/data/",
+    "annotation": "/mnt/shared-storage-user/llmrazor-share/data/llava_instruct_150k_zh_wh_openai.jsonl"
+  },
+  "alpaca_pretrain": {
+    "media_root": "",
+    "annotation": "/mnt/shared-storage-user/llmrazor-share/data/alpaca_202404121913-shard-1-of-3_openai_pretrain.jsonl",
+    "text_pretrain": true
+  },
+  "llava150k_zh_pretrain": {
+    "media_root": "/mnt/shared-storage-user/llmrazor-share/data/",
+    "annotation": "/mnt/shared-storage-user/llmrazor-share/data/llava_instruct_150k_zh_wh_openai_openai_pretrain.jsonl"
+  }
+}

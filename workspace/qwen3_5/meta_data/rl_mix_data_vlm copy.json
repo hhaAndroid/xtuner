@@ -1,0 +1,25 @@
+{   
+    "FanqingM_MMK12_1": {
+        "sample_ratio": 3.0,
+        "annotation": "/mnt/shared-storage-user/llmit1/user/liujiangning/data/s1_1_rl_delivery/exp_rl/FanqingM_MMK12/jsonl/rollout-qwen3vl235b_a22b_thinking_fp8_avgpass_0.2_0.4.jsonl",
+        "media_root": "/mnt/shared-storage-user/llmit1/user/liujiangning/data/s1_1_rl_delivery/qwen3vl235b_a22b_thinking_fp8_rollout/FanqingM_MMK12/images",
+        "length": 388
+    },
+    "FanqingM_MMK12_2": {
+        "sample_ratio": 3.0,
+        "annotation":  "/mnt/shared-storage-user/llmit1/user/liujiangning/data/s1_1_rl_delivery/exp_rl/FanqingM_MMK12/jsonl/rollout-qwen3vl235b_a22b_thinking_fp8_avgpass_0.4_0.6.jsonl",
+        "media_root": "/mnt/shared-storage-user/llmit1/user/liujiangning/data/s1_1_rl_delivery/qwen3vl235b_a22b_thinking_fp8_rollout/FanqingM_MMK12/images",
+        "length": 236
+    },
+    "FanqingM_MMK12_3": {
+        "sample_ratio": 3.0,
+        "annotation": "/mnt/shared-storage-user/llmit1/user/liujiangning/data/s1_1_rl_delivery/exp_rl/FanqingM_MMK12/jsonl/rollout-qwen3vl235b_a22b_thinking_fp8_avgpass_0.6_0.8.jsonl",
+        "media_root": "/mnt/shared-storage-user/llmit1/user/liujiangning/data/s1_1_rl_delivery/qwen3vl235b_a22b_thinking_fp8_rollout/FanqingM_MMK12/images",
+        "length": 578
+    },
+    "DAPO_MATH": {
+        "sample_ratio": 0.01,
+        "annotation": "/mnt/shared-storage-user/llmrazor-share/data/dapo_math/dapo-math-17k.jsonl",
+        "length": 1791700
+    }
+}

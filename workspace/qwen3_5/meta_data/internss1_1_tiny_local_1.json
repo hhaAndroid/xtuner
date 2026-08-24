@@ -1,0 +1,436 @@
+{
+    "P~multimodal_3d~unknown~COCO_caption_qa_two_objs_spatial_compare_near_far_jsonl~1.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~multimodal_3d~unknown~COCO_caption_qa_two_objs_spatial_compare_near_far_jsonl~1.0.0~0.0/jsonl/",
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~multimodal_3d~unknown~COCO_caption_qa_two_objs_spatial_compare_near_far_jsonl~1.0.0~0.0/multimodal_elements/",
+        "length": 560
+    },
+    "P~Single_Image_OCR_ShortQA~en~estvqa_en_20240620~1.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Single_Image_OCR_ShortQA~en~estvqa_en_20240620~1.0.0~0.0/jsonl/",
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~Single_Image_OCR_ShortQA~en~estvqa_en_20240620~1.0.0~0.0/multimodal_elements/",
+        "length": 3408
+    },
+    "P~other~unknown~web_canvas_internvl_grounding_20250428~2.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~other~unknown~web_canvas_internvl_grounding_20250428~2.0.0~0.0/jsonl/",
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~other~unknown~web_canvas_internvl_grounding_20250428~2.0.0~0.0/multimodal_elements/",
+        "length": 6
+    },
+    "P~Single_Image_GUI_Single_Operation~zh~private_ui_aig_share_operation_oral_zh_20241102~1.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Single_Image_GUI_Single_Operation~zh~private_ui_aig_share_operation_oral_zh_20241102~1.0.0~0.0/jsonl/",
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~Single_Image_GUI_Single_Operation~zh~private_ui_aig_share_operation_oral_zh_20241102~1.0.0~0.0/multimodal_elements/",
+        "length": 505
+    },
+    "P~other~unknown~internal_windows_planning_cot_20250612~2.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~other~unknown~internal_windows_planning_cot_20250612~2.0.0~0.0/jsonl/",
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~other~unknown~internal_windows_planning_cot_20250612~2.0.0~0.0/multimodal_elements/",
+        "length": 19
+    },
+    "P~other~unknown~windows_click_grounding_20250310~2.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~other~unknown~windows_click_grounding_20250310~2.0.0~0.0/jsonl/",
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~other~unknown~windows_click_grounding_20250310~2.0.0~0.0/multimodal_elements/",
+        "length": 6
+    },
+    "P~multimodal_3d~unknown~R2R_route_planning~1.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~multimodal_3d~unknown~R2R_route_planning~1.0.0~0.0/jsonl/",
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~multimodal_3d~unknown~R2R_route_planning~1.0.0~0.0/multimodal_elements/",
+        "length": 662
+    },
+    "P~UI_grounding~unknown~aw_1218_oral_operation~1.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~UI_grounding~unknown~aw_1218_oral_operation~1.0.0~0.0/jsonl/",
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~UI_grounding~unknown~aw_1218_oral_operation~1.0.0~0.0/multimodal_elements/",
+        "length": 43
+    },
+    "P~other~unknown~ubuntu_internvl_grounding_20250508~2.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~other~unknown~ubuntu_internvl_grounding_20250508~2.0.0~0.0/jsonl/",
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~other~unknown~ubuntu_internvl_grounding_20250508~2.0.0~0.0/multimodal_elements/",
+        "length": 9
+    },
+    "P~Single_Image_OCR_ShortQA~en~eaten_trainticket_zh_20240402~3.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Single_Image_OCR_ShortQA~en~eaten_trainticket_zh_20240402~3.0.0~0.0/jsonl/",
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~Single_Image_OCR_ShortQA~en~eaten_trainticket_zh_20240402~3.0.0~0.0/multimodal_elements/",
+        "length": 900
+    },
+    "P~other~unknown~aidapearson_ocr_kaggle_20241126check~1.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~other~unknown~aidapearson_ocr_kaggle_20241126check~1.0.0~0.0/jsonl/",
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~other~unknown~aidapearson_ocr_kaggle_20241126check~1.0.0~0.0/multimodal_elements/",
+        "length": 1200
+    },
+    "P~Single_Image_OCR_Recognition~zh~synth_calligraphy_regular_zh_20240805~1.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Single_Image_OCR_Recognition~zh~synth_calligraphy_regular_zh_20240805~1.0.0~0.0/jsonl/",
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~Single_Image_OCR_Recognition~zh~synth_calligraphy_regular_zh_20240805~1.0.0~0.0/multimodal_elements/",
+        "length": 3999
+    },
+    "P~Single_Image_Reflux~en~reflux_20240907_to_20241015_gpt4o_v2_en_zh_20241019~1.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Single_Image_Reflux~en~reflux_20240907_to_20241015_gpt4o_v2_en_zh_20241019~1.0.0~0.0/jsonl/",
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~Single_Image_Reflux~en~reflux_20240907_to_20241015_gpt4o_v2_en_zh_20241019~1.0.0~0.0/multimodal_elements/",
+        "length": 894
+    },
+    "P~Single_Image_Reflux~en~reflux_20240710_to_20240902_gpt4o_en_zh_20240905~1.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Single_Image_Reflux~en~reflux_20240710_to_20240902_gpt4o_en_zh_20240905~1.0.0~0.0/jsonl/",
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~Single_Image_Reflux~en~reflux_20240710_to_20240902_gpt4o_en_zh_20240905~1.0.0~0.0/multimodal_elements/",
+        "length": 5421
+    },
+    "P~other~unknown~VQA_Pathology_VQA_train_reports_sphinx_jsonl~1.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~other~unknown~VQA_Pathology_VQA_train_reports_sphinx_jsonl~1.0.0~0.0/jsonl/",
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~other~unknown~VQA_Pathology_VQA_train_reports_sphinx_jsonl~1.0.0~0.0/multimodal_elements/",
+        "length": 43
+    },
+    "P~other~unknown~windows_aug_action_grounding_20250630_9~2.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~other~unknown~windows_aug_action_grounding_20250630_9~2.0.0~0.0/jsonl/",
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~other~unknown~windows_aug_action_grounding_20250630_9~2.0.0~0.0/multimodal_elements/",
+        "length": 5
+    },
+    "P~Road_Sign_QA~unknown~road_sign_qa_v1~1.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Road_Sign_QA~unknown~road_sign_qa_v1~1.0.0~0.0/jsonl/",
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~Road_Sign_QA~unknown~road_sign_qa_v1~1.0.0~0.0/multimodal_elements/",
+        "length": 28
+    },
+    "P~Single_Image_OCR_Recognition~unknown~thai_ocr_th_20240920~1.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Single_Image_OCR_Recognition~unknown~thai_ocr_th_20240920~1.0.0~0.0/jsonl/",
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~Single_Image_OCR_Recognition~unknown~thai_ocr_th_20240920~1.0.0~0.0/multimodal_elements/",
+        "length": 177
+    },
+    "P~Handwriting_OCR_wo_bbox~unknown~Calligraphy_TangShi_632_v2~1.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Handwriting_OCR_wo_bbox~unknown~Calligraphy_TangShi_632_v2~1.0.0~0.0/jsonl/",
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~Handwriting_OCR_wo_bbox~unknown~Calligraphy_TangShi_632_v2~1.0.0~0.0/multimodal_elements/",
+        "length": 6
+    },
+    "P~other~unknown~android_control_sft~1.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~other~unknown~android_control_sft~1.0.0~0.0/jsonl/",
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~other~unknown~android_control_sft~1.0.0~0.0/multimodal_elements/",
+        "length": 415
+    },
+    "P~other~unknown~internal_ubuntu_navigation_boost_instruction_action_20250624~2.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~other~unknown~internal_ubuntu_navigation_boost_instruction_action_20250624~2.0.0~0.0/jsonl/",
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~other~unknown~internal_ubuntu_navigation_boost_instruction_action_20250624~2.0.0~0.0/multimodal_elements/",
+        "length": 2435
+    },
+    "P~Single_Image_Knowledge_LongCap~en~inat_train2018_merge_gpt4o_en_20240819__caprl32b_upgrade_251031~1.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Single_Image_Knowledge_LongCap~en~inat_train2018_merge_gpt4o_en_20240819__caprl32b_upgrade_251031~1.0.0~0.0/jsonl/",
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~Single_Image_Knowledge_LongCap~en~inat_train2018_merge_gpt4o_en_20240819__caprl32b_upgrade_251031~1.0.0~0.0/multimodal_elements/",
+        "length": 621
+    },
+    "P~other~unknown~internal_ubuntu_planning_cot_boost_instruction_20250612~2.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~other~unknown~internal_ubuntu_planning_cot_boost_instruction_20250612~2.0.0~0.0/jsonl/",
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~other~unknown~internal_ubuntu_planning_cot_boost_instruction_20250612~2.0.0~0.0/multimodal_elements/",
+        "length": 91
+    },
+    "P~Chart_LongCap~unknown~synthChart_stackedBar_caption_v1_0_jsonl__caprl32b_upgrade_251031~2.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Chart_LongCap~unknown~synthChart_stackedBar_caption_v1_0_jsonl__caprl32b_upgrade_251031~2.0.0~0.0/jsonl/",
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~Chart_LongCap~unknown~synthChart_stackedBar_caption_v1_0_jsonl__caprl32b_upgrade_251031~2.0.0~0.0/multimodal_elements/",
+        "length": 3333
+    },
+    "P~UI_grounding~unknown~private_ui2json_web_d20240822_v1~1.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~UI_grounding~unknown~private_ui2json_web_d20240822_v1~1.0.0~0.0/jsonl/",
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~UI_grounding~unknown~private_ui2json_web_d20240822_v1~1.0.0~0.0/multimodal_elements/",
+        "length": 59
+    },
+    "P~Video_Video_LongQA~en~llava_video_youtube_oe_1_2_m_en_20241009~3.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Video_Video_LongQA~en~llava_video_youtube_oe_1_2_m_en_20241009~3.0.0~0.0/jsonl/",
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~Video_Video_LongQA~en~llava_video_youtube_oe_1_2_m_en_20241009~3.0.0~0.0/multimodal_elements/",
+        "length": 27527
+    },
+    "P~Video_Video_MCQ~en~star_as_ap_en_20240805~3.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Video_Video_MCQ~en~star_as_ap_en_20240805~3.0.0~0.0/jsonl/",
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~Video_Video_MCQ~en~star_as_ap_en_20240805~3.0.0~0.0/multimodal_elements/",
+        "length": 3276
+    },
+    "P~other~unknown~image-text_pubmed_CUHKSZ_240625_pubmed_single_image_vqa_rewrite_jsonl~2.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~other~unknown~image-text_pubmed_CUHKSZ_240625_pubmed_single_image_vqa_rewrite_jsonl~2.0.0~0.0/jsonl/",
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~other~unknown~image-text_pubmed_CUHKSZ_240625_pubmed_single_image_vqa_rewrite_jsonl~2.0.0~0.0/multimodal_elements/",
+        "length": 7538
+    },
+    "P~other~unknown~vsr~1.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~other~unknown~vsr~1.0.0~0.0/jsonl/",
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~other~unknown~vsr~1.0.0~0.0/multimodal_elements/",
+        "length": 99
+    },
+    "P~mm_video~unknown~vqa_perception_train-mc_question_train_forchoice_8k~3.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~mm_video~unknown~vqa_perception_train-mc_question_train_forchoice_8k~3.0.0~0.0/jsonl/",
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~mm_video~unknown~vqa_perception_train-mc_question_train_forchoice_8k~3.0.0~0.0/multimodal_elements/",
+        "length": 1478
+    },
+    "P~Document_OCR_with_bbox~unknown~fanti_vertical_regular_chat_wBox_v2_0_jsonl~1.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Document_OCR_with_bbox~unknown~fanti_vertical_regular_chat_wBox_v2_0_jsonl~1.0.0~0.0/jsonl/",
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~Document_OCR_with_bbox~unknown~fanti_vertical_regular_chat_wBox_v2_0_jsonl~1.0.0~0.0/multimodal_elements/",
+        "length": 231
+    },
+    "P~other~unknown~internal_ubuntu_planning_cot_boost_instruction_20250624~2.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~other~unknown~internal_ubuntu_planning_cot_boost_instruction_20250624~2.0.0~0.0/jsonl/",
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~other~unknown~internal_ubuntu_planning_cot_boost_instruction_20250624~2.0.0~0.0/multimodal_elements/",
+        "length": 163
+    },
+    "P~Single_Image_OCR_LongQA~zh~arxivqa_shibotian_zh_20240810~1.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Single_Image_OCR_LongQA~zh~arxivqa_shibotian_zh_20240810~1.0.0~0.0/jsonl/",
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~Single_Image_OCR_LongQA~zh~arxivqa_shibotian_zh_20240810~1.0.0~0.0/multimodal_elements/",
+        "length": 5211
+    },
+    "P~Video_Video_LongCap~en~llava_video_30_60_s_youtube_v0_1_cap_en_20241010~3.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Video_Video_LongCap~en~llava_video_30_60_s_youtube_v0_1_cap_en_20241010~3.0.0~0.0/jsonl/",
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~Video_Video_LongCap~en~llava_video_30_60_s_youtube_v0_1_cap_en_20241010~3.0.0~0.0/multimodal_elements/",
+        "length": 3994
+    },
+    "P~other~unknown~chegg~1.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~other~unknown~chegg~1.0.0~0.0/jsonl/",
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~other~unknown~chegg~1.0.0~0.0/multimodal_elements/",
+        "length": 348
+    },
+    "P~UI_grounding~unknown~private_ui_phone_2403_long_caption_d20240604_v2__caprl32b_upgrade_251031~1.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~UI_grounding~unknown~private_ui_phone_2403_long_caption_d20240604_v2__caprl32b_upgrade_251031~1.0.0~0.0/jsonl/",
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~UI_grounding~unknown~private_ui_phone_2403_long_caption_d20240604_v2__caprl32b_upgrade_251031~1.0.0~0.0/multimodal_elements/",
+        "length": 573
+    },
+    "P~other~unknown~broxiv_mcq~3.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~other~unknown~broxiv_mcq~3.0.0~0.0/jsonl/",
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~other~unknown~broxiv_mcq~3.0.0~0.0/multimodal_elements/",
+        "length": 2553
+    },
+    "P~Chart_LongCap~unknown~synthChart_heatmap_caption_v1_0_jsonl__caprl32b_upgrade_251031~2.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Chart_LongCap~unknown~synthChart_heatmap_caption_v1_0_jsonl__caprl32b_upgrade_251031~2.0.0~0.0/jsonl/",
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~Chart_LongCap~unknown~synthChart_heatmap_caption_v1_0_jsonl__caprl32b_upgrade_251031~2.0.0~0.0/multimodal_elements/",
+        "length": 3333
+    },
+    "P~Single_Image_OCR_Recognition~zh~synth_calligraphy_poetry_zh_20240805~1.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Single_Image_OCR_Recognition~zh~synth_calligraphy_poetry_zh_20240805~1.0.0~0.0/jsonl/",
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~Single_Image_OCR_Recognition~zh~synth_calligraphy_poetry_zh_20240805~1.0.0~0.0/multimodal_elements/",
+        "length": 3999
+    },
+    "P~other~unknown~guiact-web-multi-l3_sft~1.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~other~unknown~guiact-web-multi-l3_sft~1.0.0~0.0/jsonl/",
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~other~unknown~guiact-web-multi-l3_sft~1.0.0~0.0/multimodal_elements/",
+        "length": 92
+    },
+    "P~Single_Image_OCR_Recognition~en~arxiv_ocr_162k_en_20240403~1.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Single_Image_OCR_Recognition~en~arxiv_ocr_162k_en_20240403~1.0.0~0.0/jsonl/",
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~Single_Image_OCR_Recognition~en~arxiv_ocr_162k_en_20240403~1.0.0~0.0/multimodal_elements/",
+        "length": 3249
+    },
+    "P~Single_Image_Conversation_LongCap~en~sharegpt4o_longcap_en_20240819~1.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Single_Image_Conversation_LongCap~en~sharegpt4o_longcap_en_20240819~1.0.0~0.0/jsonl/",
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~Single_Image_Conversation_LongCap~en~sharegpt4o_longcap_en_20240819~1.0.0~0.0/multimodal_elements/",
+        "length": 3510
+    },
+    "P~Document_OCR_wo_bbox~unknown~captcha_feedback_619_v1~1.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Document_OCR_wo_bbox~unknown~captcha_feedback_619_v1~1.0.0~0.0/jsonl/",
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~Document_OCR_wo_bbox~unknown~captcha_feedback_619_v1~1.0.0~0.0/multimodal_elements/",
+        "length": 30
+    },
+    "P~Single_Image_Grounding~en~asv2_detailed_description_en_20240830~1.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Single_Image_Grounding~en~asv2_detailed_description_en_20240830~1.0.0~0.0/jsonl/",
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~Single_Image_Grounding~en~asv2_detailed_description_en_20240830~1.0.0~0.0/multimodal_elements/",
+        "length": 2127
+    },
+    "P~Document_Handwriting_OCR_wo_bbox~unknown~SynthLayout_ko_regular_v2~1.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Document_Handwriting_OCR_wo_bbox~unknown~SynthLayout_ko_regular_v2~1.0.0~0.0/jsonl/",
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~Document_Handwriting_OCR_wo_bbox~unknown~SynthLayout_ko_regular_v2~1.0.0~0.0/multimodal_elements/",
+        "length": 1666
+    },
+    "P~other~unknown~windows_aug_internvl_grounding_20250623_5~2.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~other~unknown~windows_aug_internvl_grounding_20250623_5~2.0.0~0.0/jsonl/",
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~other~unknown~windows_aug_internvl_grounding_20250623_5~2.0.0~0.0/multimodal_elements/",
+        "length": 3
+    },
+    "P~other~unknown~iphone_action_grounding_20250414~2.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~other~unknown~iphone_action_grounding_20250414~2.0.0~0.0/jsonl/",
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~other~unknown~iphone_action_grounding_20250414~2.0.0~0.0/multimodal_elements/",
+        "length": 111
+    },
+    "P~other~unknown~image-text_pubmed_CUHKSZ_240608_pubmed_multiple_image_caption_jsonl_sft~2.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~other~unknown~image-text_pubmed_CUHKSZ_240608_pubmed_multiple_image_caption_jsonl_sft~2.0.0~0.0/jsonl/",
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~other~unknown~image-text_pubmed_CUHKSZ_240608_pubmed_multiple_image_caption_jsonl_sft~2.0.0~0.0/multimodal_elements/",
+        "length": 637
+    },
+    "P~UI_grounding~unknown~aitw_aug_planprogress_d241231~1.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~UI_grounding~unknown~aitw_aug_planprogress_d241231~1.0.0~0.0/jsonl/",
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~UI_grounding~unknown~aitw_aug_planprogress_d241231~1.0.0~0.0/multimodal_elements/",
+        "length": 981
+    },
+    "P~other~unknown~mac_action_grounding_20250407~2.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~other~unknown~mac_action_grounding_20250407~2.0.0~0.0/jsonl/",
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~other~unknown~mac_action_grounding_20250407~2.0.0~0.0/multimodal_elements/",
+        "length": 8
+    },
+        "P~Code~code~miniSAgoge_miniUniSVG_1m_text~1.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Code~code~miniSAgoge_miniUniSVG_1m_text~1.0.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 61511
+    },
+    "P~Math~en~amthinking_gptoss_answertoken_32k-64k~1.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Math~en~amthinking_gptoss_answertoken_32k-64k~1.0.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 1634
+    },
+    "P~Math~en~enhance_dsv32_all_64k~1.2.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Math~en~enhance_dsv32_all_64k~1.2.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 7928
+    },
+    "P~Math~en~compression_data~1.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Math~en~compression_data~1.0.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 2212
+    },
+        "P~other~en~IF_s2_IF_guoxu_if_1k_rengong_3~1.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~other~en~IF_s2_IF_guoxu_if_1k_rengong_3~1.0.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 98
+    },
+    "P~other~en~general_0626_d005000_just_s2_20w_simple_choice_firstlabel_total20w_avgdifficulty_rollout_qwen3_235b_a22b_project-conversation_tulu_if_EN_trainingdata_29980_safety_dingo_data~1.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~other~en~general_0626_d005000_just_s2_20w_simple_choice_firstlabel_total20w_avgdifficulty_rollout_qwen3_235b_a22b_project-conversation_tulu_if_EN_trainingdata_29980_safety_dingo_data~1.0.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 189
+    },
+    "P~Code~code~januscoder_1121~1.1.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Code~code~januscoder_1121~1.1.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 43520
+    },
+    "P~Code~code~multilingual_plots_data~1.2.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Code~code~multilingual_plots_data~1.2.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 67936
+    },
+    "P~Code~code~human_checked_demo_cases~1.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Code~code~human_checked_demo_cases~1.0.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 2900
+    },
+    "P~Code~code~more_basic_simulation~1.1.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Code~code~more_basic_simulation~1.1.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 836
+    },
+    "P~Instruct~en~IF_IFBench_pass~1.1.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Instruct~en~IF_IFBench_pass~1.1.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 12582
+    },
+    "P~Long_Context~en~P_ruler_json_format_20260112~1.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Long_Context~en~P_ruler_json_format_20260112~1.0.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 434
+    }
+}

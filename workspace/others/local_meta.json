@@ -1,0 +1,823 @@
+{
+    "image-text_GMAI-VL-5__5M_cls_100w_sft_data_internvl": {
+        "data_augment": true,
+        "sample_ratio": 0.00625,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~other~unknown~image-text_GMAI-VL-5__5M_cls_100w_sft_data_internvl_final~1.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~other~unknown~image-text_GMAI-VL-5__5M_cls_100w_sft_data_internvl_final~1.0.0~0.0/multimodal_elements/",
+        "length": 199569
+    },
+    "UVT_Explanatory": {
+        "sample_ratio": 0.05,
+        "data_augment": true,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~other~unknown~UVT_Explanatory_final~1.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~other~unknown~UVT_Explanatory_final~1.0.0~0.0/multimodal_elements/",
+        "length": 1902984
+    },
+    "vqav2_en_20240402": {
+        "data_augment": true,
+        "sample_ratio": 0.25,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~Single_Image_General_ShortQA~en~vqav2_en_20240402~1.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~Single_Image_General_ShortQA~en~vqav2_en_20240402~1.0.0~0.0/multimodal_elements/",
+        "length": 82783
+    },
+    "scienceqa_multi_choice_en_20240402": {
+        "data_augment": true,
+        "sample_ratio": 0.0625,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~Single_Image_Science_MCQ~en~scienceqa_multi_choice_en_20240402~1.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~Single_Image_Science_MCQ~en~scienceqa_multi_choice_en_20240402~1.0.0~0.0/multimodal_elements/",
+        "length": 19024
+    },
+    "tabmwp_en_20240402": {
+        "data_augment": true,
+        "sample_ratio": 0.0625,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~Single_Image_Chart_ShortQA~en~tabmwp_en_20240402~1.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~Single_Image_Chart_ShortQA~en~tabmwp_en_20240402~1.0.0~0.0/multimodal_elements/",
+        "length": 74921
+    },
+    "dvqa_en_20240402": {
+        "data_augment": true,
+        "sample_ratio": 0.0625,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~Single_Image_Chart_ShortQA~en~dvqa_en_20240402~1.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~Single_Image_Chart_ShortQA~en~dvqa_en_20240402~1.0.0~0.0/multimodal_elements/",
+        "length": 200000
+    },
+    "figureqa_en_20240402": {
+        "data_augment": true,
+        "sample_ratio": 0.0625,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~Single_Image_Chart_ShortQA~en~figureqa_en_20240402~1.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~Single_Image_Chart_ShortQA~en~figureqa_en_20240402~1.0.0~0.0/multimodal_elements/",
+        "length": 100000
+    },
+    "laion_gpt4v_en_20240402": {
+        "data_augment": true,
+        "sample_ratio": 0.0625,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~Single_Image_OCR_LongCap~en~laion_gpt4v_en_20240402~1.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~Single_Image_OCR_LongCap~en~laion_gpt4v_en_20240402~1.0.0~0.0/multimodal_elements/",
+        "length": 10950
+    },
+    "arxiv_ocr_162k_en_20240403": {
+        "data_augment": true,
+        "sample_ratio": 0.0625,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~Single_Image_OCR_Recognition~en~arxiv_ocr_162k_en_20240403~1.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~Single_Image_OCR_Recognition~en~arxiv_ocr_162k_en_20240403~1.0.0~0.0/multimodal_elements/",
+        "length": 162464
+    },
+    "refcoco_grounding_en_20240402": {
+        "data_augment": true,
+        "sample_ratio": 0.125,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~Single_Image_Grounding~en~refcoco_grounding_en_20240402~1.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~Single_Image_Grounding~en~refcoco_grounding_en_20240402~1.0.0~0.0/multimodal_elements/",
+        "length": 27676
+    },
+    "refcoco_grounding_aug_en_20240402": {
+        "data_augment": true,
+        "sample_ratio": 0.125,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~Single_Image_Grounding~en~refcoco_grounding_aug_en_20240402~1.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~Single_Image_Grounding~en~refcoco_grounding_aug_en_20240402~1.0.0~0.0/multimodal_elements/",
+        "length": 141880
+    },
+    "geoqa+_en_20240402": {
+        "data_augment": true,
+        "sample_ratio": 0.125,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~Single_Image_Math_MCQ~en~geoqa+_en_20240402~1.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~Single_Image_Math_MCQ~en~geoqa+_en_20240402~1.0.0~0.0/multimodal_elements/",
+        "length": 72318
+    },
+    "geometry3k_en_20240402": {
+        "data_augment": true,
+        "sample_ratio": 0.0625,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~Single_Image_Math_MCQ~en~geometry3k_en_20240402~1.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~Single_Image_Math_MCQ~en~geometry3k_en_20240402~1.0.0~0.0/multimodal_elements/",
+        "length": 10505
+    },
+    "geos_en_20240402": {
+        "data_augment": true,
+        "sample_ratio": 0.0625,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~Single_Image_Math_MCQ~en~geos_en_20240402~1.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~Single_Image_Math_MCQ~en~geos_en_20240402~1.0.0~0.0/multimodal_elements/",
+        "length": 338
+    },
+    "mapqa_suv_en_20240402": {
+        "data_augment": true,
+        "sample_ratio": 0.0625,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~Single_Image_Math_ShortQA~en~mapqa_suv_en_20240402~1.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~Single_Image_Math_ShortQA~en~mapqa_suv_en_20240402~1.0.0~0.0/multimodal_elements/",
+        "length": 37417
+    },
+    "vqa_rad_en_20240402": {
+        "data_augment": true,
+        "sample_ratio": 0.0625,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~Single_Image_Math_ShortQA~en~vqa_rad_en_20240402~1.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~Single_Image_Math_ShortQA~en~vqa_rad_en_20240402~1.0.0~0.0/multimodal_elements/",
+        "length": 1793
+    },
+    "ctrip_insight_gpt4v_zh_20240402": {
+        "data_augment": true,
+        "sample_ratio": 0.0625,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~Single_Image_Conversation_LongCap~zh~ctrip_insight_gpt4v_zh_20240402~1.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~Single_Image_Conversation_LongCap~zh~ctrip_insight_gpt4v_zh_20240402~1.0.0~0.0/multimodal_elements/",
+        "length": 10002
+    },
+    "DB_cropped_v1_20240816": {
+        "sample_ratio": 0.0625,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~General_LongCap~unknown~DB_cropped_v1_20240816~1.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~General_LongCap~unknown~DB_cropped_v1_20240816~1.0.0~0.0/multimodal_elements/",
+        "length": 4865
+    },
+    "DB_original_v1_20240816": {
+        "sample_ratio": 0.0625,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~General_LongCap~unknown~DB_original_v1_20240816~1.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~General_LongCap~unknown~DB_original_v1_20240816~1.0.0~0.0/multimodal_elements/",
+        "length": 10805
+    },
+    "abstract_paintings_v2_20240816": {
+        "sample_ratio": 0.0625,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~General_LongCap~unknown~abstract_paintings_v2_20240816~1.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~General_LongCap~unknown~abstract_paintings_v2_20240816~1.0.0~0.0/multimodal_elements/",
+        "length": 280
+    },
+    "artistic_photographs_v2_20240816": {
+        "sample_ratio": 0.0625,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~General_LongCap~unknown~artistic_photographs_v2_20240816~1.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~General_LongCap~unknown~artistic_photographs_v2_20240816~1.0.0~0.0/multimodal_elements/",
+        "length": 806
+    },
+    "interpersonal_relation_v1_20240816": {
+        "sample_ratio": 0.0625,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~General_LongCap~unknown~interpersonal_relation_v1_20240816~1.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~General_LongCap~unknown~interpersonal_relation_v1_20240816~1.0.0~0.0/multimodal_elements/",
+        "length": 8015
+    },
+    "gaokao_biology_0809_train_r3110_v1": {
+        "sample_ratio": 0.125,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~Science~unknown~gaokao_biology_0809_train_r3110_v1~1.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~Science~unknown~gaokao_biology_0809_train_r3110_v1~1.0.0~0.0/multimodal_elements/",
+        "length": 3108
+    },
+    "gaokao_chinese_0809_train_r1461": {
+        "sample_ratio": 0.0625,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~Science~unknown~gaokao_chinese_0809_train_r1461~1.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~Science~unknown~gaokao_chinese_0809_train_r1461~1.0.0~0.0/multimodal_elements/",
+        "length": 1461
+    },
+    "gaokao_geography_0809_train_r2445": {
+        "sample_ratio": 0.0625,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~Science~unknown~gaokao_geography_0809_train_r2445~1.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~Science~unknown~gaokao_geography_0809_train_r2445~1.0.0~0.0/multimodal_elements/",
+        "length": 2445
+    },
+    "gaokao_history_0809_train_r2324": {
+        "sample_ratio": 0.0625,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~Science~unknown~gaokao_history_0809_train_r2324~1.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~Science~unknown~gaokao_history_0809_train_r2324~1.0.0~0.0/multimodal_elements/",
+        "length": 2324
+    },
+    "persona_v1_merged_20240907check": {
+        "sample_ratio": 0.0125,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~General_Conversation~unknown~persona_v1_merged_20240907check~1.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~General_Conversation~unknown~persona_v1_merged_20240907check~1.0.0~0.0/multimodal_elements/",
+        "length": 192413
+    },
+    "ocr_repeat_gpt4o_20240817": {
+        "sample_ratio": 0.0125,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~OCR~unknown~ocr_repeat_gpt4o_20240817~1.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~OCR~unknown~ocr_repeat_gpt4o_20240817~1.0.0~0.0/multimodal_elements/",
+        "length": 3898
+    },
+    "data_gpt_generalquestion_correction_cn_43k_v2_20240813": {
+        "sample_ratio": 0.025,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~General_Conversation~en~data_gpt_generalquestion_correction_cn_43k_v2_20240813~1.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~General_Conversation~en~data_gpt_generalquestion_correction_cn_43k_v2_20240813~1.0.0~0.0/multimodal_elements/",
+        "length": 43002
+    },
+    "reflux_merge_djx_202408_r9026_20241025check": {
+        "sample_ratio": 0.0625,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~General_Conversation~unknown~reflux_merge_djx_202408_r9026_20241025check~1.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~General_Conversation~unknown~reflux_merge_djx_202408_r9026_20241025check~1.0.0~0.0/multimodal_elements/",
+        "length": 8979
+    },
+    "reflux_merge_djx_202409_r759_20241025check": {
+        "sample_ratio": 0.0625,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~General_Conversation~unknown~reflux_merge_djx_202409_r759_20241025check~1.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~General_Conversation~unknown~reflux_merge_djx_202409_r759_20241025check~1.0.0~0.0/multimodal_elements/",
+        "length": 756
+    },
+    "cn_sam_all_46886_20240927check": {
+        "sample_ratio": 0.0125,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~General_LongCap~unknown~cn_sam_all_46886_20240927check~1.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~General_LongCap~unknown~cn_sam_all_46886_20240927check~1.0.0~0.0/multimodal_elements/",
+        "length": 46886
+    },
+    "cn_mmdataset_gpt4o_LongCpation_r32759_20240927check": {
+        "sample_ratio": 0.0125,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~General_LongCap~unknown~cn_mmdataset_gpt4o_LongCpation_r32759_20240927check~1.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~General_LongCap~unknown~cn_mmdataset_gpt4o_LongCpation_r32759_20240927check~1.0.0~0.0/multimodal_elements/",
+        "length": 32759
+    },
+    "industry_research_report_woBox_caption_v1_0_20240927check": {
+        "sample_ratio": 0.0125,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~General_LongCap~unknown~industry_research_report_woBox_caption_v1_0_20240927check~1.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~General_LongCap~unknown~industry_research_report_woBox_caption_v1_0_20240927check~1.0.0~0.0/multimodal_elements/",
+        "length": 4999
+    },
+    "en_sam_all_40101_20240927check": {
+        "sample_ratio": 0.0125,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~General_LongCap~en~en_sam_all_40101_20240927check~1.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~General_LongCap~en~en_sam_all_40101_20240927check~1.0.0~0.0/multimodal_elements/",
+        "length": 40100
+    },
+    "synthChart_mixgraph_reCaption_v1_0_20240927check": {
+        "sample_ratio": 0.0125,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~General_LongCap~unknown~synthChart_mixgraph_reCaption_v1_0_20240927check~1.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~General_LongCap~unknown~synthChart_mixgraph_reCaption_v1_0_20240927check~1.0.0~0.0/multimodal_elements/",
+        "length": 14999
+    },
+    "numina_cot_qwen2_verified_valid_20241015check": {
+        "sample_ratio": 0.0125,
+        "annotation": "/mnt/shared-storage-user/puyullmgpu-shared/puyu3-delivery/internlm3/P~Math~en~numina_cot_qwen2_verified_valid_20241015check~1.0.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 437491
+    },
+    "qwen2_math_metamath_verified_no_voting_dpp_20241015check": {
+        "sample_ratio": 0.0125,
+        "annotation": "/mnt/shared-storage-user/puyullmgpu-shared/puyu3-delivery/internlm3/P~Math~en~qwen2_math_metamath_verified_no_voting_dpp_20241015check~1.0.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 335917
+    },
+    "sftmath_qwen2_5_662k_v3_20241022check": {
+        "sample_ratio": 0.0125,
+        "annotation": "/mnt/shared-storage-user/puyullmgpu-shared/puyu3-delivery/internlm3/P~Math~en~sftmath_qwen2_5_662k_v3_20241022check~1.0.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 661982
+    },
+    "mmmu_merge_20241106check": {
+        "sample_ratio": 0.0125,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~Science~unknown~mmmu_merge_20241106check~1.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~Science~unknown~mmmu_merge_20241106check~1.0.0~0.0/multimodal_elements/",
+        "length": 43584
+    },
+    "mmmu_knowledge_google_gpt4o_50k_20241106check": {
+        "sample_ratio": 0.025,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~Science~unknown~mmmu_knowledge_google_gpt4o_50k_20241106check~1.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~Science~unknown~mmmu_knowledge_google_gpt4o_50k_20241106check~1.0.0~0.0/multimodal_elements/",
+        "length": 48699
+    },
+    "ocr_math_formula_haoweilai_20241126check": {
+        "sample_ratio": 0.0125,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~other~unknown~ocr_math_formula_haoweilai_20241126check~1.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~other~unknown~ocr_math_formula_haoweilai_20241126check~1.0.0~0.0/multimodal_elements/",
+        "length": 30000
+    },
+    "google_mathwritting_20241127check": {
+        "sample_ratio": 0.00625,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~other~unknown~google_mathwritting_20241127check~1.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~other~unknown~google_mathwritting_20241127check~1.0.0~0.0/multimodal_elements/",
+        "length": 229864
+    },
+    "IAM_words_20241118check": {
+        "sample_ratio": 0.025,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~other~unknown~IAM_words_20241118check~1.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~other~unknown~IAM_words_20241118check~1.0.0~0.0/multimodal_elements/",
+        "length": 96451
+    },
+    "nonsemanticText_20241126check": {
+        "sample_ratio": 0.0125,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~other~unknown~nonsemanticText_20241126check~1.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~other~unknown~nonsemanticText_20241126check~1.0.0~0.0/multimodal_elements/",
+        "length": 104623
+    },
+    "nonsemanticText_withdigit_20241126check": {
+        "sample_ratio": 0.0125,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~other~unknown~nonsemanticText_withdigit_20241126check~1.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~other~unknown~nonsemanticText_withdigit_20241126check~1.0.0~0.0/multimodal_elements/",
+        "length": 100681
+    },
+    "renderText_20241127check": {
+        "sample_ratio": 0.0625,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~other~en~renderText_20241127check~1.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~other~en~renderText_20241127check~1.0.0~0.0/multimodal_elements/",
+        "length": 10954
+    },
+    "crohme23_truephoto_train_20241126check": {
+        "sample_ratio": 0.125,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~other~unknown~crohme23_truephoto_train_20241126check~1.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~other~unknown~crohme23_truephoto_train_20241126check~1.0.0~0.0/multimodal_elements/",
+        "length": 1045
+    },
+    "funsd_20241126check": {
+        "sample_ratio": 0.125,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~other~unknown~funsd_20241126check~1.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~other~unknown~funsd_20241126check~1.0.0~0.0/multimodal_elements/",
+        "length": 1932
+    },
+    "synthChart_qa_en_v6_0_20241127check": {
+        "sample_ratio": 0.00125,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~other~en~synthChart_qa_en_v6_0_20241127check~1.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~other~en~synthChart_qa_en_v6_0_20241127check~1.0.0~0.0/multimodal_elements/",
+        "length": 99991
+    },
+    "synthChart_qa_cn_v6_0_20241127check": {
+        "sample_ratio": 0.00125,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~other~unknown~synthChart_qa_cn_v6_0_20241127check~1.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~other~unknown~synthChart_qa_cn_v6_0_20241127check~1.0.0~0.0/multimodal_elements/",
+        "length": 99992
+    },
+    "mmmu_woimg_val_subqa_2k_v2_20241127check": {
+        "sample_ratio": 0.025,
+        "annotation": "/mnt/shared-storage-user/puyullmgpu-shared/puyu3-delivery/internlm3/P~other~unknown~mmmu_woimg_val_subqa_2k_v2_20241127check~1.0.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 2363
+    },
+    "mmmu_wimg_val_subqa_2k_v2_20241127check": {
+        "sample_ratio": 0.025,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~other~unknown~mmmu_wimg_val_subqa_2k_v2_20241127check~1.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~other~unknown~mmmu_wimg_val_subqa_2k_v2_20241127check~1.0.0~0.0/multimodal_elements/",
+        "length": 2363
+    },
+    "mmmu_woimg_test_subqa_33k_v1_20241127check": {
+        "sample_ratio": 0.025,
+        "annotation": "/mnt/shared-storage-user/puyullmgpu-shared/puyu3-delivery/internlm3/P~other~unknown~mmmu_woimg_test_subqa_33k_v1_20241127check~1.0.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 33467
+    },
+    "mmmu_wimg_test_subqa_33k_v1_20241127check": {
+        "sample_ratio": 0.025,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~other~unknown~mmmu_wimg_test_subqa_33k_v1_20241127check~1.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~other~unknown~mmmu_wimg_test_subqa_33k_v1_20241127check~1.0.0~0.0/multimodal_elements/",
+        "length": 33452
+    },
+    "mmmu_woimg_val_newquestion_cot_3k_20241127check": {
+        "sample_ratio": 0.025,
+        "annotation": "/mnt/shared-storage-user/puyullmgpu-shared/puyu3-delivery/internlm3/P~other~unknown~mmmu_woimg_val_newquestion_cot_3k_20241127check~1.0.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 3196
+    },
+    "mmmu_wimg_val_newquestion_cot_3k_20241127check": {
+        "sample_ratio": 0.025,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~other~unknown~mmmu_wimg_val_newquestion_cot_3k_20241127check~1.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~other~unknown~mmmu_wimg_val_newquestion_cot_3k_20241127check~1.0.0~0.0/multimodal_elements/",
+        "length": 2367
+    },
+    "mmmu_woimg_val_newquestion_subqa_23k_20241127check": {
+        "sample_ratio": 0.025,
+        "annotation": "/mnt/shared-storage-user/puyullmgpu-shared/puyu3-delivery/internlm3/P~other~unknown~mmmu_woimg_val_newquestion_subqa_23k_20241127check~1.0.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 23460
+    },
+    "mmmu_wimg_val_newquestion_subqa_17k_20241127check": {
+        "sample_ratio": 0.025,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~other~unknown~mmmu_wimg_val_newquestion_subqa_17k_20241127check~1.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~other~unknown~mmmu_wimg_val_newquestion_subqa_17k_20241127check~1.0.0~0.0/multimodal_elements/",
+        "length": 16561
+    },
+    "iconqa_cube_count_10k_v1_20241127check": {
+        "sample_ratio": 0.0125,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~other~unknown~iconqa_cube_count_10k_v1_20241127check~1.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~other~unknown~iconqa_cube_count_10k_v1_20241127check~1.0.0~0.0/multimodal_elements/",
+        "length": 10045
+    },
+    "geomm_87k_v1_1028_20241113check": {
+        "sample_ratio": 0.0125,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~other~unknown~geomm_87k_v1_1028_20241113check~1.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~other~unknown~geomm_87k_v1_1028_20241113check~1.0.0~0.0/multimodal_elements/",
+        "length": 86857
+    },
+    "mmvet_merge_lab_and_gt_20250120check": {
+        "sample_ratio": 0.0125,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~other~unknown~mmvet_merge_lab_and_gt_20250120check~1.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~other~unknown~mmvet_merge_lab_and_gt_20250120check~1.0.0~0.0/multimodal_elements/",
+        "length": 218
+    },
+    "o1_pro_long_caption_sft_20241225check": {
+        "sample_ratio": 0.1,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~other~unknown~o1_pro_long_caption_sft_20241225check~1.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~other~unknown~o1_pro_long_caption_sft_20241225check~1.0.0~0.0/multimodal_elements/",
+        "length": 5146
+    },
+    "numina_qwen2math_385k_20241014check": {
+        "sample_ratio": 0.0125,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~other~en~numina_qwen2math_385k_20241014check~1.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~other~en~numina_qwen2math_385k_20241014check~1.0.0~0.0/multimodal_elements/",
+        "length": 385613
+    },
+    "metamath_numina_qwen2math_300k_20241014check": {
+        "sample_ratio": 0.0125,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~other~en~metamath_numina_qwen2math_300k_20241014check~1.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~other~en~metamath_numina_qwen2math_300k_20241014check~1.0.0~0.0/multimodal_elements/",
+        "length": 303654
+    },
+    "render_mmlu_train_100k_20241024check": {
+        "sample_ratio": 0.0125,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~other~en~render_mmlu_train_100k_20241024check~1.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~other~en~render_mmlu_train_100k_20241024check~1.0.0~0.0/multimodal_elements/",
+        "length": 97127
+    },
+    "sftmath_qwen25_650k_20241024check": {
+        "sample_ratio": 0.0125,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~other~en~sftmath_qwen25_650k_20241024check~1.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~other~en~sftmath_qwen25_650k_20241024check~1.0.0~0.0/multimodal_elements/",
+        "length": 655892
+    },
+    "cn_mmdataset_o1_pro_caption_r5692_20250110check": {
+        "sample_ratio": 0.1,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~other~unknown~cn_mmdataset_o1_pro_caption_r5692_20250110check~1.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~other~unknown~cn_mmdataset_o1_pro_caption_r5692_20250110check~1.0.0~0.0/multimodal_elements/",
+        "length": 5691
+    },
+    "pixmo_charts_v1": {
+        "data_augment": false,
+        "sample_ratio": 0.0025,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~other~unknown~pixmo_charts_v1~1.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~other~unknown~pixmo_charts_v1~1.0.0~0.0/multimodal_elements/",
+        "length": 116814
+    },
+    "pixmo_digrams_v1": {
+        "data_augment": false,
+        "sample_ratio": 0.005,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~other~unknown~pixmo_digrams_v1~1.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~other~unknown~pixmo_digrams_v1~1.0.0~0.0/multimodal_elements/",
+        "length": 16551
+    },
+    "pixmo_other_v1": {
+        "data_augment": false,
+        "sample_ratio": 0.0025,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~other~unknown~pixmo_other_v1~1.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~other~unknown~pixmo_other_v1~1.0.0~0.0/multimodal_elements/",
+        "length": 71282
+    },
+    "pixmo_tables_v1": {
+        "data_augment": false,
+        "sample_ratio": 0.0025,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~other~unknown~pixmo_tables_v1~1.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~other~unknown~pixmo_tables_v1~1.0.0~0.0/multimodal_elements/",
+        "length": 46518
+    },
+    "MIT_translate_chinese_jsonl": {
+        "data_augment": false,
+        "sample_ratio": 0.0025,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~other~unknown~MIT_translate_chinese_jsonl~1.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~other~unknown~MIT_translate_chinese_jsonl~1.0.0~0.0/multimodal_elements/",
+        "length": 324282
+    },
+    "EdrawSVG_Caption_13K_v1_2_jsonl": {
+        "data_augment": false,
+        "sample_ratio": 0.005,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~Contruction_LongCap~unknown~EdrawSVG_Caption_13K_v1_2_jsonl~1.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~Contruction_LongCap~unknown~EdrawSVG_Caption_13K_v1_2_jsonl~1.0.0~0.0/multimodal_elements/",
+        "length": 13103
+    },
+    "synthTabNet_marketing_md_v2_0_promptMd_jsonl": {
+        "data_augment": false,
+        "sample_ratio": 0.001,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~Table_Markdown~unknown~synthTabNet_marketing_md_v2_0_promptMd_jsonl~1.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~Table_Markdown~unknown~synthTabNet_marketing_md_v2_0_promptMd_jsonl~1.0.0~0.0/multimodal_elements/",
+        "length": 147946
+    },
+    "synthTabNet_pubtabnet_md_v2_0_promptMd_jsonl": {
+        "data_augment": false,
+        "sample_ratio": 0.00075,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~Table_Markdown~unknown~synthTabNet_pubtabnet_md_v2_0_promptMd_jsonl~1.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~Table_Markdown~unknown~synthTabNet_pubtabnet_md_v2_0_promptMd_jsonl~1.0.0~0.0/multimodal_elements/",
+        "length": 150000
+    },
+    "SynthTableBig_cap_aug_v1_0": {
+        "data_augment": false,
+        "sample_ratio": 0.0025,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~Table_Markdown~unknown~SynthTableBig_cap_aug_v1_0~1.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~Table_Markdown~unknown~SynthTableBig_cap_aug_v1_0~1.0.0~0.0/multimodal_elements/",
+        "length": 100139
+    },
+    "SynthTableBig_cap_v1_0_jsonl": {
+        "data_augment": false,
+        "sample_ratio": 0.0005,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~Table_Markdown~unknown~SynthTableBig_cap_v1_0_jsonl~1.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~Table_Markdown~unknown~SynthTableBig_cap_v1_0_jsonl~1.0.0~0.0/multimodal_elements/",
+        "length": 100140
+    },
+    "SynthTableRandom_20240603_md_chat_v2_0_jsonl": {
+        "data_augment": false,
+        "sample_ratio": 0.00075,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~Table_Markdown~unknown~SynthTableRandom_20240603_md_chat_v2_0_jsonl~1.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~Table_Markdown~unknown~SynthTableRandom_20240603_md_chat_v2_0_jsonl~1.0.0~0.0/multimodal_elements/",
+        "length": 86537
+    },
+    "SynthTableSmall_cap_v1_0_jsonl": {
+        "data_augment": false,
+        "sample_ratio": 0.00075,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~Table_Markdown~unknown~SynthTableSmall_cap_v1_0_jsonl~1.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~Table_Markdown~unknown~SynthTableSmall_cap_v1_0_jsonl~1.0.0~0.0/multimodal_elements/",
+        "length": 100116
+    },
+    "synthChart_box_caption_v1_0_jsonl": {
+        "data_augment": false,
+        "sample_ratio": 0.0025,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~Chart_LongCap~unknown~synthChart_box_caption_v1_0_jsonl~1.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~Chart_LongCap~unknown~synthChart_box_caption_v1_0_jsonl~1.0.0~0.0/multimodal_elements/",
+        "length": 99931
+    },
+    "part-pdf_mllm_P_Knowledge_pdf_mllm_250515_pdf_new_pipleine_delivery-Science-Geology-zh_1_0_0_0_0": {
+        "sample_ratio": 0.075,
+        "annotation": "/mnt/shared-storage-user/puyullmgpu-shared/puyu3-delivery/internlm3/P~other~en~part-pdf_mllm_P_Knowledge_pdf_mllm_250515_pdf_new_pipleine_delivery-Science-Geology-zh_1_0_0_0_0~1.0.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 3083,
+        "text_pretrain": true
+    },
+    "part-pdf_mllm_P_Knowledge_pdf_mllm_250515_pdf_new_pipleine_delivery-Medical-en_1_0_0_0_0": {
+        "sample_ratio": 0.075,
+        "annotation": "/mnt/shared-storage-user/puyullmgpu-shared/puyu3-delivery/internlm3/P~other~en~part-pdf_mllm_P_Knowledge_pdf_mllm_250515_pdf_new_pipleine_delivery-Medical-en_1_0_0_0_0~1.0.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 17458,
+        "text_pretrain": true
+    },
+    "part-pdf_mllm_P_Knowledge_pdf_mllm_250604_pdf_new_pipleine_delivery-Entertainment-other_1_0_0_0_0": {
+        "sample_ratio": 0.075,
+        "annotation": "/mnt/shared-storage-user/puyullmgpu-shared/puyu3-delivery/internlm3/P~other~en~part-pdf_mllm_P_Knowledge_pdf_mllm_250604_pdf_new_pipleine_delivery-Entertainment-other_1_0_0_0_0~1.0.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 3,
+        "text_pretrain": true
+    },
+    "part-pdf_mllm_P_Knowledge_pdf_mllm_250515_pdf_new_pipleine_delivery-Engineering-Chemical_Engineering_and_Technology-en_1_0_0_0_0": {
+        "sample_ratio": 0.075,
+        "annotation": "/mnt/shared-storage-user/puyullmgpu-shared/puyu3-delivery/internlm3/P~other~en~part-pdf_mllm_P_Knowledge_pdf_mllm_250515_pdf_new_pipleine_delivery-Engineering-Chemical_Engineering_and_Technology-en_1_0_0_0_0~1.0.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 919,
+        "text_pretrain": true
+    },
+    "part-pdf_mllm_P_Knowledge_pdf_mllm_250515_pdf_new_pipleine_delivery-Engineering-Food_Science_and_Engineering-other_1_0_0_0_0": {
+        "sample_ratio": 0.075,
+        "annotation": "/mnt/shared-storage-user/puyullmgpu-shared/puyu3-delivery/internlm3/P~other~en~part-pdf_mllm_P_Knowledge_pdf_mllm_250515_pdf_new_pipleine_delivery-Engineering-Food_Science_and_Engineering-other_1_0_0_0_0~1.0.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 1,
+        "text_pretrain": true
+    },
+    "part-reasoning_P_Reasoning_reasoning_logic-top_p10_1_0_0_0_0": {
+        "sample_ratio": 0.075,
+        "annotation": "/mnt/shared-storage-user/puyullmgpu-shared/puyu3-delivery/internlm3/P~other~unknown~part-reasoning_P_Reasoning_reasoning_logic-top_p10_1_0_0_0_0~1.0.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 1,
+        "text_pretrain": true
+    },
+    "part-pdf_mllm_P_Knowledge_pdf_mllm_250604_pdf_new_pipleine_delivery-Human_Daily_Life-other_1_0_0_0_0": {
+        "sample_ratio": 0.075,
+        "annotation": "/mnt/shared-storage-user/puyullmgpu-shared/puyu3-delivery/internlm3/P~other~unknown~part-pdf_mllm_P_Knowledge_pdf_mllm_250604_pdf_new_pipleine_delivery-Human_Daily_Life-other_1_0_0_0_0~1.0.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 14,
+        "text_pretrain": true
+    },
+    "part-life_science_P_Life_science_life_science_250604_cc_recall_medical_delivery-Policy_and_Regulatory_Framework-Knowledge_dense-en_1_0_0_0_0": {
+        "sample_ratio": 0.075,
+        "annotation": "/mnt/shared-storage-user/puyullmgpu-shared/puyu3-delivery/internlm3/P~other~en~part-life_science_P_Life_science_life_science_250604_cc_recall_medical_delivery-Policy_and_Regulatory_Framework-Knowledge_dense-en_1_0_0_0_0~1.0.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 1,
+        "text_pretrain": true
+    },
+    "part-life_science_P_Life_science_life_science_250604_cc_recall_medical_delivery-Academic_Knowledge_Production-Reasoning_heavy-en_1_0_0_0_0": {
+        "sample_ratio": 0.075,
+        "annotation": "/mnt/shared-storage-user/puyullmgpu-shared/puyu3-delivery/internlm3/P~other~en~part-life_science_P_Life_science_life_science_250604_cc_recall_medical_delivery-Academic_Knowledge_Production-Reasoning_heavy-en_1_0_0_0_0~1.0.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 1,
+        "text_pretrain": true
+    },
+    "part-pdf_mllm_P_Knowledge_pdf_mllm_250604_pdf_new_pipleine_delivery-Science-Mathematics-other_1_0_0_0_0": {
+        "sample_ratio": 0.075,
+        "annotation": "/mnt/shared-storage-user/puyullmgpu-shared/puyu3-delivery/internlm3/P~other~en~part-pdf_mllm_P_Knowledge_pdf_mllm_250604_pdf_new_pipleine_delivery-Science-Mathematics-other_1_0_0_0_0~1.0.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 170,
+        "text_pretrain": true
+    },
+    "part-en_P_Knowledge_en_mineru_pdf_2025-16topics_post_cleaned-History-zh_1_0_0_0_0": {
+        "sample_ratio": 0.075,
+        "annotation": "/mnt/shared-storage-user/puyullmgpu-shared/puyu3-delivery/internlm3/P~other~en~part-en_P_Knowledge_en_mineru_pdf_2025-16topics_post_cleaned-History-zh_1_0_0_0_0~1.0.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 1019,
+        "text_pretrain": true
+    },
+    "part-pdf_mllm_P_Knowledge_pdf_mllm_250604_pdf_new_pipleine_delivery-Engineering-Mining_Engineering-en_1_0_0_0_0": {
+        "sample_ratio": 0.075,
+        "annotation": "/mnt/shared-storage-user/puyullmgpu-shared/puyu3-delivery/internlm3/P~other~en~part-pdf_mllm_P_Knowledge_pdf_mllm_250604_pdf_new_pipleine_delivery-Engineering-Mining_Engineering-en_1_0_0_0_0~1.0.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 570,
+        "text_pretrain": true
+    },
+    "part-pdf_mllm_P_Knowledge_pdf_mllm_250605_cc_pdf_edu_new_pipleine_delivery-Science-Geophysics-en_1_0_0_0_0": {
+        "sample_ratio": 0.075,
+        "annotation": "/mnt/shared-storage-user/puyullmgpu-shared/puyu3-delivery/internlm3/P~other~en~part-pdf_mllm_P_Knowledge_pdf_mllm_250605_cc_pdf_edu_new_pipleine_delivery-Science-Geophysics-en_1_0_0_0_0~1.0.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 447,
+        "text_pretrain": true
+    },
+    "part-pdf_mllm_P_Knowledge_pdf_mllm_250605_cc_pdf_edu_new_pipleine_delivery-Engineering-Transportation_Engineering-zh_1_0_0_0_0": {
+        "sample_ratio": 0.075,
+        "annotation": "/mnt/shared-storage-user/puyullmgpu-shared/puyu3-delivery/internlm3/P~other~zh~part-pdf_mllm_P_Knowledge_pdf_mllm_250605_cc_pdf_edu_new_pipleine_delivery-Engineering-Transportation_Engineering-zh_1_0_0_0_0~1.0.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 936,
+        "text_pretrain": true
+    },
+    "part-en_P_Material_science_en_0610_matbench_omdb_band_gap_pretrain_1_0_0_0_0": {
+        "sample_ratio": 0.075,
+        "annotation": "/mnt/shared-storage-user/puyullmgpu-shared/puyu3-delivery/internlm3/P~other~en~part-en_P_Material_science_en_0610_matbench_omdb_band_gap_pretrain_1_0_0_0_0~1.0.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 1007,
+        "text_pretrain": true
+    },
+    "part-pdf_mllm_P_Knowledge_pdf_mllm_250515_pdf_new_pipleine_delivery-Science-Geophysics-en_1_0_0_0_0": {
+        "sample_ratio": 0.075,
+        "annotation": "/mnt/shared-storage-user/puyullmgpu-shared/puyu3-delivery/internlm3/P~other~en~part-pdf_mllm_P_Knowledge_pdf_mllm_250515_pdf_new_pipleine_delivery-Science-Geophysics-en_1_0_0_0_0~1.0.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 391,
+        "text_pretrain": true
+    },
+    "part-geo_science_P_Geo_science_geo_science_shujutang_text_science_corpus_textbook_vl_mix_1_0_0_0_0": {
+        "sample_ratio": 0.075,
+        "annotation": "/mnt/shared-storage-user/puyullmgpu-shared/puyu3-delivery/internlm3/P~other~en~part-geo_science_P_Geo_science_geo_science_shujutang_text_science_corpus_textbook_vl_mix_1_0_0_0_0~1.0.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 1,
+        "text_pretrain": true
+    },
+    "part-pdf_mllm_P_Knowledge_pdf_mllm_250605_cc_pdf_edu_new_pipleine_delivery-Science-Physics-en_1_0_0_0_0": {
+        "sample_ratio": 0.075,
+        "annotation": "/mnt/shared-storage-user/puyullmgpu-shared/puyu3-delivery/internlm3/P~other~en~part-pdf_mllm_P_Knowledge_pdf_mllm_250605_cc_pdf_edu_new_pipleine_delivery-Science-Physics-en_1_0_0_0_0~1.0.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 14880,
+        "text_pretrain": true
+    },
+    "part-en_P_Instruct_en_delivery_0605_complex_instruction_following_cif_ddm_thinking_easy_v1_1_0_0_0_0": {
+        "sample_ratio": 0.075,
+        "annotation": "/mnt/shared-storage-user/puyullmgpu-shared/puyu3-delivery/internlm3/P~other~en~part-en_P_Instruct_en_delivery_0605_complex_instruction_following_cif_ddm_thinking_easy_v1_1_0_0_0_0~1.0.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 1
+    },
+    "videochat2it_conversation_videochat2": {
+        "data_augment": false,
+        "sample_ratio": 0.125,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~other~unknown~videochat2it_conversation_videochat2~3.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~other~unknown~videochat2it_conversation_videochat2~3.0.0~0.0/multimodal_elements/",
+        "length": 9376
+    },
+    "videochat2it_conversation_videochatgpt": {
+        "data_augment": false,
+        "sample_ratio": 0.125,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~other~unknown~videochat2it_conversation_videochatgpt~3.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~other~unknown~videochat2it_conversation_videochatgpt~3.0.0~0.0/multimodal_elements/",
+        "length": 13297
+    },
+    "videochat2it_reasoning_clevrer_mc": {
+        "data_augment": false,
+        "sample_ratio": 0.125,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~other~unknown~videochat2it_reasoning_clevrer_mc~3.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~other~unknown~videochat2it_reasoning_clevrer_mc~3.0.0~0.0/multimodal_elements/",
+        "length": 42620
+    },
+    "videochat2it_reasoning_clevrer_qa": {
+        "data_augment": false,
+        "sample_ratio": 0.125,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~other~unknown~videochat2it_reasoning_clevrer_qa~3.1.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~other~unknown~videochat2it_reasoning_clevrer_qa~3.1.0~0.0/multimodal_elements/",
+        "length": 40000
+    },
+    "videochat2it_reasoning_next_qa": {
+        "data_augment": false,
+        "sample_ratio": 0.125,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~other~unknown~videochat2it_reasoning_next_qa~3.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~other~unknown~videochat2it_reasoning_next_qa~3.0.0~0.0/multimodal_elements/",
+        "length": 34132
+    },
+    "videochat2it_vqa_tgif_frame_qa": {
+        "data_augment": false,
+        "sample_ratio": 0.125,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~other~unknown~videochat2it_vqa_tgif_frame_qa~3.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~other~unknown~videochat2it_vqa_tgif_frame_qa~3.0.0~0.0/multimodal_elements/",
+        "length": 39149
+    },
+    "videochat2it_vqa_webvid_qa": {
+        "data_augment": false,
+        "sample_ratio": 0.125,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~other~unknown~videochat2it_vqa_webvid_qa~3.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~other~unknown~videochat2it_vqa_webvid_qa~3.0.0~0.0/multimodal_elements/",
+        "length": 99994
+    },
+    "videochat2it_vqa_tgif_transition_qa": {
+        "data_augment": false,
+        "sample_ratio": 0.125,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~other~unknown~videochat2it_vqa_tgif_transition_qa~3.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~other~unknown~videochat2it_vqa_tgif_transition_qa~3.0.0~0.0/multimodal_elements/",
+        "length": 52696
+    },
+    "videogptplus": {
+        "data_augment": false,
+        "sample_ratio": 0.125,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~other~unknown~videogptplus~3.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~other~unknown~videogptplus~3.0.0~0.0/multimodal_elements/",
+        "length": 112642
+    },
+    "videochat2it_conversation_videochat1_zh": {
+        "data_augment": false,
+        "sample_ratio": 0.125,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~other~zh~videochat2it_conversation_videochat1_zh~3.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~other~zh~videochat2it_conversation_videochat1_zh~3.0.0~0.0/multimodal_elements/",
+        "length": 4112
+    },
+    "LSMDC_qa_data_40k_sharegpt4o": {
+        "data_augment": false,
+        "sample_ratio": 0.25,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~other~unknown~LSMDC_qa_data_40k_sharegpt4o~3.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~other~unknown~LSMDC_qa_data_40k_sharegpt4o~3.0.0~0.0/multimodal_elements/",
+        "length": 41197
+    },
+    "videochat2it_conversation_videochatgpt_zh": {
+        "data_augment": false,
+        "sample_ratio": 0.125,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~other~zh~videochat2it_conversation_videochatgpt_zh~3.1.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~other~zh~videochat2it_conversation_videochatgpt_zh~3.1.0~0.0/multimodal_elements/",
+        "length": 13256
+    },
+    "videochat2it_reasoning_clevrer_qa_zh": {
+        "data_augment": false,
+        "sample_ratio": 0.125,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~other~zh~videochat2it_reasoning_clevrer_qa_zh~3.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~other~zh~videochat2it_reasoning_clevrer_qa_zh~3.0.0~0.0/multimodal_elements/",
+        "length": 26520
+    },
+    "videochat2it_conversation_videochat2_zh": {
+        "data_augment": false,
+        "sample_ratio": 0.125,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~other~zh~videochat2it_conversation_videochat2_zh~3.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~other~zh~videochat2it_conversation_videochat2_zh~3.0.0~0.0/multimodal_elements/",
+        "length": 9341
+    },
+    "videochat2it_reasoning_next_qa_zh": {
+        "data_augment": false,
+        "sample_ratio": 0.125,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~other~zh~videochat2it_reasoning_next_qa_zh~3.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~other~zh~videochat2it_reasoning_next_qa_zh~3.0.0~0.0/multimodal_elements/",
+        "length": 14161
+    },
+    "videochat2it_vqa_webvid_qa_zh": {
+        "data_augment": false,
+        "sample_ratio": 0.125,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~other~zh~videochat2it_vqa_webvid_qa_zh~3.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~other~zh~videochat2it_vqa_webvid_qa_zh~3.0.0~0.0/multimodal_elements/",
+        "length": 30515
+    },
+    "Vript_Chinese_pretrain_20240926_readable": {
+        "sample_ratio": 0.0125,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~other~unknown~Vript_Chinese_pretrain_20240926_readable~3.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~other~unknown~Vript_Chinese_pretrain_20240926_readable~3.0.0~0.0/multimodal_elements/",
+        "length": 293572
+    },
+    "Vript_pretrain_20240926_readable": {
+        "sample_ratio": 0.0125,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~other~unknown~Vript_pretrain_20240926_readable~3.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~other~unknown~Vript_pretrain_20240926_readable~3.0.0~0.0/multimodal_elements/",
+        "length": 408813
+    },
+    "grounding_didemo-didemo-train_66k_cpt": {
+        "data_augment": false,
+        "sample_ratio": 0.0125,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~mm_video~unknown~grounding_didemo-didemo-train_66k_cpt~3.1.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~mm_video~unknown~grounding_didemo-didemo-train_66k_cpt~3.1.0~0.0/multimodal_elements/",
+        "length": 64254
+    },
+    "videochat2it_vqa_ego_qa": {
+        "data_augment": false,
+        "sample_ratio": 0.125,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~other~unknown~videochat2it_vqa_ego_qa~4.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~other~unknown~videochat2it_vqa_ego_qa~4.0.0~0.0/multimodal_elements/",
+        "length": 7797
+    },
+    "videochat2it_vqa_ego_qa_zh": {
+        "data_augment": false,
+        "sample_ratio": 0.125,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~other~zh~videochat2it_vqa_ego_qa_zh~4.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~other~zh~videochat2it_vqa_ego_qa_zh~4.0.0~0.0/multimodal_elements/",
+        "length": 7797
+    },
+    "converted_vlm_3r_data_merged_qa_route_plan_train_arkit": {
+        "data_augment": false,
+        "sample_ratio": 0.05,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~other~unknown~converted_vlm_3r_data_merged_qa_route_plan_train_arkit~4.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~other~unknown~converted_vlm_3r_data_merged_qa_route_plan_train_arkit~4.0.0~0.0/multimodal_elements/",
+        "length": 1364
+    },
+    "libgen_textbooks_mm": {
+        "data_augment": true,
+        "sample_ratio": 0.0125,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~other~unknown~libgen_textbooks_mm~1.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~other~unknown~libgen_textbooks_mm~1.0.0~0.0/multimodal_elements/",
+        "length": 59679
+    },
+    "multimodal_materials_mathpix_master": {
+        "data_augment": true,
+        "sample_ratio": 0.0125,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~other~unknown~multimodal_materials_mathpix_master~1.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~other~unknown~multimodal_materials_mathpix_master~1.0.0~0.0/multimodal_elements/",
+        "length": 10410
+    },
+    "converted_vlm_3r_data_merged_qa_route_plan_train_cpt": {
+        "data_augment": false,
+        "sample_ratio": 0.05,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~other~unknown~converted_vlm_3r_data_merged_qa_route_plan_train_cpt~1.0.0~0.0/jsonl/",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~other~unknown~converted_vlm_3r_data_merged_qa_route_plan_train_cpt~1.0.0~0.0/multimodal_elements/",
+        "length": 2721
+    }
+}

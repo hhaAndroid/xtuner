@@ -1,0 +1,7 @@
+{
+    "DAPO_MATH": {
+        "sample_ratio": 0.01,
+        "annotation": "/mnt/shared-storage-user/llmrazor-share/data/dapo_math/dapo-math-17k.jsonl",
+        "length": 1791700
+    }
+}

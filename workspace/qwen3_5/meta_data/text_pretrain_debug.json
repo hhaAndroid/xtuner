@@ -1,0 +1,17 @@
+{
+  "physics__P~Physics~physics~20250407~2.0.0~0.0__part-67ff7de8838a-000086": {
+    "media_root": "",
+    "annotation": "/mnt/shared-storage-user/songdemin/user/puyudilivery/datasets/stable_20250930a/physics/P~Physics~physics~20250407~2.0.0~0.0/part-67ff7de8838a-000086.jsonl",
+    "sample_ratio": 1.0
+  },
+  "geo_science__P~Geo_science~geo_science~text.science_corpus_textbook_vl.mix~2.0.0~0.0__part-680b2ed0d316-000057": {
+    "media_root": "",
+    "annotation": "/mnt/shared-storage-user/songdemin/user/puyudilivery/datasets/stable_20250930a/geo_science/P~Geo_science~geo_science~text.science_corpus_textbook_vl.mix~2.0.0~0.0/part-680b2ed0d316-000057.jsonl",
+    "sample_ratio": 1.0
+  },
+  "geo_science__P~Geo_science~geo_science~text.science_corpus_textbook_vl.mix~2.0.0~0.0__part-680b2ed0d316-000112": {
+    "media_root": "",
+    "annotation": "/mnt/shared-storage-user/songdemin/user/puyudilivery/datasets/stable_20250930a/geo_science/P~Geo_science~geo_science~text.science_corpus_textbook_vl.mix~2.0.0~0.0/part-680b2ed0d316-000112.jsonl",
+    "sample_ratio": 1.0
+  }
+}

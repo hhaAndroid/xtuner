@@ -1,0 +1,12 @@
+序列 32k + 35b 模型 
+
+nvml显示 allocate显示
+
+ep4 5.5g 66m
+ep1 2.9g 65m            额外的 all2all nccl 大概占 2.6g
+ep4+fp8 5.5g 66m
+
+offload+ep1 3.5g 538m            正好 3.5g-2.9g=538m
+offload+ep1 OffloadManager().clear() 2.9g 65m 
+offload+ep4 OffloadManager().clear() 5.5g 66m
+

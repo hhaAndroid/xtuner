@@ -1,0 +1,9 @@
+{
+    "P~Single_Image_OCR_ShortQA~en~estvqa_en_20240620~1.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Single_Image_OCR_ShortQA~en~estvqa_en_20240620~1.0.0~0.0/jsonl/",
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~Single_Image_OCR_ShortQA~en~estvqa_en_20240620~1.0.0~0.0/multimodal_elements/",
+        "length": 3408
+    }
+}

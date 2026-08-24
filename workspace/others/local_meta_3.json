@@ -1,0 +1,23 @@
+{
+    "P~Agent~en~mengjie~1.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/puyullmgpu-shared/puyu3-delivery/internlm3/P~Agent~en~mengjie~1.0.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 3014
+    },
+    "P~Agent~en~xlam~2.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/puyullmgpu-shared/puyu3-delivery/internlm3/P~Agent~en~xlam~2.0.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 60000
+    },
+    "P~Agent~en~chuangzhi~3.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/puyullmgpu-shared/puyu3-delivery/internlm3/P~Agent~en~chuangzhi~3.0.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 56680
+    }
+}

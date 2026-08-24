@@ -1,0 +1,14 @@
+{
+    "claw-bench": {
+        "tokenize_fn": "RLClawTokenizeFnConfig",
+        "root_path": "/mnt/shared-storage-user/llmit/user/liukuikun/workspace/bench/claw-bench/tasks",
+        "annotation": "/mnt/shared-storage-user/huanghaian/code/temp/xtuner/workspace/agent_dev/claw_tasks.jsonl",
+        "sample_ratio": 1.0
+    },
+    "tb2_rl": {
+        "tokenize_fn": "RLTB2RLTokenizeFnConfig",
+        "root_path": "/mnt/shared-storage-user/llmit1/user/liukuikun/delivery/data/terminalbench2_rl_data",
+        "annotation": "/mnt/shared-storage-user/huanghaian/code/temp/xtuner/workspace/agent_dev/tb2_tasks.jsonl",
+        "sample_ratio": 1.0
+    }
+}

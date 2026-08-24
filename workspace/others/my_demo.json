@@ -1,0 +1,7 @@
+{
+    "qwen3_video":{
+        "sample_ratio": 3000.0,
+        "annotation": "/mnt/shared-storage-user/huanghaian/code/temp/xtuner/dump.jsonl",
+        "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~other~unknown~image-text_GMAI-VL-5__5M_cls_100w_sft_data_internvl_final~1.0.0~0.0/multimodal_elements/"
+    }
+}

@@ -1,0 +1,72 @@
+{
+  "physics__P~Physics~physics~20250407~2.0.0~0.0__part-67ff7de8838a-000086": {
+    "media_root": "",
+    "annotation": "/mnt/shared-storage-user/songdemin/user/puyudilivery/datasets/stable_20250930a/physics/P~Physics~physics~20250407~2.0.0~0.0/part-67ff7de8838a-000086.jsonl",
+    "sample_ratio": 1.0
+  },
+  "geo_science__P~Geo_science~geo_science~text.science_corpus_textbook_vl.mix~2.0.0~0.0__part-680b2ed0d316-000057": {
+    "media_root": "",
+    "annotation": "/mnt/shared-storage-user/songdemin/user/puyudilivery/datasets/stable_20250930a/geo_science/P~Geo_science~geo_science~text.science_corpus_textbook_vl.mix~2.0.0~0.0/part-680b2ed0d316-000057.jsonl",
+    "sample_ratio": 1.0
+  },
+  "geo_science__P~Geo_science~geo_science~text.science_corpus_textbook_vl.mix~2.0.0~0.0__part-680b2ed0d316-000112": {
+    "media_root": "",
+    "annotation": "/mnt/shared-storage-user/songdemin/user/puyudilivery/datasets/stable_20250930a/geo_science/P~Geo_science~geo_science~text.science_corpus_textbook_vl.mix~2.0.0~0.0/part-680b2ed0d316-000112.jsonl",
+    "sample_ratio": 1.0
+  },
+  "code__P~Code~code~stack_v2_python_good_by_agent_without_comment_29_checked~1.1.0~0.0__part-676edae99917-000476": {
+    "media_root": "",
+    "annotation": "/mnt/shared-storage-user/songdemin/user/puyudilivery/datasets/stable_20250930a/code/P~Code~code~stack_v2_python_good_by_agent_without_comment_29_checked~1.1.0~0.0/part-676edae99917-000476.jsonl",
+    "sample_ratio": 1.0
+  },
+  "code__P~Code~code~cc-stackexchange_data_json~1.0.0~0.0__part-664b3a697413-009204": {
+    "media_root": "",
+    "annotation": "/mnt/shared-storage-user/songdemin/user/puyudilivery/datasets/stable_20250930a/code/P~Code~code~cc-stackexchange_data_json~1.0.0~0.0/part-664b3a697413-009204.jsonl",
+    "sample_ratio": 1.0
+  },
+  "code__P~Code~code~cc-stackexchange_data_json~1.0.0~0.0__part-664b3a697413-003051": {
+    "media_root": "",
+    "annotation": "/mnt/shared-storage-user/songdemin/user/puyudilivery/datasets/stable_20250930a/code/P~Code~code~cc-stackexchange_data_json~1.0.0~0.0/part-664b3a697413-003051.jsonl",
+    "sample_ratio": 1.0
+  },
+  "retrieval__P~Math~retrieval~fasttext_binary_v003_recall_pjcc~2.0.0~0.0__part-68383ee40273-011337": {
+    "media_root": "",
+    "annotation": "/mnt/shared-storage-user/songdemin/user/puyudilivery/datasets/stable_20250930a/retrieval/P~Math~retrieval~fasttext_binary_v003_recall_pjcc~2.0.0~0.0/part-68383ee40273-011337.jsonl",
+    "sample_ratio": 1.0
+  },
+  "scihub_pdf__P~Knowledge~scihub_pdf~250605_llm_production_filter_add_dedup~1.0.0~0.0__part-684052578639-028496": {
+    "media_root": "",
+    "annotation": "/mnt/shared-storage-user/songdemin/user/puyudilivery/datasets/stable_20250930a/scihub_pdf/P~Knowledge~scihub_pdf~250605_llm_production_filter_add_dedup~1.0.0~0.0/part-684052578639-028496.jsonl",
+    "sample_ratio": 1.0
+  },
+  "scihub_pdf__P~Knowledge~scihub_pdf~250605_llm_production_filter_add_dedup~1.0.0~0.0__part-684052578639-006464": {
+    "media_root": "",
+    "annotation": "/mnt/shared-storage-user/songdemin/user/puyudilivery/datasets/stable_20250930a/scihub_pdf/P~Knowledge~scihub_pdf~250605_llm_production_filter_add_dedup~1.0.0~0.0/part-684052578639-006464.jsonl",
+    "sample_ratio": 1.0
+  },
+  "agent_retrieval__P~Knowledge~agent_retrieval~sy_chinese~2.0.0~0.0__part-676edd3902d3-000908": {
+    "media_root": "",
+    "annotation": "/mnt/shared-storage-user/songdemin/user/puyudilivery/datasets/stable_20250930a/agent_retrieval/P~Knowledge~agent_retrieval~sy_chinese~2.0.0~0.0/part-676edd3902d3-000908.jsonl",
+    "sample_ratio": 1.0
+  },
+  "agent_retrieval__P~Knowledge~agent_retrieval~sy_chinese~2.0.0~0.0__part-676edd3902d3-000893": {
+    "media_root": "",
+    "annotation": "/mnt/shared-storage-user/songdemin/user/puyudilivery/datasets/stable_20250930a/agent_retrieval/P~Knowledge~agent_retrieval~sy_chinese~2.0.0~0.0/part-676edd3902d3-000893.jsonl",
+    "sample_ratio": 1.0
+  },
+  "agent_retrieval__P~Knowledge~agent_retrieval~yichuan_0730_fix~1.0.0~0.0__part-672c98da4b2e-000086": {
+    "media_root": "",
+    "annotation": "/mnt/shared-storage-user/songdemin/user/puyudilivery/datasets/stable_20250930a/agent_retrieval/P~Knowledge~agent_retrieval~yichuan_0730_fix~1.0.0~0.0/part-672c98da4b2e-000086.jsonl",
+    "sample_ratio": 1.0
+  },
+  "en__P~Knowledge~en~mineru_pdf_2025-16topics_post_cleaned-Religion-zh~1.0.0~0.0__part-67f89836864d-001888": {
+    "media_root": "",
+    "annotation": "/mnt/shared-storage-user/songdemin/user/puyudilivery/datasets/stable_20250930a/en/P~Knowledge~en~mineru_pdf_2025-16topics_post_cleaned-Religion-zh~1.0.0~0.0/part-67f89836864d-001888.jsonl",
+    "sample_ratio": 1.0
+  },
+  "cn__P~Language~cn~zh-zhihu-answer-discipline~1.0.0~2.2__merge-62-2273_2274_2275_2276_2277_2278_2279_2280_2281_2282_2283_2284_1": {
+    "media_root": "",
+    "annotation": "/mnt/shared-storage-user/songdemin/user/puyudilivery/datasets/stable_20250930a/cn/P~Language~cn~zh-zhihu-answer-discipline~1.0.0~2.2/merge-62-2273_2274_2275_2276_2277_2278_2279_2280_2281_2282_2283_2284_1.jsonl",
+    "sample_ratio": 1.0
+  }
+}

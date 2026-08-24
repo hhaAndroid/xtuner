@@ -1,0 +1,12 @@
+
+DEEPEP_MAX_TOKENS_PER_RANK=256 lmdeploy serve api_server /mnt/shared-storage-user/llmrazor-share/model/Qwen3-VL-30B-A3B-Instruct_MOE --model-name qwenvl --enable-return-routed-experts --ep 4 
+
+DEEPEP_MAX_TOKENS_PER_RANK=256 lmdeploy serve api_server /mnt/shared-storage-user/llmrazor-share/model/Qwen3-30B-A3B --model-name qwenvl --enable-return-routed-experts --ep 4 
+
+python /mnt/shared-storage-user/huanghaian/code/temp/xtuner/workspace/qwen3_5/test_generate_all.py
+
+
+extra_rollout_config=dict(
+    lmdeploy_tool_call_parser="qwen3coder",
+    lmdeploy_reasoning_parser="default",
+),

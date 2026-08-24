@@ -1,0 +1,10 @@
+        lmdeploy_enable_prefix_caching=True,
+        lmdeploy_prefix_cache_state_budget=8, # 需要调下，
+        lmdeploy_prefix_cache_decode_state_interval=2048 # 需要调
+
+        extra_engine_config["enable_prefix_caching"] = lmdeploy_config_kwargs.pop("enable_prefix_caching", False)
+        extra_engine_config["prefix_cache_state_budget"] = lmdeploy_config_kwargs.pop("prefix_cache_state_budget", 0)
+        extra_engine_config["prefix_cache_decode_state_interval"] = lmdeploy_config_kwargs.pop(
+            "prefix_cache_decode_state_interval", 0
+        )
+

@@ -1,0 +1,26 @@
+import debugpy
+debugpy.connect(('10.102.250.69', 5680))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ss -ltnp | grep -E ':5680\b'
+

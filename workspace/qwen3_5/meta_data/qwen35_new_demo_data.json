@@ -1,0 +1,69 @@
+{
+    "demo1": {
+     "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~Bank_Card_QA~unknown~credit_card_v1_0~2.0.0~0.0/multimodal_elements/",
+     "annotation": "/mnt/shared-storage-user/intern-pretrain-shared02/linjunyao/internvalidata/output/260410_sft_format_clean_sample_v0_2_0_to_v0_3_0/passed/0000_P_Bank_Card_QA_unknown_credit_card_v1_0_2.0.0_0.0_n100.jsonl",
+     "sample_ratio": 1
+   },
+   "demo2": {
+    "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~Chart_LongCap~unknown~synthChart_classDiagram_lp_v1_0_jsonl~2.0.0~0.0/multimodal_elements/",
+    "annotation": "/mnt/shared-storage-user/intern-pretrain-shared02/linjunyao/internvalidata/output/260410_sft_format_clean_sample_v0_2_0_to_v0_3_0/passed/0001_P_Chart_LongCap_unknown_synthChart_classDiagram_lp_v1_0_jsonl_2.0.0_0.0_n100.jsonl",
+    "sample_ratio": 1
+  },
+  "demo3": {
+    "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~mm_video~en~reasoning_next_qa_oe-openend_qa_annos-next_qa_train_openend_35k~4.0.0~0.0/multimodal_elements/",
+    "annotation": "/mnt/shared-storage-user/intern-pretrain-shared02/linjunyao/internvalidata/output/260410_sft_format_clean_sample_v0_2_0_to_v0_3_0/passed/0002_P_mm_video_en_reasoning_next_qa_oe-openend_qa_annos-next_qa_train_openend_35k_4._n100.jsonl",
+    "sample_ratio": 1
+  },
+  "demo4": {
+    "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~mm_video~reasoning~video_reasoning_youtube_20251128~4.0.0~0.0/multimodal_elements/",
+    "annotation": "/mnt/shared-storage-user/intern-pretrain-shared02/linjunyao/internvalidata/output/260410_sft_format_clean_sample_v0_2_0_to_v0_3_0/passed/0003_P_mm_video_reasoning_video_reasoning_youtube_20251128_4.0.0_0.0_n100.jsonl",
+    "sample_ratio": 1
+  },
+  "demo5": {
+    "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~mm_longdoc~en~scihub_translation_en2zh_20241113~2.0.0~0.0/multimodal_elements/",
+    "annotation": "/mnt/shared-storage-user/intern-pretrain-shared02/linjunyao/internvalidata/output/260410_sft_format_clean_sample_v0_2_0_to_v0_3_0/passed/0004_P_mm_longdoc_en_scihub_translation_en2zh_20241113_2.0.0_0.0_n100.jsonl",
+    "sample_ratio": 1
+  },
+  "demo6": {
+    "annotation": "/mnt/shared-storage-user/intern-pretrain-shared02/linjunyao/internvalidata/output/260410_sft_format_clean_sample_v0_2_0_to_v0_3_0/passed/0005_P_Code_code_cot_code_sft_3.0.0_0.0_n100.jsonl",
+    "sample_ratio": 1
+  },
+  "demo7": {
+    "annotation": "/mnt/shared-storage-user/intern-pretrain-shared02/linjunyao/internvalidata/output/260410_sft_format_clean_sample_v0_2_0_to_v0_3_0/passed/0006_P_Exam_kaoshi_zh_quark_2.0.0_0.0_n100.jsonl",
+    "sample_ratio": 1
+  },
+  "demo8": {
+    "annotation": "/mnt/shared-storage-user/intern-pretrain-shared02/linjunyao/internvalidata/output/260410_sft_format_clean_sample_v0_2_0_to_v0_3_0/passed/0009_P_Agent_en_rapidapi_2.0.0_0.0_n100.jsonl",
+    "sample_ratio": 1
+  },
+  "demo9": {
+    "annotation": "/mnt/shared-storage-user/intern-pretrain-shared02/linjunyao/internvalidata/output/260410_sft_format_clean_sample_v0_2_0_to_v0_3_0/passed/0010_P_Agent_en_supp_multi_turn_4.0.0_0.0_n100.jsonl",
+    "sample_ratio": 1
+  },
+  "demo10": {
+    "annotation": "/mnt/shared-storage-user/intern-pretrain-shared02/linjunyao/internvalidata/output/260410_sft_format_clean_sample_v0_2_0_to_v0_3_0/passed/0007_P_Agent_en_GAIA_enhanced_1229_2.0.0_0.0_n100.jsonl",
+    "sample_ratio": 1
+  },
+  "demo11": {
+    "annotation": "/mnt/shared-storage-user/intern-pretrain-shared02/linjunyao/internvalidata/output/260410_sft_format_clean_sample_v0_2_0_to_v0_3_0/passed/0011_P~Science~mix_science_data~sgi_wet_protocol~1.0.0~0.0_n100.jsonl",
+    "sample_ratio": 1
+  },
+  "demo12": {
+    "annotation": "/mnt/shared-storage-user/intern-pretrain-shared02/linjunyao/internvalidata/output/260410_sft_format_clean_sample_v0_2_0_to_v0_3_0/passed/0012_P~Material_science~material_science~mp_20_enhanced~4.0.0~0.0_n100.jsonl",
+    "sample_ratio": 1
+  },
+  "demo13": {
+    "annotation": "/mnt/shared-storage-user/intern-pretrain-shared02/linjunyao/internvalidata/output/260410_sft_format_clean_sample_v0_2_0_to_v0_3_0/passed/0013_P~Chemistry~chemistry~mol-instruction-ori-mini~2.0.0~0.0_n100.jsonl",
+    "sample_ratio": 1
+  },
+  "demo14": {
+    "media_root": "yidian_ssd:s3://intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~other~unknown~ChEBI~3.0.0~0.0/multimodal_elements/",
+    "annotation": "/mnt/shared-storage-user/intern-pretrain-shared02/linjunyao/internvalidata/output/260410_sft_format_clean_sample_v0_2_0_to_v0_3_0/passed/0014_P~other~unknown~ChEBI~3.0.0~0.0_n100.jsonl",
+    "sample_ratio": 1
+  },
+  "demo15": {
+    "media_root": "xsky:s3://gulixin/data/interns1_1_base02_20260120b_tiny/P~Video_Video_ShortCap~en~tarsier2_recap_585k~1.7.0~0.0/multimodal_elements/",
+    "annotation": "/mnt/shared-storage-user/intern-pretrain-shared02/linjunyao/internvalidata/output/260410_sft_format_clean_sample_v0_2_0_to_v0_3_0/passed/0015_tarsier2_recap_timestamp.jsonl",
+    "sample_ratio": 1
+  }
+ }
