@@ -168,7 +168,6 @@ class SyncProduceStrategyConfig(ProduceStrategyConfig):
         rollout_controller: "Optional[RolloutControllerProxy]" = None,
     ) -> "SyncProduceStrategy":
         return SyncProduceStrategy(
-            is_valid_sample_fn=self.is_valid_sample_fn,
             should_continue_fn=self.should_continue_fn,
         )
 
