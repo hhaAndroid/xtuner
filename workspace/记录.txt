@@ -1,0 +1,105 @@
+conda activate pt2121_all_env
+pip install torch==2.12.1 torchvision==0.27.1 --index-url https://download.pytorch.org/whl/cu132  
+不用 -i http://mirrors.h.pjlab.org.cn/pypi/simple/ --trusted-host mirrors.h.pjlab.org.cn 虽然很快，但是里面的是cuda runtime 是 13.0，我们要 13.2
+
+cd /mnt/shared-storage-user/huanghaian/code/xtuner/
+pip install -e .
+
+当前 registry.h.pjlab.org.cn/ailab-llmrazor/xtuner_tmp:pt28_20260303_f2adb47 镜像中没有 cuda 13.2 的 nvcc 需要自己安装
+
+wget https://developer.download.nvidia.com/compute/cuda/13.2.1/local_installers/cuda_13.2.1_595.58.03_linux.run
+export HOME=/mnt/shared-storage-user/huanghaian/
+sh /mnt/shared-storage-user/huanghaian/cuda_13.2.1_595.58.03_linux.run \
+    --silent \
+    --toolkit \
+    --toolkitpath=$HOME/cuda/cuda-13.2.1 \
+    --no-man-page
+
+export CUDA_HOME=/mnt/shared-storage-user/huanghaian//cuda/cuda-13.2.1
+export PATH=$CUDA_HOME/bin:$PATH
+export LD_LIBRARY_PATH=$CUDA_HOME/lib64:$LD_LIBRARY_PATH
+
+cd /mnt/shared-storage-user/llmrazor-share/xtuner_extra_cpp_library
+./build_libs --help
+./build_libs flash-attention # 报错
+
+https://windreamer.github.io/flash-attention3-wheels/
+pip install flash_attn_3 --find-links https://windreamer.github.io/flash-attention3-wheels/cu132_torch2120
+
+export CPLUS_INCLUDE_PATH=/mnt/shared-storage-user/huanghaian/cuda/cuda-13.2.1/include/cccl
+./build_libs DeepEP
+./build_libs DeepGEMM # LMDeploy 需要，xtuner 默认不需要
+
+如果 xtuner 训练要开 deepep 那么就要安装 groupgemm,会使用里面的 premute 接口。
+./build_libs GroupedGEMM
+
+
+qwen3.5
+./build_libs causal-conv1d
+pip install flash-linear-attention[cuda]==0.4.2 # 0.5.2 接口不一致，回退到 0.4.2
+
+
+fp8: ./build_libs AdaptiveGEMM
+
+
+
+  库                   XTuner v1 里什么时候用                                    干啥                                                        开启条件
+  ━━━━━━━━━━━━━━━━━━━  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   flash-attention      MHA/vision attention/MLA prefill 走 flash_attention       varlen flash attention、paged attention decoding            CUDA 下 attn_impl="flash_attention"，默认就是这个；装了 flash-attn 或
+                                                                                                                                              flash-attn-3。XTUNER_USE_FA3=1 才走 FA3，否则走 FA2
+  ───────────────────  ────────────────────────────────────────────────────────  ──────────────────────────────────────────────────────────  ────────────────────────────────────────────────────────────────────────────
+   causal-conv1d        Qwen3.5 的 linear_attention / GatedDeltaNet 层            depthwise causal conv，给 GatedDeltaNet 的 q/k/v conv 用    模型配置有 linear_attention=GatedDeltaNetConfig。Qwen3.5 VL MoE 默认 3/4
+                                                                                                                                              层是 linear attention，所以默认会用
+  ───────────────────  ────────────────────────────────────────────────────────  ──────────────────────────────────────────────────────────  ────────────────────────────────────────────────────────────────────────────
+   GroupedGEMM          MoE token permute/unpermute；可选 CUTLASS grouped GEMM    MoE token 重排/还原，以及可选 grouped GEMM 后端             CUDA MoE 会用 permute/unpermute；装了 grouped_gemm 就用它的 CUDA backend，
+                                                                                                                                              否则 fallback torch。XTUNER_USE_CUTLASS_GROUP_GEMM=1 才用它的 CUTLASS
+                                                                                                                                              GMM；默认 grouped GEMM 是 XTuner 自己的 Triton kernel
+  ───────────────────  ────────────────────────────────────────────────────────  ──────────────────────────────────────────────────────────  ────────────────────────────────────────────────────────────────────────────
+   AdaptiveGEMM         FP8 tilewise Linear / FP8 tilewise GroupedLinear          FP8 GEMM / FP8 grouped GEMM                                 model_cfg.float8_cfg 非空，且 scaling_granularity_gemm=TILEWISE 或
+                                                                                                                                              scaling_granularity_grouped_gemm=TILEWISE。examples 里 Qwen3.5 VL MoE 明确
+                                                                                                                                              model_cfg.float8_cfg = None，所以不开
+  ───────────────────  ────────────────────────────────────────────────────────  ──────────────────────────────────────────────────────────  ────────────────────────────────────────────────────────────────────────────
+   DeepEP               训练侧 MoE expert-parallel dispatcher                     MoE dispatch/combine 的 EP 通信                             必须 ep_size > 1 且 dispatcher="deepep"。dispatcher=None 在 EP 下默认是
+                                                                                                                                              all2all，不是 DeepEP；ep_size=1 会退成 Naive
+  ───────────────────  ────────────────────────────────────────────────────────  ──────────────────────────────────────────────────────────  ────────────────────────────────────────────────────────────────────────────
+   FlashMLA             MLAConfig 模型的 decoding 路径                            MLA KV cache decoding kernel                                只有 DeepSeekV3 这类 MLA 模型，并且走带 KV cache/block table 的 decode。
+                                                                                                                                              prefill/训练还是 flash_attn_varlen_func
+  ───────────────────  ────────────────────────────────────────────────────────  ──────────────────────────────────────────────────────────  ────────────────────────────────────────────────────────────────────────────
+   DeepGEMM / dlblas    XTuner v1 训练代码没直接 import                           主要是 LMDeploy rollout EP 侧可能间接用 DLBlas DeepEP       RolloutConfig.expert_parallel_size > 1 的 LMDeploy EP 模式会设置
+                                                                                                                                              DEEPEP_MAX_TOKENS_PER_RANK；实际用库在 LMDeploy/DLBlas 里
+  ───────────────────  ────────────────────────────────────────────────────────  ──────────────────────────────────────────────────────────  ────────────────────────────────────────────────────────────────────────────
+   cudnn-frontend       没看到 v1/examples 直接使用                               当前这块对 XTuner v1 路径无直接作用                         无直接开启配置
+
+
+lmdeploy: pip install pybase64 shortuuid openai partial_json_parser zmq xgrammar
+
+直接安装会出现 tvm-ffi 报错
+pip install --force-reinstall --no-deps tilelang==0.1.11 apache-tvm-ffi==0.1.10 torch-c-dlpack-ext==0.1.5  需要和 lmdeploy 对一下安装命令
+python -c "import tilelang; print('tilelang ok')"
+
+
+cd /mnt/shared-storage-user/llmrazor-share/comm_env
+conda create --prefix pt121_all_env --clone pt2121_all_en
+
+conda create --name pt2121_all_en_sglang --clone pt2121_all_env
+
+
+
+# sglang 
+conda activate pt2121_all_en_sglang
+tag v0.5.15.post1
+
+export CUDA_HOME=/mnt/shared-storage-user/huanghaian//cuda/cuda-13.2.1
+export PATH=$CUDA_HOME/bin:$PATH
+export LD_LIBRARY_PATH=$CUDA_HOME/lib64:$LD_LIBRARY_PATH
+
+conda install -c conda-forge rust # 没网，只能把  [[tool.setuptools-rust.ext-modules]] 内容注释掉，不安装 grpc 了
+这个 Rust 扩展只在 --grpc-port 这条 native gRPC 路径用到。代码里也写了：没装扩展时，只有设置了 --grpc-port 才会报 sglang.srt.grpc._core not found
+
+pip install -e "python"
+
+
+https://github.com/sgl-project/sglang/pull/23751
+
+
+python -m pip install -e python --dry-run 模拟下载但是不会真的安装，可以看到依赖

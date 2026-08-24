@@ -1,0 +1,72 @@
+{
+    "sharegpt4o_review_negative_en_20240825": {
+        "data_augment": true,
+        "sample_ratio": 3.0,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~Single_Image_Reflection_LongCap~en~sharegpt4o_review_negative_en_20240825_final~1.0.0~0.0/jsonl/",
+        "media_root": "/mnt/shared-storage-user/songdemin/user/tanghuanze/tmp/multimodal_elements4internvl/intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~Single_Image_Reflection_LongCap~en~sharegpt4o_review_negative_en_20240825_final~1.0.0~0.0/multimodal_elements/",
+        "length": 30451
+    },
+    "internvl_sa1b_caption_gpt4o_review_gpt4o_en_20241017": {
+        "data_augment": true,
+        "sample_ratio": 3.0,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~Single_Image_Reflection_LongCap~en~internvl_sa1b_caption_gpt4o_review_gpt4o_en_20241017_final~1.0.0~0.0/jsonl/",
+        "media_root": "/mnt/shared-storage-user/songdemin/user/tanghuanze/tmp/multimodal_elements4internvl/intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~Single_Image_Reflection_LongCap~en~internvl_sa1b_caption_gpt4o_review_gpt4o_en_20241017_final~1.0.0~0.0/multimodal_elements/",
+        "length": 48765
+    },
+    "ccbench_inhouse_part2_zh_20240410": {
+        "data_augment": true,
+        "sample_ratio": 3.0,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~Single_Image_General_MCQ~en~ccbench_inhouse_part2_zh_20240410_final~1.0.0~0.0/jsonl/",
+        "media_root": "/mnt/shared-storage-user/songdemin/user/tanghuanze/tmp/multimodal_elements4internvl/intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~Single_Image_General_MCQ~en~ccbench_inhouse_part2_zh_20240410_final~1.0.0~0.0/multimodal_elements/",
+        "length": 19626
+    },
+    "tqa_en_20240402_sft": {
+        "data_augment": true,
+        "sample_ratio": 3.0,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~Single_Image_Math_MCQ~en~tqa_en_20240402_sft_final~1.0.0~0.0/jsonl/",
+        "media_root": "/mnt/shared-storage-user/songdemin/user/tanghuanze/tmp/multimodal_elements4internvl/intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~Single_Image_Math_MCQ~en~tqa_en_20240402_sft_final~1.0.0~0.0/multimodal_elements/",
+        "length": 20115
+    },
+    "tqa_cot_gpt4o_en_20240621": {
+        "data_augment": true,
+        "sample_ratio": 6.0,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~Single_Image_Math_CoT~en~tqa_cot_gpt4o_en_20240621_final~1.0.0~0.0/jsonl/",
+        "media_root": "/mnt/shared-storage-user/songdemin/user/tanghuanze/tmp/multimodal_elements4internvl/intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~Single_Image_Math_CoT~en~tqa_cot_gpt4o_en_20240621_final~1.0.0~0.0/multimodal_elements/",
+        "length": 17350
+    },
+    "study_com_en_20240619": {
+        "data_augment": true,
+        "sample_ratio": 6.0,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~Multiple_Image_K12_Comprehensive~en~study_com_en_20240619~1.0.0~0.0/jsonl/",
+        "media_root": "/mnt/shared-storage-user/songdemin/user/tanghuanze/tmp/multimodal_elements4internvl/intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~Multiple_Image_K12_Comprehensive~en~study_com_en_20240619~1.0.0~0.0/multimodal_elements/",
+        "length": 4902
+    },
+    "dreamsim_en_20240910": {
+        "data_augment": true,
+        "sample_ratio": 3.0,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~Multiple_Image_General_LongQA_MCQ~en~dreamsim_en_20240910~1.0.0~0.0/jsonl/",
+        "media_root": "/mnt/shared-storage-user/songdemin/user/tanghuanze/tmp/multimodal_elements4internvl/intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~Multiple_Image_General_LongQA_MCQ~en~dreamsim_en_20240910~1.0.0~0.0/multimodal_elements/",
+        "length": 15941
+    },
+    "mm_chem_exam_multi_zh_20240807": {
+        "data_augment": true,
+        "sample_ratio": 3.0,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~Multiple_Image_K12_Chemistry~zh~mm_chem_exam_multi_zh_20240807~1.0.0~0.0/jsonl/",
+        "media_root": "/mnt/shared-storage-user/songdemin/user/tanghuanze/tmp/multimodal_elements4internvl/intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~Multiple_Image_K12_Chemistry~zh~mm_chem_exam_multi_zh_20240807~1.0.0~0.0/multimodal_elements/",
+        "length": 27875
+    },
+    "artwork_part1_en_20240628": {
+        "data_augment": true,
+        "sample_ratio": 3.0,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~Multiple_Image_Conversation_LongQA~en~artwork_part1_en_20240628~1.0.0~0.0/jsonl/",
+        "media_root": "/mnt/shared-storage-user/songdemin/user/tanghuanze/tmp/multimodal_elements4internvl/intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~Multiple_Image_Conversation_LongQA~en~artwork_part1_en_20240628~1.0.0~0.0/multimodal_elements/",
+        "length": 10895
+    },
+    "china_5a_gpt4o_zh_20240628": {
+        "data_augment": true,
+        "sample_ratio": 6.0,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~Multiple_Image_Conversation_LongQA~zh~china_5a_gpt4o_zh_20240628~1.0.0~0.0/jsonl/",
+        "media_root": "/mnt/shared-storage-user/songdemin/user/tanghuanze/tmp/multimodal_elements4internvl/intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~Multiple_Image_Conversation_LongQA~zh~china_5a_gpt4o_zh_20240628~1.0.0~0.0/multimodal_elements/",
+        "length": 409
+    }
+}

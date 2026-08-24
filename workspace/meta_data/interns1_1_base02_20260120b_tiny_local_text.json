@@ -1,0 +1,863 @@
+{
+    "0706_d027025_chemistry_0626_d000005_P~Chemistry~chemistry~all_chemdata_tag~1.2.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/0706_d027025_chemistry_0626_d000005_P~Chemistry~chemistry~all_chemdata_tag~1.2.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 8389
+    },
+    "0706_d027025_chemistry_0626_d000005_P~Chemistry~chemistry~smolinstruct~1.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/0706_d027025_chemistry_0626_d000005_P~Chemistry~chemistry~smolinstruct~1.0.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 109518
+    },
+    "0706_d027025_chemistry_0703_chemistry_P~Chemistry~chemistry~multi_step-retro-zh~1.0.0~0.0_jsonl": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Chemistry~chemistry~multi_step-retro-zh~1.0.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 1098
+    },
+    "0706_d027025_chemistry_0703_chemistry_P~Chemistry~chemistry~suzuki_condition-zh~1.0.0~0.0_jsonl": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Chemistry~chemistry~suzuki_condition-zh~1.0.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 2521
+    },
+    "0706_d027025_chemistry_0703_chemistry_P~Chemistry~chemistry~suzuki_condition~1.0.0~0.0_jsonl": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Chemistry~chemistry~suzuki_condition~1.0.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 2521
+    },
+    "0706_d027025_chemistry_0703_chemistry_P~Chemistry~chemistry~suzuki_retro-zh~1.0.0~0.0_jsonl": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Chemistry~chemistry~suzuki_retro-zh~1.0.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 1155
+    },
+    "0706_d027025_chemistry_0703_chemistry_P~Chemistry~chemistry~suzuki_retro~1.0.0~0.0_jsonl": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Chemistry~chemistry~suzuki_retro~1.0.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 1709
+    },
+    "0706_d027025_chemistry_0703_chemistry_P~Chemistry~chemistry~uspto_retro-multi-step~1.0.0~0.0_jsonl": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Chemistry~chemistry~uspto_retro-multi-step~1.0.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 1098
+    },
+    "0706_d027025_chemistry_P~Chemistry~chemistry~demo_retro_ins-en~1.0.0~0.0_jsonl": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Chemistry~chemistry~demo_retro_ins-en~1.0.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 1
+    },
+    "0706_d027025_chemistry_P~Chemistry~chemistry~demo_retro_ins-zh~1.0.0~0.0_jsonl": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Chemistry~chemistry~demo_retro_ins-zh~1.0.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 1
+    },
+    "0706_d027025_chemistry_P~Chemistry~chemistry~icho~1.0.0~0.0_jsonl": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/0706_d027025_chemistry_P~Chemistry~chemistry~icho~1.0.0~0.0_jsonl/jsonl/",
+        "media_root": null,
+        "length": 2
+    },
+    "0706_d027025_general_0623_data_sample_exp_0626_d005000_withoutmathpuzzle_withouts2_20w_withoutagent_add_all_government_department_safety_filtered_v1_dingo": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/0706_d027025_general_0623_data_sample_exp_0626_d005000_withoutmathpuzzle_withouts2_20w_withoutagent_add_all_government_department_safety_filtered_v1_dingo/jsonl/",
+        "media_root": null,
+        "length": 1
+    },
+    "0706_d027025_general_0623_data_sample_exp_0626_d005000_withoutmathpuzzle_withouts2_20w_withoutagent_add_all_government_department_safety_filtered_v1_dingo_1": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/0706_d027025_general_0623_data_sample_exp_0626_d005000_withoutmathpuzzle_withouts2_20w_withoutagent_add_all_government_department_safety_filtered_v1_dingo_1/jsonl/",
+        "media_root": null,
+        "length": 1
+    },
+    "0706_d027025_general_0623_data_sample_exp_0626_d005000_withoutmathpuzzle_withouts2_20w_withoutagent_add_all_government_department_safety_filtered_v1_dingo_2": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/0706_d027025_general_0623_data_sample_exp_0626_d005000_withoutmathpuzzle_withouts2_20w_withoutagent_add_all_government_department_safety_filtered_v1_dingo_2/jsonl/",
+        "media_root": null,
+        "length": 1
+    },
+    "0706_d027025_general_0623_data_sample_exp_0626_d005000_withoutmathpuzzle_withouts2_20w_withoutagent_add_all_s1-for-s2-safety-20240604_dingo": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/0706_d027025_general_0623_data_sample_exp_0626_d005000_withoutmathpuzzle_withouts2_20w_withoutagent_add_all_s1-for-s2-safety-20240604_dingo/jsonl/",
+        "media_root": null,
+        "length": 66
+    },
+    "0706_d027025_general_0623_data_sample_exp_0626_d005000_withoutmathpuzzle_withouts2_20w_withoutagent_add_all_s1-for-s2-safety-20240604_dingo_1": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/0706_d027025_general_0623_data_sample_exp_0626_d005000_withoutmathpuzzle_withouts2_20w_withoutagent_add_all_s1-for-s2-safety-20240604_dingo_1/jsonl/",
+        "media_root": null,
+        "length": 66
+    },
+    "0706_d027025_general_0623_data_sample_exp_0626_d005000_withoutmathpuzzle_withouts2_20w_withoutagent_add_all_s1-for-s2-safety-20240604_dingo_2": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/0706_d027025_general_0623_data_sample_exp_0626_d005000_withoutmathpuzzle_withouts2_20w_withoutagent_add_all_s1-for-s2-safety-20240604_dingo_2/jsonl/",
+        "media_root": null,
+        "length": 66
+    },
+    "0706_d027025_general_0623_data_sample_exp_0626_d005000_withoutmathpuzzle_withouts2_20w_withoutagent_add_all_safety_badcase_enhance_20241224_dingo": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/0706_d027025_general_0623_data_sample_exp_0626_d005000_withoutmathpuzzle_withouts2_20w_withoutagent_add_all_safety_badcase_enhance_20241224_dingo/jsonl/",
+        "media_root": null,
+        "length": 62
+    },
+    "0706_d027025_general_0623_data_sample_exp_0626_d005000_withoutmathpuzzle_withouts2_20w_withoutagent_add_all_safety_badcase_enhance_20241224_dingo_1": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/0706_d027025_general_0623_data_sample_exp_0626_d005000_withoutmathpuzzle_withouts2_20w_withoutagent_add_all_safety_badcase_enhance_20241224_dingo_1/jsonl/",
+        "media_root": null,
+        "length": 62
+    },
+    "0706_d027025_general_0623_data_sample_exp_0626_d005000_withoutmathpuzzle_withouts2_20w_withoutagent_add_all_safety_badcase_enhance_20241224_dingo_2": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/0706_d027025_general_0623_data_sample_exp_0626_d005000_withoutmathpuzzle_withouts2_20w_withoutagent_add_all_safety_badcase_enhance_20241224_dingo_2/jsonl/",
+        "media_root": null,
+        "length": 62
+    },
+    "0706_d027025_general_0623_data_sample_exp_0626_d005000_withoutmathpuzzle_withouts2_20w_withoutagent_others-reasoning_gongwuyuan-logic_dingo_fix": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/0706_d027025_general_0623_data_sample_exp_0626_d005000_withoutmathpuzzle_withouts2_20w_withoutagent_others-reasoning_gongwuyuan-logic_dingo_fix/jsonl/",
+        "media_root": null,
+        "length": 1
+    },
+    "0706_d027025_general_0623_data_sample_exp_0626_d005000_withoutmathpuzzle_withouts2_20w_withoutagent_others-reasoning_multicritique_sft_d4_st_5_l1_resumm_20241113-stmt_resumm_repeat2_dingo_fix": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/0706_d027025_general_0623_data_sample_exp_0626_d005000_withoutmathpuzzle_withouts2_20w_withoutagent_others-reasoning_multicritique_sft_d4_st_5_l1_resumm_20241113-stmt_resumm_repeat2_dingo_fix/jsonl/",
+        "media_root": null,
+        "length": 12
+    },
+    "0706_d027025_general_0623_data_sample_exp_0626_d005000_withoutmathpuzzle_withouts2_20w_withoutagent_others-reasoning_self_critique_answer_no_critique-answer_no_critique_dingo_fix": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/0706_d027025_general_0623_data_sample_exp_0626_d005000_withoutmathpuzzle_withouts2_20w_withoutagent_others-reasoning_self_critique_answer_no_critique-answer_no_critique_dingo_fix/jsonl/",
+        "media_root": null,
+        "length": 784
+    },
+    "0706_d027025_general_0623_data_sample_exp_0626_d005000_withoutmathpuzzle_withouts2_20w_withoutagent_others-reasoning_self_critique_answer_no_critique-answer_no_critique_dingo_fix_1": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/0706_d027025_general_0623_data_sample_exp_0626_d005000_withoutmathpuzzle_withouts2_20w_withoutagent_others-reasoning_self_critique_answer_no_critique-answer_no_critique_dingo_fix_1/jsonl/",
+        "media_root": null,
+        "length": 784
+    },
+    "0706_d027025_general_0623_data_sample_exp_0626_d005000_withoutmathpuzzle_withouts2_20w_withoutagent_others-reasoning_self_critique_gen_qa-gen_qa_dingo_fix": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/0706_d027025_general_0623_data_sample_exp_0626_d005000_withoutmathpuzzle_withouts2_20w_withoutagent_others-reasoning_self_critique_gen_qa-gen_qa_dingo_fix/jsonl/",
+        "media_root": null,
+        "length": 111
+    },
+    "0706_d027025_general_0623_data_sample_exp_0626_d005000_withoutmathpuzzle_withouts2_20w_withoutagent_others-reasoning_self_critique_qa-qa_dingo_fix": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/0706_d027025_general_0623_data_sample_exp_0626_d005000_withoutmathpuzzle_withouts2_20w_withoutagent_others-reasoning_self_critique_qa-qa_dingo_fix/jsonl/",
+        "media_root": null,
+        "length": 780
+    },
+    "0706_d027025_general_0623_data_sample_exp_0626_d005000_withoutmathpuzzle_withouts2_20w_withoutagent_others-reasoning_self_critique_refine_answer-refine_answer_repeat2_dingo_fix": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/0706_d027025_general_0623_data_sample_exp_0626_d005000_withoutmathpuzzle_withouts2_20w_withoutagent_others-reasoning_self_critique_refine_answer-refine_answer_repeat2_dingo_fix/jsonl/",
+        "media_root": null,
+        "length": 41
+    },
+    "0706_d027025_general_0623_data_sample_exp_0626_d005000_withoutmathpuzzle_withouts2_20w_withoutagent_others-reasoning_self_critique_refine_critique-refine_critique_repeat2_dingo_fix": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/0706_d027025_general_0623_data_sample_exp_0626_d005000_withoutmathpuzzle_withouts2_20w_withoutagent_others-reasoning_self_critique_refine_critique-refine_critique_repeat2_dingo_fix/jsonl/",
+        "media_root": null,
+        "length": 112
+    },
+    "0706_d027025_general_0623_data_sample_exp_0626_d005000_withoutmathpuzzle_withouts2_20w_withoutagent_s1data_all_withouto1math_withouto1code_enhance_cmmlu-data-with-meta-inst_3e5_dingo_fix": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/0706_d027025_general_0623_data_sample_exp_0626_d005000_withoutmathpuzzle_withouts2_20w_withoutagent_s1data_all_withouto1math_withouto1code_enhance_cmmlu-data-with-meta-inst_3e5_dingo_fix/jsonl/",
+        "media_root": null,
+        "length": 9961
+    },
+    "0706_d027025_general_0623_data_sample_exp_0626_d005000_withoutmathpuzzle_withouts2_20w_withoutagent_s1data_all_withouto1math_withouto1code_enhance_math_rest1028_choice_instruction_following_fix_repeat2_dingo_fix": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/0706_d027025_general_0623_data_sample_exp_0626_d005000_withoutmathpuzzle_withouts2_20w_withoutagent_s1data_all_withouto1math_withouto1code_enhance_math_rest1028_choice_instruction_following_fix_repeat2_dingo_fix/jsonl/",
+        "media_root": null,
+        "length": 8656
+    },
+    "0706_d027025_general_0623_data_sample_exp_0626_d005000_withoutmathpuzzle_withouts2_20w_withoutagent_s1data_all_withouto1math_withouto1code_others-nlp_task_coig_dingo_fix": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/0706_d027025_general_0623_data_sample_exp_0626_d005000_withoutmathpuzzle_withouts2_20w_withoutagent_s1data_all_withouto1math_withouto1code_others-nlp_task_coig_dingo_fix/jsonl/",
+        "media_root": null,
+        "length": 4663
+    },
+    "0706_d027025_general_0623_data_sample_exp_0626_d005000_withoutmathpuzzle_withouts2_20w_withoutagent_s1data_all_withouto1math_withouto1code_others-nlp_task_dev-hellaswag-multiple-choice_repeat2_dingo_fix": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/0706_d027025_general_0623_data_sample_exp_0626_d005000_withoutmathpuzzle_withouts2_20w_withoutagent_s1data_all_withouto1math_withouto1code_others-nlp_task_dev-hellaswag-multiple-choice_repeat2_dingo_fix/jsonl/",
+        "media_root": null,
+        "length": 79
+    },
+    "0706_d027025_general_0623_data_sample_exp_0626_d005000_withoutmathpuzzle_withouts2_20w_withoutagent_s1data_all_withouto1math_withouto1code_others-nlp_task_dev-hellaswag_repeat2_dingo_fix": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/0706_d027025_general_0623_data_sample_exp_0626_d005000_withoutmathpuzzle_withouts2_20w_withoutagent_s1data_all_withouto1math_withouto1code_others-nlp_task_dev-hellaswag_repeat2_dingo_fix/jsonl/",
+        "media_root": null,
+        "length": 646
+    },
+    "0706_d027025_general_0623_data_sample_exp_0626_d005000_withoutmathpuzzle_withouts2_20w_withoutagent_s1data_all_withouto1math_withouto1code_others-nlp_task_dev-race-gpt4_dingo_fix": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/0706_d027025_general_0623_data_sample_exp_0626_d005000_withoutmathpuzzle_withouts2_20w_withoutagent_s1data_all_withouto1math_withouto1code_others-nlp_task_dev-race-gpt4_dingo_fix/jsonl/",
+        "media_root": null,
+        "length": 512
+    },
+    "0706_d027025_general_0623_data_sample_exp_0626_d005000_withoutmathpuzzle_withouts2_20w_withoutagent_s1data_all_withouto1math_withouto1code_others-nlp_task_dev-race_dingo_fix": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/0706_d027025_general_0623_data_sample_exp_0626_d005000_withoutmathpuzzle_withouts2_20w_withoutagent_s1data_all_withouto1math_withouto1code_others-nlp_task_dev-race_dingo_fix/jsonl/",
+        "media_root": null,
+        "length": 333
+    },
+    "0706_d027025_general_0623_data_sample_exp_0626_d005000_withoutmathpuzzle_withouts2_20w_withoutagent_s1data_all_withouto1math_withouto1code_others-nlp_task_dev-winogrande-gpt4_dingo_fix": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/0706_d027025_general_0623_data_sample_exp_0626_d005000_withoutmathpuzzle_withouts2_20w_withoutagent_s1data_all_withouto1math_withouto1code_others-nlp_task_dev-winogrande-gpt4_dingo_fix/jsonl/",
+        "media_root": null,
+        "length": 204
+    },
+    "0706_d027025_general_0623_data_sample_exp_0626_d005000_withoutmathpuzzle_withouts2_20w_withoutagent_s1data_all_withouto1math_withouto1code_others-nlp_task_dev-winogrande_dingo_fix": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/0706_d027025_general_0623_data_sample_exp_0626_d005000_withoutmathpuzzle_withouts2_20w_withoutagent_s1data_all_withouto1math_withouto1code_others-nlp_task_dev-winogrande_dingo_fix/jsonl/",
+        "media_root": null,
+        "length": 307
+    },
+    "0706_d027025_general_0623_data_sample_exp_0626_d005000_withoutmathpuzzle_withouts2_20w_withoutagent_s1data_all_withouto1math_withouto1code_others-nlp_task_firefly_dingo_fix": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/0706_d027025_general_0623_data_sample_exp_0626_d005000_withoutmathpuzzle_withouts2_20w_withoutagent_s1data_all_withouto1math_withouto1code_others-nlp_task_firefly_dingo_fix/jsonl/",
+        "media_root": null,
+        "length": 3232
+    },
+    "0706_d027025_general_0623_data_sample_exp_0626_d005000_withoutmathpuzzle_withouts2_20w_withoutagent_s1data_all_withouto1math_withouto1code_others-nlp_task_openai-summary_dingo_fix": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/0706_d027025_general_0623_data_sample_exp_0626_d005000_withoutmathpuzzle_withouts2_20w_withoutagent_s1data_all_withouto1math_withouto1code_others-nlp_task_openai-summary_dingo_fix/jsonl/",
+        "media_root": null,
+        "length": 3885
+    },
+    "0706_d027025_general_0623_data_sample_exp_0626_d005000_withoutmathpuzzle_withouts2_20w_withoutagent_s1data_all_withouto1math_withouto1code_others-safety_safety_20240604_dingo_fix": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/0706_d027025_general_0623_data_sample_exp_0626_d005000_withoutmathpuzzle_withouts2_20w_withoutagent_s1data_all_withouto1math_withouto1code_others-safety_safety_20240604_dingo_fix/jsonl/",
+        "media_root": null,
+        "length": 1454
+    },
+    "0706_d027025_general_0623_data_sample_exp_0626_d005000_withoutmathpuzzle_withouts2_20w_withoutagent_s1data_all_withouto1math_withouto1code_project-1_samplequality_quality_all_repeat2_dingo_fix": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/0706_d027025_general_0623_data_sample_exp_0626_d005000_withoutmathpuzzle_withouts2_20w_withoutagent_s1data_all_withouto1math_withouto1code_project-1_samplequality_quality_all_repeat2_dingo_fix/jsonl/",
+        "media_root": null,
+        "length": 6
+    },
+    "0706_d027025_general_0623_data_sample_exp_0626_d005000_withoutmathpuzzle_withouts2_20w_withoutagent_s1data_all_withouto1math_withouto1code_project-reflection_code-feedback_20240419_dingo_fix": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/0706_d027025_general_0623_data_sample_exp_0626_d005000_withoutmathpuzzle_withouts2_20w_withoutagent_s1data_all_withouto1math_withouto1code_project-reflection_code-feedback_20240419_dingo_fix/jsonl/",
+        "media_root": null,
+        "length": 2164
+    },
+    "0706_d027025_geo_mv_2_oss_cms_0702_geo_P~Geo_science~geo_science~quality_filter_cot_exercise_withgt~1.0.0~0.0_jsonl": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Geo_science~geo_science~quality_filter_cot_exercise_withgt~1.0.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 146
+    },
+    "0706_d027025_life_sci_yidian_data_banyun_P~Life_science~life_science~text_sft_merged_sft_data_Biology_hard_sampled~1.0.0~0.0_jsonl": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/0706_d027025_life_sci_yidian_data_banyun_P~Life_science~life_science~text_sft_merged_sft_data_Biology_hard_sampled~1.0.0~0.0_jsonl/jsonl/",
+        "media_root": null,
+        "length": 2144
+    },
+    "0706_d027025_life_sci_yidian_data_banyun_P~Life_science~life_science~text_sft_merged_sft_data_Medical_hard_sampled~1.0.0~0.0_jsonl": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/0706_d027025_life_sci_yidian_data_banyun_P~Life_science~life_science~text_sft_merged_sft_data_Medical_hard_sampled~1.0.0~0.0_jsonl/jsonl/",
+        "media_root": null,
+        "length": 2806
+    },
+    "0706_d027025_life_sci_yidian_data_banyun_P~Life_science~life_science~text_sft_merged_sft_data_Protein_hard_sampled~1.0.0~0.0_jsonl": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/0706_d027025_life_sci_yidian_data_banyun_P~Life_science~life_science~text_sft_merged_sft_data_Protein_hard_sampled~1.0.0~0.0_jsonl/jsonl/",
+        "media_root": null,
+        "length": 432
+    },
+    "0706_d027025_mat_0626_d000005_P~Material_science~en~matbench_enhence~1.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/0706_d027025_mat_0626_d000005_P~Material_science~en~matbench_enhence~1.0.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 3001
+    },
+    "0706_d027025_mat_mv_2_oss_cms_0702_mat_fix_P~Material_science~material_science~glass_metal_cot_qwen0701~1.0.0~0.0_jsonl": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Material_science~material_science~glass_metal_cot_qwen0701~1.0.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 662
+    },
+    "0706_d027025_reasoning_0704_reasoning_P~Physics~en~runtu_error_enhance_0630_decontam_5gram~1.1.0~0.0_jsonl": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Physics~en~runtu_error_enhance_0630_decontam_5gram~1.1.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 1194
+    },
+    "0706_d027025_reasoning_P~Physics~en~synthetic_kaoshi_buguake_xueersi_non_easy~1.0.0~0.0_jsonl": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Physics~en~synthetic_kaoshi_buguake_xueersi_non_easy~1.0.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 3404
+    },
+    "0706_d027025_reasoning_others_without_lifesci_geo_P~Physics~en~r1_openbook_test_0607_doc2query_filter_v2~1.0.0~0.0_jsonl": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/0706_d027025_reasoning_others_without_lifesci_geo_P~Physics~en~r1_openbook_test_0607_doc2query_filter_v2~1.0.0~0.0_jsonl/jsonl/",
+        "media_root": null,
+        "length": 443
+    },
+    "0706_d027025_reasoning_reasoning_math_code_update_s1_P-Reasoning-reasoning-MuSR_fol2nl_v3_1-3_1_0-0_0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/0706_d027025_reasoning_reasoning_math_code_update_s1_P-Reasoning-reasoning-MuSR_fol2nl_v3_1-3_1_0-0_0/jsonl/",
+        "media_root": null,
+        "length": 236
+    },
+    "0706_d027025_reasoning_reasoning_math_code_update_s1_P-Reasoning-reasoning-SCP-116K_o1-1_0_0-0_0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/0706_d027025_reasoning_reasoning_math_code_update_s1_P-Reasoning-reasoning-SCP-116K_o1-1_0_0-0_0/jsonl/",
+        "media_root": null,
+        "length": 3887
+    },
+    "0706_d027025_general_0626_d005000_just_s2_20w": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/0706_d027025_general_0626_d005000_just_s2_20w/jsonl/",
+        "media_root": null,
+        "length": 2976
+    },
+    "P~Code~code~aider_enhancement~1.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Code~code~aider_enhancement~1.0.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 450
+    },
+    "P~Code~code~science_html_enhanced~1.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Code~code~science_html_enhanced~1.0.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 16455
+    },
+    "P~Code~code~html_enhance_1121~1.1.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Code~code~html_enhance_1121~1.1.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 19339
+    },
+    "P~Code~code~k12_zh~1.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Code~code~k12_zh~1.0.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 5278
+    },
+    "P~Code~code~k12_en~1.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Code~code~k12_en~1.0.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 4912
+    },
+    "P~Chemistry~chemistry~mol-instruction-cot-mini~1.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Chemistry~chemistry~mol-instruction-cot-mini~1.0.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 5448
+    },
+    "P~Chemistry~chemistry~mol-instruction-ori-mini~1.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Chemistry~chemistry~mol-instruction-ori-mini~1.0.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 83478
+    },
+    "P~Code~en~kernel_generation_evolve_agent_single_turn_sft~1.3.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Code~en~kernel_generation_evolve_agent_single_turn_sft~1.3.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 2389
+    },
+    "P~Exam~en~doc2query_merge_0812_nosp~2.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Exam~en~doc2query_merge_0812_nosp~2.0.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 1841
+    },
+    "P~Geo_science~geo_science~openswi-deep-mini~1.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Geo_science~geo_science~openswi-deep-mini~1.0.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 1399
+    },
+    "P~Geo_science~geo_science~openswi-shallow-mini~1.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Geo_science~geo_science~openswi-shallow-mini~1.0.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 5000
+    },
+    "P~Knowledge~synthetic~simpleqa_with_rewrite_data_2_0~1.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Knowledge~synthetic~simpleqa_with_rewrite_data_2_0~1.0.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 10242
+    },
+    "P~Language~s1~translation_sft~1.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Language~s1~translation_sft~1.0.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 435529
+    },
+    "P~Life_science~life_science~biology-instruction-v3_template~1.1.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Life_science~life_science~biology-instruction-v3_template~1.1.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 111007
+    },
+    "P~Life_science~life_science~biology-instruction-cot~1.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Life_science~life_science~biology-instruction-cot~1.0.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 703
+    },
+    "P~Long_Context~en~P_ruler_enhance_20251209~1.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Long_Context~en~P_ruler_enhance_20251209~1.0.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 541
+    },
+    "P~Reasoning~reasoning~go~1.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Reasoning~reasoning~go~1.0.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 21724
+    },
+    "P~Math~en~math_2025_collection~1.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Math~en~math_2025_collection~1.0.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 69696
+    },
+    "P~Physics~physics~CMPhysBench_train_cot~1.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Physics~physics~CMPhysBench_train_cot~1.0.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 256
+    },
+    "P~Reasoning~reasoning~flange_bootcmap~1.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Reasoning~reasoning~flange_bootcmap~1.0.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 1265
+    },
+    "P~Reasoning~reasoning~doc2query_exam_recall_251024_release~1.2.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Reasoning~reasoning~doc2query_exam_recall_251024_release~1.2.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 8410
+    },
+    "P~Reasoning~reasoning~doc2query_pdf_250516_release~1.3.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Reasoning~reasoning~doc2query_pdf_250516_release~1.3.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 9005
+    },
+    "0706_d027025_0713_add_identity_no_think": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/0706_d027025_0713_add_identity_no_think/jsonl/",
+        "media_root": null,
+        "length": 8
+    },
+    "P~Science~mix_science_data~scireasoner_sft_all~1.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Science~mix_science_data~scireasoner_sft_all~1.0.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 1046518
+    },
+    "P~Reasoning~reasoning~bbeh_bootcmap~2.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Reasoning~reasoning~bbeh_bootcmap~2.0.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 2178
+    },
+    "P~Knowledge~en~data_retrieval_20251224_mmlu_pro_longcot_data~1.1.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Knowledge~en~data_retrieval_20251224_mmlu_pro_longcot_data~1.1.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 1603
+    },
+    "P~Knowledge~en~data_retrieval_20251224_mmlu_pro_qa_data~1.2.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Knowledge~en~data_retrieval_20251224_mmlu_pro_qa_data~1.2.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 18414
+    },
+    "P~Math~en~amthinking_gptoss_answertoken_8k-32k~1.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Math~en~amthinking_gptoss_answertoken_8k-32k~1.0.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 29285
+    },
+    "P~Physics~en~ipho_p1_enhanced~1.1.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Physics~en~ipho_p1_enhanced~1.1.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 4036
+    },
+    "P~Agent~en~APIGen-MT~2.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Agent~en~APIGen-MT~2.0.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 457
+    },
+    "P~Agent~en~tau_2k~1.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Agent~en~tau_2k~1.0.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 190
+    },
+    "P~Agent~en~MiroVerse~1.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Agent~en~MiroVerse~1.0.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 7399
+    },
+    "P~Agent~en~toolace2~1.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Agent~en~toolace2~1.0.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 1129
+    },
+    "P~Agent~en~websailor_qwen_max~3.1.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Agent~en~websailor_qwen_max~3.1.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 1493
+    },
+    "P~Agent~en~mengjie~1.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Agent~en~mengjie~1.0.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 301
+    },
+    "P~Agent~en~xlam~2.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Agent~en~xlam~2.0.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 6000
+    },
+    "P~Agent~en~chuangzhi~4.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Agent~en~chuangzhi~3.0.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 5668
+    },
+    "P~Agent~en~rapidapi~2.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Agent~en~rapidapi~2.0.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 896
+    },
+    "P~Agent~en~websailor~2.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Agent~en~websailor~2.0.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 199
+    },
+    "P~Agent~en~yining~2.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Agent~en~yining~2.0.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 2131
+    },
+    "P~Agent~en~BUTTON~2.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Agent~en~BUTTON~2.0.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 774
+    },
+    "P~Agent~en~funreason~3.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Agent~en~funreason~3.0.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 2780
+    },
+    "P~Agent~en~jianze_0118~1.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Agent~en~jianze_0118~1.0.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 1408
+    },
+    "P~Agent~en~supp_multi_turn~4.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Agent~en~supp_multi_turn~4.0.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 15001
+    },
+    "P~Agent~en~GAIA_enhanced_1127~1.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Agent~en~GAIA_enhanced_1127~1.0.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 4396
+    },
+    "P~Agent~en~GAIA_enhanced_1229~1.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Agent~en~GAIA_enhanced_1229~1.0.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 2102
+    },
+    "P~Agent~en~MS003_DD003_AS004_WEWA003_NTKWS003~1.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Agent~en~MS003_DD003_AS004_WEWA003_NTKWS003~1.0.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 4945
+    },
+    "P~Physics~physics~CMPhysBench_train_cot_keep8~1.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Physics~physics~CMPhysBench_train_cot_keep8~1.0.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 784
+    },
+    "0706_d027025_IF_processed_P~Instruct~en~Instruct_Follow_SFT_20250331~1.0.0~0.0_jsonl": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/0706_d027025_IF_processed_P~Instruct~en~Instruct_Follow_SFT_20250331~1.0.0~0.0_jsonl/jsonl/",
+        "media_root": null,
+        "length": 17329
+    },
+    "0706_d027025_IF_processed_P~Instruct~en~cif_thinking_v1_0605_delivery~1.0.0~0.0_jsonl": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/0706_d027025_IF_processed_P~Instruct~en~cif_thinking_v1_0605_delivery~1.0.0~0.0_jsonl/jsonl/",
+        "media_root": null,
+        "length": 1958
+    },
+    "0706_d027025_IF_processed_P~Instruct~en~cif_thinking_v1_0605_delivery~1.0.0~0.0_1_jsonl": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/0706_d027025_IF_processed_P~Instruct~en~cif_thinking_v1_0605_delivery~1.0.0~0.0_1_jsonl/jsonl/",
+        "media_root": null,
+        "length": 1958
+    },
+    "0706_d027025_IF_processed_P~Instruct~en~cif_thinking_v1_0605_delivery~1.0.0~0.0_2_jsonl": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/0706_d027025_IF_processed_P~Instruct~en~cif_thinking_v1_0605_delivery~1.0.0~0.0_2_jsonl/jsonl/",
+        "media_root": null,
+        "length": 1958
+    },
+    "P~Code~code~cot_code_sft_mini~1.9.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Code~code~cot_code_sft_mini~1.9.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 36245
+    },
+    "P~Math~en~enhance_dsv32_all~3.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Math~en~enhance_dsv32_all~3.0.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 33124
+    },
+    "P~Reasoning~reasoning~doc2query_gpqa_mmlupro_wrong_enhance_260112_medium_release_fil_v4~1.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Reasoning~reasoning~doc2query_gpqa_mmlupro_wrong_enhance_260112_medium_release_fil_v4~1.0.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 8768
+    },
+    "P~other~en~IF_s2_IF_guoxu_if_1k_rengong~1.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~other~en~IF_s2_IF_guoxu_if_1k_rengong~1.0.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 98
+    },
+    "P~other~en~IF_s2_IF_guoxu_if_1k_rengong_2~1.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~other~en~IF_s2_IF_guoxu_if_1k_rengong_2~1.0.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 98
+    },
+    "P~other~en~IF_s2_IF_guoxu_if_1k_rengong_3~1.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~other~en~IF_s2_IF_guoxu_if_1k_rengong_3~1.0.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 98
+    },
+    "P~other~en~general_0626_d005000_just_s2_20w_simple_choice_firstlabel_total20w_avgdifficulty_rollout_qwen3_235b_a22b_project-conversation_tulu_if_EN_trainingdata_29980_safety_dingo_data~1.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~other~en~general_0626_d005000_just_s2_20w_simple_choice_firstlabel_total20w_avgdifficulty_rollout_qwen3_235b_a22b_project-conversation_tulu_if_EN_trainingdata_29980_safety_dingo_data~1.0.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 189
+    },
+    "P~Code~code~januscoder_1121~1.1.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Code~code~januscoder_1121~1.1.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 43520
+    },
+    "P~Code~code~multilingual_plots_data~1.2.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Code~code~multilingual_plots_data~1.2.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 67936
+    },
+    "P~Code~code~human_checked_demo_cases~1.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Code~code~human_checked_demo_cases~1.0.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 2900
+    },
+    "P~Code~code~more_basic_simulation~1.1.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Code~code~more_basic_simulation~1.1.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 836
+    },
+    "P~Instruct~en~IF_IFBench_pass~1.1.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Instruct~en~IF_IFBench_pass~1.1.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 12582
+    },
+    "P~Long_Context~en~P_ruler_json_format_20260112~1.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Long_Context~en~P_ruler_json_format_20260112~1.0.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 434
+    },
+    "P~Code~code~miniSAgoge_miniUniSVG_1m_text~1.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Code~code~miniSAgoge_miniUniSVG_1m_text~1.0.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 61511
+    },
+    "P~Math~en~amthinking_gptoss_answertoken_32k-64k~1.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Math~en~amthinking_gptoss_answertoken_32k-64k~1.0.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 1634
+    },
+    "P~Math~en~enhance_dsv32_all_64k~1.2.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Math~en~enhance_dsv32_all_64k~1.2.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 7928
+    },
+    "P~Math~en~compression_data~1.0.0~0.0": {
+        "data_augment": true,
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Math~en~compression_data~1.0.0~0.0/jsonl/",
+        "media_root": null,
+        "length": 2212
+    }
+}

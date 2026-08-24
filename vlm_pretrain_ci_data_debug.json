@@ -1,0 +1,6 @@
+{
+  "llava150k_zh_pretrain": {
+    "media_root": "/mnt/shared-storage-user/llmrazor-share/data/",
+    "annotation": "/mnt/shared-storage-user/llmrazor-share/data/llava_instruct_150k_zh_wh_openai_openai_pretrain.jsonl"
+  }
+}

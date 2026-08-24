@@ -1,0 +1,9 @@
+{
+    "sharegpt4o_review_negative_en_20240825": {
+        "data_augment": true,
+        "sample_ratio": 3.0,
+        "annotation": "/mnt/shared-storage-user/intern-multi-modal-delivery/internvl_delivery/internvl3_5/P~Single_Image_Reflection_LongCap~en~sharegpt4o_review_negative_en_20240825_final~1.0.0~0.0/jsonl/",
+        "media_root": "/mnt/shared-storage-user/songdemin/user/tanghuanze/tmp/multimodal_elements4internvl/intern-multi-modal-h-delivery/internvl_delivery/internvl3_5/P~Single_Image_Reflection_LongCap~en~sharegpt4o_review_negative_en_20240825_final~1.0.0~0.0/multimodal_elements/",
+        "length": 30451
+    }
+}

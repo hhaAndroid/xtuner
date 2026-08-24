@@ -1,0 +1,13 @@
+{
+   "AIME2024": {
+        "sample_ratio": 1,
+        "annotation": "/mnt/shared-storage-user/llmrazor-share/data/dapo_math/aime-2024.jsonl",
+        "length": 960
+    },
+    "GEOMETRY3K_TEST": {
+        "sample_ratio": 1.0,
+        "annotation": "/mnt/shared-storage-user/llmrazor-share/data/geometry3k/test.jsonl",
+        "media_root": "/mnt/shared-storage-user/llmrazor-share/data/geometry3k/",
+        "length": 3000
+    }
+}

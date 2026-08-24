@@ -1,0 +1,43 @@
+
+set -ex
+
+cd /mnt/shared-storage-user/huanghaian/code/xtuner/
+# bash /mnt/shared-storage-user/huanghaian/env.sh
+
+# export TORCH_LOGS=recompiles
+
+export PATH=/usr/local/nvidia/bin/:$PATH
+export LD_LIBRARY_PATH=/usr/local/nvidia/lib:/usr/local/nvidia/lib64:$LD_LIBRARY_PATH
+
+export XTUNER_TOKENIZE_WORKERS=16
+export XTUNER_USE_FA3=1
+export XTUNER_DECORD_VIDEO_THREADS=16
+
+export PYTHONPATH="$(pwd)"
+export XTUNER_GC_ENABLE=1
+export XTUNER_SKIP_EMPTY_THINK=1
+
+export XTUNER_ACTIVATION_OFFLOAD=1
+
+# tcmalloc removed: it caches freed mmap spans and prevents RSS from dropping after large batches.
+# With glibc malloc, freed large pixel_values tensors are immediately munmap'd (RSS drops each step).
+
+# export CEPH_CONFIG_PATH="/mnt/shared-storage-user/huanghaian/petreloss.conf"
+
+export WORK_DIR="work_dirs_debug/qwen35b/sft_all_local_256k_lixin_replacemodel"
+# export META_DATA_PATH="/mnt/shared-storage-user/huanghaian/code/xtuner/workspace/meta_data/interns1_1_base02_20260120b_tiny_local.json"
+# export TOKENIZER_CACHE_DIR='workspace/qwen35ba3_local/sft_tokenizer_cache'
+CONFIG_PATH="/mnt/shared-storage-user/huanghaian/code/xtuner/workspace/configs/sft_qwen35vl_35b_lixin_localgpu.py"
+
+current_time=$(date "+%m%d%H%M")
+if [ ! -d "$WORK_DIR" ]; then
+  mkdir -p "$WORK_DIR"
+fi
+
+SCRIPT_NAME=$(basename "$0")
+cp "$0" "${WORK_DIR}/${SCRIPT_NAME}"
+
+torchrun --nproc-per-node=8 \
+    xtuner/v1/train/cli/sft.py \
+    --config $CONFIG_PATH \
+    2>&1 | tee -a "${WORK_DIR}/training_log_${current_time}.txt"

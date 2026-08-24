@@ -1,0 +1,156 @@
+{
+  "P~Agent~en~funreason~3.0.0~0.0": {
+    "data_augment": true,
+    "sample_ratio": 1.0,
+    "annotation": "/mnt/shared-storage-user/intern-pretrain-shared02/linjunyao_cp/internflow_data/output/260413_intern_s2_preview_sft_v6_format_clean_v0_3_0/P~Agent~en~funreason~3.0.0~0.0/",
+    "media_root": null,
+    "length": 10376
+  },
+  "P~Agent~en~GAIA_enhanced_1127~2.0.0~0.0": {
+    "data_augment": true,
+    "sample_ratio": 0.0,
+    "annotation": "/mnt/shared-storage-user/intern-pretrain-shared02/linjunyao_cp/internflow_data/output/260413_intern_s2_preview_sft_v6_format_clean_v0_3_0/P~Agent~en~GAIA_enhanced_1127~2.0.0~0.0/",
+    "media_root": null,
+    "length": 34897
+  },
+  "P~Agent~en~GAIA_enhanced_1229~2.0.0~0.0": {
+    "data_augment": true,
+    "sample_ratio": 1.0,
+    "annotation": "/mnt/shared-storage-user/intern-pretrain-shared02/linjunyao_cp/internflow_data/output/260413_intern_s2_preview_sft_v6_format_clean_v0_3_0/P~Agent~en~GAIA_enhanced_1229~2.0.0~0.0/",
+    "media_root": null,
+    "length": 3504
+  },
+  "P~Agent~en~internagent_260331~1.0.0~0.0": {
+    "data_augment": true,
+    "sample_ratio": 1.0,
+    "annotation": "/mnt/shared-storage-user/intern-pretrain-shared02/linjunyao_cp/internflow_data/output/260413_intern_s2_preview_sft_v6_format_clean_v0_3_0/P~Agent~en~internagent_260331~1.0.0~0.0/",
+    "media_root": null,
+    "length": 16939
+  },
+  "P~Agent~en~jianze_0118~1.0.0~0.0": {
+    "data_augment": true,
+    "sample_ratio": 1.0,
+    "annotation": "/mnt/shared-storage-user/intern-pretrain-shared02/linjunyao_cp/internflow_data/output/260413_intern_s2_preview_sft_v6_format_clean_v0_3_0/P~Agent~en~jianze_0118~1.0.0~0.0/",
+    "media_root": null,
+    "length": 1398
+  },
+  "P~Agent~en~jianze_web_reasoning~2.0.0~0.0": {
+    "data_augment": true,
+    "sample_ratio": 1.0,
+    "annotation": "/mnt/shared-storage-user/intern-pretrain-shared02/linjunyao_cp/internflow_data/output/260413_intern_s2_preview_sft_v6_format_clean_v0_3_0/P~Agent~en~jianze_web_reasoning~2.0.0~0.0/",
+    "media_root": null,
+    "length": 17752
+  },
+  "P~Agent~en~MS003_DD003_AS004_WEWA003_NTKWS003~2.0.0~0.0": {
+    "data_augment": true,
+    "sample_ratio": 1.0,
+    "annotation": "/mnt/shared-storage-user/intern-pretrain-shared02/linjunyao_cp/internflow_data/output/260413_intern_s2_preview_sft_v6_format_clean_v0_3_0/P~Agent~en~MS003_DD003_AS004_WEWA003_NTKWS003~2.0.0~0.0/",
+    "media_root": null,
+    "length": 24669
+  },
+  "P~Agent~en~supp_multi_turn~4.0.0~0.0": {
+    "data_augment": true,
+    "sample_ratio": 1.0,
+    "annotation": "/mnt/shared-storage-user/intern-pretrain-shared02/linjunyao_cp/internflow_data/output/260413_intern_s2_preview_sft_v6_format_clean_v0_3_0/P~Agent~en~supp_multi_turn~4.0.0~0.0/",
+    "media_root": null,
+    "length": 14958
+  },
+  "P~Agent~en~xlam~7.0.0~0.0": {
+    "data_augment": true,
+    "sample_ratio": 1.0,
+    "annotation": "/mnt/shared-storage-user/intern-pretrain-shared02/linjunyao_cp/internflow_data/output/260413_intern_s2_preview_sft_v6_format_clean_v0_3_0/P~Agent~en~xlam~7.0.0~0.0/",
+    "media_root": null,
+    "length": 22606
+  },
+  "P~Code~en~kernel_generation_evolve_agent_single_turn_sft~1.3.0~0.0": {
+    "data_augment": true,
+    "sample_ratio": 1.0,
+    "annotation": "/mnt/shared-storage-user/intern-pretrain-shared02/linjunyao_cp/internflow_data/output/260413_intern_s2_preview_sft_v6_format_clean_v0_3_0/P~Code~en~kernel_generation_evolve_agent_single_turn_sft~1.3.0~0.0/",
+    "media_root": null,
+    "length": 756
+  },
+  "P~Agent~en~miro_9k~1.0.0~0.0": {
+    "data_augment": true,
+    "sample_ratio": 1.0,
+    "annotation": "/mnt/shared-storage-user/intern-pretrain-shared02/linjunyao_cp/format_clean/260417_format_clean_v0_3_0_intern_s2_preview_sft_0407_after_incremental/20260417v011/P~Agent~en~miro_9k~1.0.0~0.0/jsonl/",
+    "media_root": "",
+    "length": 9554
+  },
+  "P~Agent~en~strpfun_code~1.0.0~0.0": {
+    "data_augment": true,
+    "sample_ratio": 1.0,
+    "annotation": "/mnt/shared-storage-user/intern-pretrain-shared02/linjunyao_cp/format_clean/260417_format_clean_v0_3_0_intern_s2_preview_sft_0407_after_incremental/20260417v008/P~Agent~en~strpfun_code~1.0.0~0.0/jsonl/",
+    "media_root": "",
+    "length": 28052
+  },
+  "P~Agent~en~zun_terminal~1.0.0~0.0": {
+    "data_augment": true,
+    "sample_ratio": 1.0,
+    "annotation": "/mnt/shared-storage-user/intern-pretrain-shared02/linjunyao_cp/format_clean/260417_format_clean_v0_3_0_intern_s2_preview_sft_0407_after_incremental/20260417v011/P~Agent~en~zun_terminal~1.0.0~0.0/jsonl/",
+    "media_root": "",
+    "length": 4652
+  },
+  "P~Agent~en~nv_code~1.0.0~0.0": {
+    "data_augment": true,
+    "sample_ratio": 1.0,
+    "annotation": "/mnt/shared-storage-user/intern-pretrain-shared02/linjunyao_cp/format_clean/260417_format_clean_v0_3_0_intern_s2_preview_sft_0407_after_incremental/20260417v011/P~Agent~en~nv_code~1.0.0~0.0/jsonl/",
+    "media_root": "",
+    "length": 11304
+  },
+  "P~Agent~en~agent-long-context-augmentation~1.0.0~0.0": {
+    "data_augment": true,
+    "sample_ratio": 1.0,
+    "annotation": "/mnt/shared-storage-user/intern-pretrain-shared02/linjunyao_cp/format_clean/260420_format_clean_v0_3_0_intern_s2_preview_sft_0407_after_incremental/20260420v001/P~Agent~en~agent-long-context-augmentation~1.0.0~0.0/jsonl/",
+    "media_root": null,
+    "length": 10632
+  },
+  "P~Agent~en~zun_terminal_0419~1.0.0~0.0": {
+    "data_augment": true,
+    "sample_ratio": 1.0,
+    "annotation": "/mnt/shared-storage-user/intern-pretrain-shared02/linjunyao_cp/format_clean/260420_format_clean_v0_3_0_intern_s2_preview_sft_0407_after_incremental/20260420v001/P~Agent~en~zun_terminal_0419~1.0.0~0.0/jsonl/",
+    "media_root": null,
+    "length": 2142
+  },
+  "P~Agent~en~intern_review_data_v1_1~1.0.0~0.0": {
+    "data_augment": true,
+    "sample_ratio": 1.0,
+    "annotation": "/mnt/shared-storage-user/intern-pretrain-shared02/linjunyao_cp/format_clean/260420_format_clean_v0_3_0_intern_s2_preview_sft_0407_after_incremental/20260420v001/P~Agent~en~intern_review_data_v1_1~1.0.0~0.0/jsonl/",
+    "media_root": null,
+    "length": 3319
+  },
+  "P~Agent~reasoning~agentic_openclaw_v2_0421~1.0.0~0.0": {
+    "data_augment": true,
+    "sample_ratio": 1.0,
+    "annotation": "/mnt/shared-storage-user/intern-pretrain-shared02/linjunyao_cp/format_clean/260421_format_clean_v0_3_0_intern_s2_preview_sft_0407_after_incremental/20260421v001/P~Agent~reasoning~agentic_openclaw_v2_0421~1.0.0~0.0/jsonl/",
+    "media_root": null,
+    "length": 1060
+  },
+  "P~Agent~en~swe_terminal_0420~1.0.0~0.0": {
+    "data_augment": true,
+    "sample_ratio": 1,
+    "annotation": "/mnt/shared-storage-user/intern-pretrain-shared02/linjunyao_cp/format_clean/260421_format_clean_v0_3_0_intern_s2_preview_sft_0407_after_incremental/20260421v001/P~Agent~en~swe_terminal_0420~1.0.0~0.0/jsonl/",
+    "media_root": null,
+    "length": 2757
+  },
+  "P~Agent~en~MS003_DD003_AS004_WEWA003_NTKWS003_batch2~2.1.0~0.0": {
+    "data_augment": true,
+    "sample_ratio": 1.0,
+    "annotation": "/mnt/shared-storage-user/intern-pretrain-shared02/linjunyao_cp/format_clean/260422_format_clean_v0_3_0_intern_s2_preview_sft_0407_after_incremental/20260422v001/P~Agent~en~MS003_DD003_AS004_WEWA003_NTKWS003_batch2~2.1.0~0.0/jsonl/",
+    "media_root": null,
+    "length": 19177
+  },
+  "P~Agent~synthetic~gdp_synth_20260419~2.0.0~0.0": {
+    "data_augment": true,
+    "sample_ratio": 1.0,
+    "annotation": "/mnt/shared-storage-user/intern-pretrain-shared02/linjunyao_cp/format_clean/260421_format_clean_v0_3_0_intern_s2_preview_sft_0407_after_incremental/20260421v001/P~Agent~synthetic~gdp_synth_20260419~2.0.0~0.0/jsonl/",
+    "media_root": null,
+    "length": 12570
+  },
+  "P~Agent~en~science_subsets4agent_enhancement~2.1.0~0.0": {
+    "data_augment": true,
+    "sample_ratio": 1.0,
+    "annotation": "/mnt/shared-storage-user/intern-pretrain-shared02/linjunyao_cp/format_clean/260424_format_clean_v0_3_0_interns2_preview/passed/jsonl/",
+    "media_root": null,
+    "length": 17861
+  }
+}

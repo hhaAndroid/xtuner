@@ -1,0 +1,723 @@
+{
+    "P~Video_GUI_Task_Mixture~en~guiworld_en_20241029_final~3.0.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Video_GUI_Task_Mixture~en~guiworld_en_20241029_final~3.0.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 18984,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~Video_GUI_Task_Mixture~en~guiworld_en_20241029_final~3.0.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~Video_Video_LongCap~en~hd_vila_vqa_caption~1.1.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Video_Video_LongCap~en~hd_vila_vqa_caption~1.1.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 43903,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~Video_Video_LongCap~en~hd_vila_vqa_caption~1.1.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~Video_Video_LongCap~en~llava_video_0_30_s_academic_v0_1_cap_en_20241010~3.0.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Video_Video_LongCap~en~llava_video_0_30_s_academic_v0_1_cap_en_20241010~3.0.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 2396,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~Video_Video_LongCap~en~llava_video_0_30_s_academic_v0_1_cap_en_20241010~3.0.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~Video_Video_LongCap~en~llava_video_30_60_s_youtube_v0_1_cap_en_20241010~3.0.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Video_Video_LongCap~en~llava_video_30_60_s_youtube_v0_1_cap_en_20241010~3.0.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 3994,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~Video_Video_LongCap~en~llava_video_30_60_s_youtube_v0_1_cap_en_20241010~3.0.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~Video_Video_LongCap~en~llava_video_academic_cap_1_2_m_en_20241008_final~3.0.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Video_Video_LongCap~en~llava_video_academic_cap_1_2_m_en_20241008_final~3.0.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 923,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~Video_Video_LongCap~en~llava_video_academic_cap_1_2_m_en_20241008_final~3.0.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~Video_Video_LongCap~en~llava_video_academic_cap_2_3_m_en_20241012~3.0.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Video_Video_LongCap~en~llava_video_academic_cap_2_3_m_en_20241012~3.0.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 550,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~Video_Video_LongCap~en~llava_video_academic_cap_2_3_m_en_20241012~3.0.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~Video_Video_LongCap~en~llava_video_academic_cap_30_60_s_en_20241009~3.0.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Video_Video_LongCap~en~llava_video_academic_cap_30_60_s_en_20241009~3.0.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 2102,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~Video_Video_LongCap~en~llava_video_academic_cap_30_60_s_en_20241009~3.0.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~Video_Video_LongCap~en~llava_video_youtube_cap_1_2_m_en_20241009~3.0.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Video_Video_LongCap~en~llava_video_youtube_cap_1_2_m_en_20241009~3.0.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 4819,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~Video_Video_LongCap~en~llava_video_youtube_cap_1_2_m_en_20241009~3.0.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~Video_Video_LongCap~en~llava_video_youtube_cap_2_3_m_v1_en_20241013~3.0.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Video_Video_LongCap~en~llava_video_youtube_cap_2_3_m_v1_en_20241013~3.0.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 4829,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~Video_Video_LongCap~en~llava_video_youtube_cap_2_3_m_v1_en_20241013~3.0.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~Video_Video_LongCap~en~openvid_100k_en_20240911_final~3.0.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Video_Video_LongCap~en~openvid_100k_en_20240911_final~3.0.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 19798,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~Video_Video_LongCap~en~openvid_100k_en_20240911_final~3.0.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~Video_Video_LongQA~en~llava_video_0_30_s_academic_oe_v0_1_qa_en_20241010~3.0.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Video_Video_LongQA~en~llava_video_0_30_s_academic_oe_v0_1_qa_en_20241010~3.0.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 9693,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~Video_Video_LongQA~en~llava_video_0_30_s_academic_oe_v0_1_qa_en_20241010~3.0.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~Video_Video_LongQA~en~llava_video_0_30_s_youtube_oe_v0_1_qa_en_20241010~3.0.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Video_Video_LongQA~en~llava_video_0_30_s_youtube_oe_v0_1_qa_en_20241010~3.0.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 15377,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~Video_Video_LongQA~en~llava_video_0_30_s_youtube_oe_v0_1_qa_en_20241010~3.0.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~Video_Video_LongQA~en~llava_video_0_30_s_youtube_v0_1_cap_en_20241010~3.0.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Video_Video_LongQA~en~llava_video_0_30_s_youtube_v0_1_cap_en_20241010~3.0.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 7294,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~Video_Video_LongQA~en~llava_video_0_30_s_youtube_v0_1_cap_en_20241010~3.0.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~Video_Video_LongQA~en~llava_video_30_60_s_youtube_oe_v0_1_qa_en_20241010~3.0.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Video_Video_LongQA~en~llava_video_30_60_s_youtube_oe_v0_1_qa_en_20241010~3.0.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 22119,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~Video_Video_LongQA~en~llava_video_30_60_s_youtube_oe_v0_1_qa_en_20241010~3.0.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~Video_Video_LongQA~en~llava_video_academic_oe_1_2_m_en_20241009~3.0.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Video_Video_LongQA~en~llava_video_academic_oe_1_2_m_en_20241009~3.0.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 5260,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~Video_Video_LongQA~en~llava_video_academic_oe_1_2_m_en_20241009~3.0.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~Video_Video_LongQA~en~llava_video_academic_oe_2_3_m_en_20241009~3.0.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Video_Video_LongQA~en~llava_video_academic_oe_2_3_m_en_20241009~3.0.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 3626,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~Video_Video_LongQA~en~llava_video_academic_oe_2_3_m_en_20241009~3.0.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~Video_Video_LongQA~en~llava_video_academic_oe_30_60_s_en_20241013~3.0.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Video_Video_LongQA~en~llava_video_academic_oe_30_60_s_en_20241013~3.0.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 11348,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~Video_Video_LongQA~en~llava_video_academic_oe_30_60_s_en_20241013~3.0.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~Video_Video_LongQA~en~llava_video_youtube_oe_1_2_m_en_20241009~3.0.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Video_Video_LongQA~en~llava_video_youtube_oe_1_2_m_en_20241009~3.0.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 27527,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~Video_Video_LongQA~en~llava_video_youtube_oe_1_2_m_en_20241009~3.0.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~Video_Video_LongQA~en~llava_video_youtube_oe_2_3_m_v1_en_20241013~4.0.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Video_Video_LongQA~en~llava_video_youtube_oe_2_3_m_v1_en_20241013~4.0.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 28287,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~Video_Video_LongQA~en~llava_video_youtube_oe_2_3_m_v1_en_20241013~4.0.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~Video_Video_MCQ~en~clever_mc_en_20240628~3.0.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Video_Video_MCQ~en~clever_mc_en_20240628~3.0.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 5237,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~Video_Video_MCQ~en~clever_mc_en_20240628~3.0.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~Video_Video_MCQ~en~clever_oe_en_20240628~3.0.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Video_Video_MCQ~en~clever_oe_en_20240628~3.0.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 2179,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~Video_Video_MCQ~en~clever_oe_en_20240628~3.0.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~Video_Video_MCQ~en~clevrer_moving_direction_en_20241110~3.0.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Video_Video_MCQ~en~clevrer_moving_direction_en_20241110~3.0.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 1938,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~Video_Video_MCQ~en~clevrer_moving_direction_en_20241110~3.0.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~Video_Video_MCQ~en~hd_vila_vqa_short_vqa~1.1.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Video_Video_MCQ~en~hd_vila_vqa_short_vqa~1.1.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 36582,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~Video_Video_MCQ~en~hd_vila_vqa_short_vqa~1.1.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~Video_Video_MCQ~en~llava_video_0_30_s_academic_mc_v0_1_qa_en_20241012~3.0.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Video_Video_MCQ~en~llava_video_0_30_s_academic_mc_v0_1_qa_en_20241012~3.0.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 1141,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~Video_Video_MCQ~en~llava_video_0_30_s_academic_mc_v0_1_qa_en_20241012~3.0.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~Video_Video_MCQ~en~llava_video_0_30_s_youtube_mc_v0_1_qa_en_20241010~3.0.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Video_Video_MCQ~en~llava_video_0_30_s_youtube_mc_v0_1_qa_en_20241010~3.0.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 3932,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~Video_Video_MCQ~en~llava_video_0_30_s_youtube_mc_v0_1_qa_en_20241010~3.0.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~Video_Video_MCQ~en~llava_video_30_60_s_youtube_mc_v0_1_qa_en_20241010~3.0.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Video_Video_MCQ~en~llava_video_30_60_s_youtube_mc_v0_1_qa_en_20241010~3.0.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 7984,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~Video_Video_MCQ~en~llava_video_30_60_s_youtube_mc_v0_1_qa_en_20241010~3.0.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~Video_Video_MCQ~en~llava_video_academic_mc_1_2_m_en_20241009~3.0.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Video_Video_MCQ~en~llava_video_academic_mc_1_2_m_en_20241009~3.0.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 848,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~Video_Video_MCQ~en~llava_video_academic_mc_1_2_m_en_20241009~3.0.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~Video_Video_MCQ~en~llava_video_academic_mc_2_3_m_en_20241013~3.0.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Video_Video_MCQ~en~llava_video_academic_mc_2_3_m_en_20241013~3.0.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 1228,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~Video_Video_MCQ~en~llava_video_academic_mc_2_3_m_en_20241013~3.0.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~Video_Video_MCQ~en~llava_video_academic_qa_30_60_s_en_20241009~3.0.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Video_Video_MCQ~en~llava_video_academic_qa_30_60_s_en_20241009~3.0.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 4069,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~Video_Video_MCQ~en~llava_video_academic_qa_30_60_s_en_20241009~3.0.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~Video_Video_MCQ~en~llava_video_youtube_mc_1_2_m_en_20241009~3.0.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Video_Video_MCQ~en~llava_video_youtube_mc_1_2_m_en_20241009~3.0.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 7941,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~Video_Video_MCQ~en~llava_video_youtube_mc_1_2_m_en_20241009~3.0.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~Video_Video_MCQ~en~llava_video_youtube_mc_2_3_m_v1_en_20241010~3.0.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Video_Video_MCQ~en~llava_video_youtube_mc_2_3_m_v1_en_20241010~3.0.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 7991,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~Video_Video_MCQ~en~llava_video_youtube_mc_2_3_m_v1_en_20241010~3.0.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~Video_Video_MCQ~en~meta_egoschema_training_en_20241029~3.0.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Video_Video_MCQ~en~meta_egoschema_training_en_20241029~3.0.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 100,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~Video_Video_MCQ~en~meta_egoschema_training_en_20241029~3.0.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~Video_Video_MCQ~en~nturgbd_fp_en_20240805~3.0.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Video_Video_MCQ~en~nturgbd_fp_en_20240805~3.0.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 11447,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~Video_Video_MCQ~en~nturgbd_fp_en_20240805~3.0.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~Video_Video_MCQ~en~perceptiontest_mc_en_20241110~3.0.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Video_Video_MCQ~en~perceptiontest_mc_en_20241110~3.0.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 782,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~Video_Video_MCQ~en~perceptiontest_mc_en_20241110~3.0.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~Video_Video_MCQ~en~star_as_ap_en_20240805~3.0.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Video_Video_MCQ~en~star_as_ap_en_20240805~3.0.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 3276,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~Video_Video_MCQ~en~star_as_ap_en_20240805~3.0.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~Video_Video_ShortCap~en~finevideo_shortcaption_en_20241110~3.0.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Video_Video_ShortCap~en~finevideo_shortcaption_en_20241110~3.0.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 4347,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~Video_Video_ShortCap~en~finevideo_shortcaption_en_20241110~3.0.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~Video_Video_ShortCap~en~tarsier2_recap_585k~1.7.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Video_Video_ShortCap~en~tarsier2_recap_585k~1.7.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 11115,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~Video_Video_ShortCap~en~tarsier2_recap_585k~1.7.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~Video_Video_ShortQA~en~egoit_99k~1.3.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Video_Video_ShortQA~en~egoit_99k~1.3.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 2575,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~Video_Video_ShortQA~en~egoit_99k~1.3.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~Video_Video_ShortQA~en~egotask_direct_qa_en_20240628~3.0.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Video_Video_ShortQA~en~egotask_direct_qa_en_20240628~3.0.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 4746,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~Video_Video_ShortQA~en~egotask_direct_qa_en_20240628~3.0.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~Video_Video_ShortQA~en~egotask_indirect_qa_en_20240628~3.0.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Video_Video_ShortQA~en~egotask_indirect_qa_en_20240628~3.0.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 4060,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~Video_Video_ShortQA~en~egotask_indirect_qa_en_20240628~3.0.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~Video_Video_ShortQA~en~finevideo_vqa_mr_en_20241110~3.0.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Video_Video_ShortQA~en~finevideo_vqa_mr_en_20241110~3.0.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 4371,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~Video_Video_ShortQA~en~finevideo_vqa_mr_en_20241110~3.0.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~Video_Video_ShortQA~en~llava_video_0_30_s_activitynetqa_oe_qa_en_20241010~3.0.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Video_Video_ShortQA~en~llava_video_0_30_s_activitynetqa_oe_qa_en_20241010~3.0.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 590,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~Video_Video_ShortQA~en~llava_video_0_30_s_activitynetqa_oe_qa_en_20241010~3.0.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~Video_Video_ShortQA~en~llava_video_activitynetqa_oe_1_2_m_en_20241009~3.0.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Video_Video_ShortQA~en~llava_video_activitynetqa_oe_1_2_m_en_20241009~3.0.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 1718,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~Video_Video_ShortQA~en~llava_video_activitynetqa_oe_1_2_m_en_20241009~3.0.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~Video_Video_ShortQA~en~llava_video_activitynetqa_oe_2_3_m_en_20241009~3.0.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Video_Video_ShortQA~en~llava_video_activitynetqa_oe_2_3_m_en_20241009~3.0.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 1492,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~Video_Video_ShortQA~en~llava_video_activitynetqa_oe_2_3_m_en_20241009~3.0.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~Video_Video_ShortQA~en~llava_video_activitynetqa_qa_30_60_s_en_20241009~3.0.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Video_Video_ShortQA~en~llava_video_activitynetqa_qa_30_60_s_en_20241009~3.0.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 906,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~Video_Video_ShortQA~en~llava_video_activitynetqa_qa_30_60_s_en_20241009~3.0.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~Video_Video_ShortQA~en~meta_scanqa_training_en_20241029~1.0.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~Video_Video_ShortQA~en~meta_scanqa_training_en_20241029~1.0.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 2556,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~Video_Video_ShortQA~en~meta_scanqa_training_en_20241029~1.0.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~mm_video~en~VSI-590k-video~1.4.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~mm_video~en~VSI-590k-video~1.4.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 12290,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~mm_video~en~VSI-590k-video~1.4.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~mm_video~en~caption_vidln_uvo_dense-vidln-uvo_dense_train_1k~3.0.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~mm_video~en~caption_vidln_uvo_dense-vidln-uvo_dense_train_1k~3.0.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 112,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~mm_video~en~caption_vidln_uvo_dense-vidln-uvo_dense_train_1k~3.0.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~mm_video~en~reasoning_next_qa_oe-openend_qa_annos-next_qa_train_openend_35k~3.0.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~mm_video~en~reasoning_next_qa_oe-openend_qa_annos-next_qa_train_openend_35k~3.0.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 6826,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~mm_video~en~reasoning_next_qa_oe-openend_qa_annos-next_qa_train_openend_35k~3.0.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~mm_video~reasoning~video_reasoning_bilibili_20251120~1.0.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~mm_video~reasoning~video_reasoning_bilibili_20251120~1.0.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 3187,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~mm_video~reasoning~video_reasoning_bilibili_20251120~1.0.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~mm_video~reasoning~video_reasoning_youtube_20251128~1.1.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~mm_video~reasoning~video_reasoning_youtube_20251128~1.1.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 3822,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~mm_video~reasoning~video_reasoning_youtube_20251128~1.1.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~mm_video~unknown~caption_favd-favd-train_10k~3.0.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~mm_video~unknown~caption_favd-favd-train_10k~3.0.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 2000,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~mm_video~unknown~caption_favd-favd-train_10k~3.0.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~mm_video~unknown~caption_sharegemini_k400_223k~3.0.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~mm_video~unknown~caption_sharegemini_k400_223k~3.0.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 22086,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~mm_video~unknown~caption_sharegemini_k400_223k~3.0.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~mm_video~unknown~caption_sharegemini_webvid_core100k_clean~3.0.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~mm_video~unknown~caption_sharegemini_webvid_core100k_clean~3.0.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 10138,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~mm_video~unknown~caption_sharegemini_webvid_core100k_clean~3.0.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~mm_video~unknown~caption_sharegpt4o-sharegpt4o_3k~3.0.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~mm_video~unknown~caption_sharegpt4o-sharegpt4o_3k~3.0.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 422,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~mm_video~unknown~caption_sharegpt4o-sharegpt4o_3k~3.0.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~mm_video~unknown~caption_textvr-textvr-train_40k~3.0.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~mm_video~unknown~caption_textvr-textvr-train_40k~3.0.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 7929,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~mm_video~unknown~caption_textvr-textvr-train_40k~3.0.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~mm_video~unknown~caption_videochatgpt-videochatgpt-train_101k~3.0.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~mm_video~unknown~caption_videochatgpt-videochatgpt-train_101k~3.0.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 20002,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~mm_video~unknown~caption_videochatgpt-videochatgpt-train_101k~3.0.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~mm_video~unknown~caption_vidln_kinetics-vidln-kinetics_train_28k_1~3.0.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~mm_video~unknown~caption_vidln_kinetics-vidln-kinetics_train_28k_1~3.0.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 1420,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~mm_video~unknown~caption_vidln_kinetics-vidln-kinetics_train_28k_1~3.0.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~mm_video~unknown~caption_vidln_kinetics-vidln-kinetics_train_28k_2~3.0.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~mm_video~unknown~caption_vidln_kinetics-vidln-kinetics_train_28k_2~3.0.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 1185,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~mm_video~unknown~caption_vidln_kinetics-vidln-kinetics_train_28k_2~3.0.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~mm_video~unknown~caption_vidln_kinetics-vidln-kinetics_train_28k_3~3.0.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~mm_video~unknown~caption_vidln_kinetics-vidln-kinetics_train_28k_3~3.0.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 2837,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~mm_video~unknown~caption_vidln_kinetics-vidln-kinetics_train_28k_3~3.0.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~mm_video~unknown~caption_vidln_oops-vidln-oops_train_11k~3.0.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~mm_video~unknown~caption_vidln_oops-vidln-oops_train_11k~3.0.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 2139,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~mm_video~unknown~caption_vidln_oops-vidln-oops_train_11k~3.0.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~mm_video~unknown~caption_vidln_uvo_sparse-vidln-uvo_sparse_train_6k~3.0.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~mm_video~unknown~caption_vidln_uvo_sparse-vidln-uvo_sparse_train_6k~3.0.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 1140,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~mm_video~unknown~caption_vidln_uvo_sparse-vidln-uvo_sparse_train_6k~3.0.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~mm_video~unknown~caption_youcook2-youcook2-train_debug_9k~3.0.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~mm_video~unknown~caption_youcook2-youcook2-train_debug_9k~3.0.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 1740,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~mm_video~unknown~caption_youcook2-youcook2-train_debug_9k~3.0.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~mm_video~unknown~classification_k710-k710-train_40k_1~3.0.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~mm_video~unknown~classification_k710-k710-train_40k_1~3.0.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 2683,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~mm_video~unknown~classification_k710-k710-train_40k_1~3.0.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~mm_video~unknown~classification_k710-k710-train_40k_2~3.0.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~mm_video~unknown~classification_k710-k710-train_40k_2~3.0.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 2408,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~mm_video~unknown~classification_k710-k710-train_40k_2~3.0.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~mm_video~unknown~classification_k710-k710-train_40k_3~3.0.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~mm_video~unknown~classification_k710-k710-train_40k_3~3.0.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 2908,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~mm_video~unknown~classification_k710-k710-train_40k_3~3.0.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~mm_video~unknown~classification_ssv2-ssv2-train_40k~6.0.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~mm_video~unknown~classification_ssv2-ssv2-train_40k~6.0.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 8000,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~mm_video~unknown~classification_ssv2-ssv2-train_40k~6.0.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~mm_video~unknown~conversation_videochat1-videochat1-train_5k~3.0.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~mm_video~unknown~conversation_videochat1-videochat1-train_5k~3.0.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 860,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~mm_video~unknown~conversation_videochat1-videochat1-train_5k~3.0.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~mm_video~unknown~conversation_videochat2-videochat2-train_10k~3.0.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~mm_video~unknown~conversation_videochat2-videochat2-train_10k~3.0.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 1916,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~mm_video~unknown~conversation_videochat2-videochat2-train_10k~3.0.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~mm_video~unknown~grounding_didemo-didemo-train_66k_sft~3.0.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~mm_video~unknown~grounding_didemo-didemo-train_66k_sft~3.0.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 13113,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~mm_video~unknown~grounding_didemo-didemo-train_66k_sft~3.0.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~mm_video~unknown~lsmdc-lsmdc_297k~4.0.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~mm_video~unknown~lsmdc-lsmdc_297k~4.0.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 59378,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~mm_video~unknown~lsmdc-lsmdc_297k~4.0.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~mm_video~unknown~moviechat1k_caption-MovieChat-train_caption_1k~3.0.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~mm_video~unknown~moviechat1k_caption-MovieChat-train_caption_1k~3.0.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 155,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~mm_video~unknown~moviechat1k_caption-MovieChat-train_caption_1k~3.0.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~mm_video~unknown~moviechat1k_global-MovieChat-train_global_1k~5.0.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~mm_video~unknown~moviechat1k_global-MovieChat-train_global_1k~5.0.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 159,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~mm_video~unknown~moviechat1k_global-MovieChat-train_global_1k~5.0.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~mm_video~unknown~reasoning_clevrer_mc-clevrer_mc-train_43k_debug_43k~3.0.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~mm_video~unknown~reasoning_clevrer_mc-clevrer_mc-train_43k_debug_43k~3.0.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 8524,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~mm_video~unknown~reasoning_clevrer_mc-clevrer_mc-train_43k_debug_43k~3.0.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~mm_video~unknown~reasoning_clevrer_qa-clevrer_qa-train_mc_40k~3.0.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~mm_video~unknown~reasoning_clevrer_qa-clevrer_qa-train_mc_40k~3.0.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 8000,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~mm_video~unknown~reasoning_clevrer_qa-clevrer_qa-train_mc_40k~3.0.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~mm_video~unknown~reasoning_next_qa-next_qa-train_35k~3.0.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~mm_video~unknown~reasoning_next_qa-next_qa-train_35k~3.0.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 6826,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~mm_video~unknown~reasoning_next_qa-next_qa-train_35k~3.0.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~mm_video~unknown~reasoning_star-star-train_46k~3.0.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~mm_video~unknown~reasoning_star-star-train_46k~3.0.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 9146,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~mm_video~unknown~reasoning_star-star-train_46k~3.0.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~mm_video~unknown~vcg-plus_112K_clean_97k~3.0.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~mm_video~unknown~vcg-plus_112K_clean_97k~3.0.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 19288,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~mm_video~unknown~vcg-plus_112K_clean_97k~3.0.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~mm_video~unknown~vqa_ego_qa-ego_qa-train_8k_clean_8k~3.0.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~mm_video~unknown~vqa_ego_qa-ego_qa-train_8k_clean_8k~3.0.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 1558,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~mm_video~unknown~vqa_ego_qa-ego_qa-train_8k_clean_8k~3.0.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~mm_video~unknown~vqa_perception_train-mc_question_train_forchoice_8k~3.0.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~mm_video~unknown~vqa_perception_train-mc_question_train_forchoice_8k~3.0.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 1478,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~mm_video~unknown~vqa_perception_train-mc_question_train_forchoice_8k~3.0.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~mm_video~unknown~vqa_rgbd-nturgbd_clean_110k~3.0.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~mm_video~unknown~vqa_rgbd-nturgbd_clean_110k~3.0.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 21882,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~mm_video~unknown~vqa_rgbd-nturgbd_clean_110k~3.0.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~mm_video~unknown~vqa_webvid_qa-webvid_qa-train_100k~3.0.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~mm_video~unknown~vqa_webvid_qa-webvid_qa-train_100k~3.0.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 19999,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~mm_video~unknown~vqa_webvid_qa-webvid_qa-train_100k~3.0.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~other~en~videochatgpt_raw_caption_50k_en_20240925check_v1~3.0.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~other~en~videochatgpt_raw_caption_50k_en_20240925check_v1~3.0.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 3333,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~other~en~videochatgpt_raw_caption_50k_en_20240925check_v1~3.0.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~other~en~videochatgpt_temporal_caption_3k_en_20240926check_v1~3.0.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~other~en~videochatgpt_temporal_caption_3k_en_20240926check_v1~3.0.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 418,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~other~en~videochatgpt_temporal_caption_3k_en_20240926check_v1~3.0.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~other~unknown~video_racap_all~3.0.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~other~unknown~video_racap_all~3.0.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 661,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~other~unknown~video_racap_all~3.0.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~other~unknown~videochat2it_caption_textvr_r39628_20240904check_v1~3.0.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~other~unknown~videochat2it_caption_textvr_r39628_20240904check_v1~3.0.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 1584,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~other~unknown~videochat2it_caption_textvr_r39628_20240904check_v1~3.0.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~other~unknown~videochat2it_caption_webvid_0_1x_r40k_readable_20240914check_v1~3.0.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~other~unknown~videochat2it_caption_webvid_0_1x_r40k_readable_20240914check_v1~3.0.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 1599,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~other~unknown~videochat2it_caption_webvid_0_1x_r40k_readable_20240914check_v1~3.0.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~other~unknown~videochat2it_caption_webvid_r399832_20240920check_v1_v1~3.0.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~other~unknown~videochat2it_caption_webvid_r399832_20240920check_v1_v1~3.0.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 1144,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~other~unknown~videochat2it_caption_webvid_r399832_20240920check_v1_v1~3.0.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~other~unknown~videochat2it_caption_youcook2_r8626_20240904check_v1~3.0.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~other~unknown~videochat2it_caption_youcook2_r8626_20240904check_v1~3.0.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 689,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~other~unknown~videochat2it_caption_youcook2_r8626_20240904check_v1~3.0.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~other~unknown~videochat2it_conversation_videochat1_r4300_20240905check_v1~3.0.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~other~unknown~videochat2it_conversation_videochat1_r4300_20240905check_v1~3.0.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 163,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~other~unknown~videochat2it_conversation_videochat1_r4300_20240905check_v1~3.0.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~other~unknown~videochat2it_conversation_videochat2_r9584_20240905check_v1~3.0.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~other~unknown~videochat2it_conversation_videochat2_r9584_20240905check_v1~3.0.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 733,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~other~unknown~videochat2it_conversation_videochat2_r9584_20240905check_v1~3.0.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~other~unknown~videochat2it_conversation_videochatgpt_r13k_readable_20240914check_v1~3.0.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~other~unknown~videochat2it_conversation_videochatgpt_r13k_readable_20240914check_v1~3.0.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 1940,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~other~unknown~videochat2it_conversation_videochatgpt_r13k_readable_20240914check_v1~3.0.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~other~unknown~videochat2it_vqa_ego_qa_readable_20240914check_v1~3.0.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~other~unknown~videochat2it_vqa_ego_qa_readable_20240914check_v1~3.0.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 623,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~other~unknown~videochat2it_vqa_ego_qa_readable_20240914check_v1~3.0.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~other~unknown~videochat2it_vqa_webvid_qa_r100k_readable_20240914check_v1~3.0.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~other~unknown~videochat2it_vqa_webvid_qa_r100k_readable_20240914check_v1~3.0.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 3333,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~other~unknown~videochat2it_vqa_webvid_qa_r100k_readable_20240914check_v1~3.0.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~other~unknown~videochat2it_youcook2_b_sub_20241112check~3.0.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~other~unknown~videochat2it_youcook2_b_sub_20241112check~3.0.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 725,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~other~unknown~videochat2it_youcook2_b_sub_20241112check~3.0.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~other~unknown~videogptplus_r103k_readable_20240914check~3.0.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~other~unknown~videogptplus_r103k_readable_20240914check~3.0.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 3333,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~other~unknown~videogptplus_r103k_readable_20240914check~3.0.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~other~unknown~vript_short_videos_EN_longcaption_r8741_20240904check_v1~3.0.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~other~unknown~vript_short_videos_EN_longcaption_r8741_20240904check_v1~3.0.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 348,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~other~unknown~vript_short_videos_EN_longcaption_r8741_20240904check_v1~3.0.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~other~zh~videochat2it_conversation_videochat1_zh_20240905check_v1~3.0.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~other~zh~videochat2it_conversation_videochat1_zh_20240905check_v1~3.0.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 152,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~other~zh~videochat2it_conversation_videochat1_zh_20240905check_v1~3.0.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~other~zh~videochat2it_conversation_videochat2_zh_20240905check_v1~3.0.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~other~zh~videochat2it_conversation_videochat2_zh_20240905check_v1~3.0.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 659,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~other~zh~videochat2it_conversation_videochat2_zh_20240905check_v1~3.0.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~other~zh~videochat2it_conversation_videochatgpt_zh_r13k_readable_20240914check_v1~3.0.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~other~zh~videochat2it_conversation_videochatgpt_zh_r13k_readable_20240914check_v1~3.0.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 1898,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~other~zh~videochat2it_conversation_videochatgpt_zh_r13k_readable_20240914check_v1~3.0.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~other~zh~videochat2it_reasoning_next_qa_zh_r14161_20240905check_v1~3.0.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~other~zh~videochat2it_reasoning_next_qa_zh_r14161_20240905check_v1~3.0.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 1131,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~other~zh~videochat2it_reasoning_next_qa_zh_r14161_20240905check_v1~3.0.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~other~zh~videochat2it_vqa_ego_qa_zh_readable_20240914check_v1~3.0.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~other~zh~videochat2it_vqa_ego_qa_zh_readable_20240914check_v1~3.0.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 621,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~other~zh~videochat2it_vqa_ego_qa_zh_readable_20240914check_v1~3.0.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    },
+    "P~other~zh~videochat2it_vqa_webvid_qa_zh_r30k_readable_20240914check_v1~3.0.0~0.0": {
+        "annotation": "/mnt/shared-storage-user/intern7shared/gulixin/data/interns1_1_base02_20260120b_tiny/P~other~zh~videochat2it_vqa_webvid_qa_zh_r30k_readable_20240914check_v1~3.0.0~0.0/jsonl/",
+        "data_augment": true,
+        "length": 1215,
+        "media_root": "/mnt/shared-storage-user/intern7shared/chensitao/datasets/sft-tiny/P~other~zh~videochat2it_vqa_webvid_qa_zh_r30k_readable_20240914check_v1~3.0.0~0.0/multimodal_elements/",
+        "sample_ratio": 1.0
+    }
+}
